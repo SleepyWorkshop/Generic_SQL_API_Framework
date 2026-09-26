@@ -48,6 +48,7 @@ web root or `/index.php` when `api/` itself is the document root.
 - [Authentication and user management](Authentication-and-User-Management.md)
 - [Authorization and roles](Authorization-and-Roles.md)
 - [Audit and security logging](Audit-and-Security-Logging.md)
+- [Operational logging](Operational-Logging.md)
 - [Backup and recovery](Backup-and-Recovery.md)
 - [Monitoring and health](Monitoring-and-Health.md)
 - [Production error handling](Production-Error-Handling.md)

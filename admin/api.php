@@ -50,6 +50,8 @@ if (json_last_error() !== JSON_ERROR_NONE) Response::error('Invalid JSON request
 if (!is_array($request) || array_is_list($request)) {
     Response::error('Invalid request.', 400, 'INVALID_REQUEST', [['path' => '', 'message' => 'Request body must be a JSON object.']]);
 }
+Response::setRequestContext(['action' => is_string($request['action'] ?? null) ? $request['action'] : null]);
+(new LoggingMiddleware())->handle($request);
 
 $setupActions = ['setup.status', 'setup.createAdmin'];
 $authActions = ['auth.csrf', 'auth.login', 'auth.session', 'auth.logout'];
@@ -70,6 +72,7 @@ $adminActions = [
     'admin.runtime.save',
     'admin.backup.history', 'admin.backup.create', 'admin.backup.download',
     'admin.backup.preview', 'admin.backup.restore',
+    'admin.operational.event',
 ];
 $allActions = array_merge($setupActions, $authActions, $userActions, $apiKeyActions, $roleActions, $adminActions);
 if (!in_array($request['action'] ?? null, $allActions, true)) {
@@ -81,8 +84,6 @@ if (!in_array($request['action'] ?? null, $allActions, true)) {
 (new ApiRateLimitMiddleware())->handle($request);
 (new AdminAuthorizationMiddleware(array_merge($userActions, $apiKeyActions, $roleActions, $adminActions)))->handle($request);
 (new CsrfProtectionMiddleware())->handle($request);
-(new LoggingMiddleware())->handle($request);
-
 if (in_array($request['action'], $setupActions, true)) {
     $validated = (new SetupRequestValidator())->validate($request);
     Response::setRequestContext(['action' => $validated['action']]);

@@ -5,6 +5,7 @@ require_once __DIR__ . '/../Authorization/PrincipalContext.php';
 require_once __DIR__ . '/../Security/ApiRateLimiter.php';
 require_once __DIR__ . '/../Security/SecurityConfiguration.php';
 require_once __DIR__ . '/../../core/Logger.php';
+require_once __DIR__ . '/../../core/OperationalLogger.php';
 
 final class ApiRateLimitMiddleware extends Middleware
 {
@@ -21,6 +22,9 @@ final class ApiRateLimitMiddleware extends Middleware
             $this->limiter->consume($identity);
         } catch (ApiRequestException $exception) {
             if ($exception->getErrorCode() === 'RATE_LIMIT_EXCEEDED') {
+                (new OperationalLogger())->warning('api', 'API rate limit rejected', [
+                    'error_code' => 'RATE_LIMIT_EXCEEDED',
+                ]);
                 $this->logger->audit('rate_limit.api', 'rejected', 'WARNING', [
                     'identityType' => strstr($identity, ':', true) ?: 'anonymous',
                     'identityHash' => substr(hash('sha256', $identity), 0, 16),

@@ -15,6 +15,7 @@ $tests = [
     __DIR__ . '/QueryExecutionIsolationTest.php',
     __DIR__ . '/LoggerTest.php',
     __DIR__ . '/SecurityAuditLoggingTest.php',
+    __DIR__ . '/OperationalLoggingTest.php',
     __DIR__ . '/BackupRecoveryTest.php',
     __DIR__ . '/HealthMonitoringTest.php',
     __DIR__ . '/ProductionErrorHandlingTest.php',

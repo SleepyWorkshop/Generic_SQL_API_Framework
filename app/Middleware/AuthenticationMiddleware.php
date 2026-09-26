@@ -11,6 +11,7 @@ require_once __DIR__ . '/../Authorization/PrincipalContext.php';
 require_once __DIR__ . '/../Services/AuthorizationService.php';
 require_once __DIR__ . '/../Services/ApiKeyService.php';
 require_once __DIR__ . '/../../core/Logger.php';
+require_once __DIR__ . '/../../core/OperationalLogger.php';
 
 final class AuthenticationMiddleware extends Middleware
 {
@@ -51,6 +52,7 @@ final class AuthenticationMiddleware extends Middleware
         unset($_SERVER['GENERIC_AUTH_PROVIDER']);
         PrincipalContext::clear();
         if (!$this->enforce || in_array($request['action'] ?? null, $this->publicActions, true)) {
+            (new OperationalLogger())->info('api', 'API authentication not required', ['action' => $request['action'] ?? null]);
             return;
         }
 
@@ -66,10 +68,12 @@ final class AuthenticationMiddleware extends Middleware
             $roles = $this->authorization->publicRoles();
             $role = $roles[0] ?? null;
             PrincipalContext::set(new Principal(null, 'public', 'none', $role, false, null, true, $this->authorization->permissionsForRoles($roles)));
+            (new OperationalLogger())->info('api', 'API authentication accepted', ['authentication' => 'none']);
             return;
         }
         if (($mode === 'api_key' || $mode === 'session+api_key') && $this->resolveApiKey()) {
             $_SERVER['GENERIC_AUTH_PROVIDER'] = 'api_key';
+            (new OperationalLogger())->info('api', 'API authentication accepted', ['authentication' => 'api_key']);
             return;
         }
         if ($mode === 'api_key') {
@@ -123,6 +127,7 @@ final class AuthenticationMiddleware extends Middleware
             $user['id'], $user['username'], 'session', $user['backendRole'], $user['frontendAccess'],
             $user['frontendRole'], true, $this->authorization->permissionsForRoles(array_values(array_filter([$user['backendRole'], $user['frontendRole']])))
         ));
+        (new OperationalLogger())->info('api', 'API authentication accepted', ['authentication' => 'session']);
     }
 
     private function resolveApiKey(): bool
@@ -157,6 +162,7 @@ final class AuthenticationMiddleware extends Middleware
 
     private function authenticationRequired(): never
     {
+        (new OperationalLogger())->warning('api', 'API authentication failed', ['error_code' => 'AUTHENTICATION_REQUIRED']);
         $identity = 'anonymous:' . SecurityConfiguration::clientIp();
         try {
             $this->unauthenticatedRateLimiter->consume($identity);

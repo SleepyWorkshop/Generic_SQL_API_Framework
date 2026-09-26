@@ -83,6 +83,15 @@ preview showing changed/unchanged files, versions, compatibility, and
 verification/authenticity state. A second explicit **Restore Configuration**
 confirmation is mandatory.
 
+The browser preserves the verified upload token through confirmation and captures
+the restore button before awaiting the native dialog. Confirming immediately
+shows **Restoring configuration...**, prevents a duplicate submission, and sends
+only the server-issued token. Success is displayed only after activation and the
+health callback complete. A safe failure includes the response request ID. If a
+restored `auth.json` invalidates the current session through identity, role,
+enabled-state, or `authVersion` changes, the console returns to sign-in without
+bypassing session validation.
+
 Confirmed restore re-verifies the upload, creates a verified pre-change recovery
 point, validates every staged value, and activates configuration under the
 shared lock using the existing atomic per-document writer. If any activation or
@@ -131,6 +140,8 @@ available. Events include `backup.created`, `backup.verified`, `backup.failed`,
 `restore.completed`, and `restore.failed`. Records may contain operation,
 outcome, reason, and recovery-point ID, but never archives, full configuration,
 paths, passwords, keys, raw API keys, decrypted credentials, or sessions.
+The separate Admin operational log records the detailed preview, confirmation,
+activation, and health-check lifecycle for troubleshooting.
 
 ## Storage, retention, and operations
 

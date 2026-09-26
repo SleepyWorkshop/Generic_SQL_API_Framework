@@ -128,7 +128,7 @@ Security boundaries include:
 - hash-only, one-time-reveal managed API keys with `gsk_` secrets;
 - fixed roles and deny-by-default resource authorization;
 - prepared runtime values and allowlisted identifiers/functions;
-- correlated, redacted errors and JSON Lines audit/security logs;
+- correlated, redacted, date-wise subsystem diagnostics and JSON Lines audit/security logs;
 - request-scoped ODBC connections and configurable statement timeouts.
 
 Plaintext database configuration remains readable only for compatibility.

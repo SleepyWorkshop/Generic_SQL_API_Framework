@@ -169,7 +169,9 @@ try {
 
     $managedDirectory = $backupParent . '/managed';
     $logDirectory = $directory . '/logs';
-    $service = new BackupRecoveryService($manager, $managedDirectory, new Logger($logDirectory), static fn (): bool => true);
+    $operationalDirectory = $directory . '/operational-logs';
+    $operationalLogger = new OperationalLogger($operationalDirectory);
+    $service = new BackupRecoveryService($manager, $managedDirectory, new Logger($logDirectory), static fn (): bool => true, $operationalLogger);
     $created = $service->create();
     backupAssert(str_ends_with($created['filename'], '.zip') && $created['verification'] === 'valid' && $created['authenticity'] === 'valid', 'Admin backup orchestration did not create a verified recovery point.');
     $history = $service->history();
@@ -183,6 +185,19 @@ try {
     $previewUpload = $service->previewUpload('selected-backup.zip', $download['archive']);
     $restoreResult = $service->restore($previewUpload['uploadToken'], true);
     backupAssert($restoreResult['restored'] === true && $restoreResult['health'] === 'healthy', 'Confirmed Admin restore did not activate safely.');
+    $missingUploadFailure = backupFailure(fn () => $service->restore(str_repeat('f', 48), true), 'Missing staged restore upload was accepted.');
+    backupAssert($missingUploadFailure instanceof ApiRequestException && $missingUploadFailure->getErrorCode() === 'RESTORE_UPLOAD_UNAVAILABLE', 'Missing staged restore returned the wrong structured error.');
+    $failedRestoreService = new BackupRecoveryService($manager, $managedDirectory, new Logger($logDirectory), static fn (): bool => false, $operationalLogger);
+    $failedPreview = $failedRestoreService->previewUpload('selected-backup.zip', $download['archive']);
+    $healthFailure = backupFailure(fn () => $failedRestoreService->restore($failedPreview['uploadToken'], true), 'Post-restore health failure was reported as success.');
+    backupAssert($healthFailure instanceof ApiRequestException && $healthFailure->getErrorCode() === 'RESTORE_FAILED', 'Post-restore health failure was not sanitized.');
+    $operationalRestoreLog = (string)file_get_contents($operationalDirectory . '/admin/' . date('Y-m-d') . '.txt');
+    foreach (['admin.restore.preview.start', 'admin.restore.preview.success', 'admin.restore.confirm.submitted',
+        'admin.restore.start', 'admin.restore.activation.start', 'admin.restore.activation.success',
+        'admin.restore.activation.failed', 'admin.restore.health_check.start',
+        'admin.restore.health_check.success', 'admin.restore.health_check.failed'] as $event) {
+        backupAssert(str_contains($operationalRestoreLog, $event), "Restore operational event {$event} is missing.");
+    }
 
     ConfigurationMutationBackup::setFactoryForTests(static fn (): BackupRecoveryService => $service);
     putenv('GENERIC_RUNTIME_CONFIG_DIR=' . $runtimePath);
@@ -205,8 +220,15 @@ try {
     foreach (['admin.backup.history', 'admin.backup.create'] as $action) backupAssert($validator->validate(['action' => $action])['action'] === $action, "Admin backup action {$action} was rejected.");
     backupAssert($validator->validate(['action' => 'admin.backup.restore', 'uploadToken' => str_repeat('a', 48), 'confirmed' => true])['confirmed'] === true, 'Confirmed restore request was rejected.');
     backupFailure(fn () => $validator->validate(['action' => 'admin.backup.restore', 'uploadToken' => str_repeat('a', 48), 'confirmed' => false]), 'Unconfirmed restore request was accepted.');
+    backupAssert($validator->validate([
+        'action' => 'admin.operational.event', 'event' => 'frontend.restore.confirmed',
+        'page' => 'backup-recovery', 'operation' => 'restore',
+    ])['event'] === 'frontend.restore.confirmed', 'Allowlisted restore frontend event was rejected.');
+    backupFailure(fn () => $validator->validate([
+        'action' => 'admin.operational.event', 'event' => 'frontend.unrestricted.payload',
+    ]), 'Unrestricted frontend log event was accepted.');
     unset($_SERVER['HTTP_X_CSRF_TOKEN'], $_SERVER['GENERIC_AUTH_PROVIDER']);
-    foreach (['admin.backup.create', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore'] as $action) {
+    foreach (['admin.backup.create', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore', 'admin.operational.event'] as $action) {
         $failure = backupFailure(fn () => (new CsrfProtectionMiddleware())->handle(['action' => $action]), "{$action} bypassed CSRF protection.");
         backupAssert($failure instanceof ApiRequestException && $failure->getErrorCode() === 'CSRF_VALIDATION_FAILED', "{$action} returned the wrong CSRF error.");
     }
@@ -216,7 +238,8 @@ try {
         new ApplicationBackupManager($applicationRoot, $auditBrokenSources, 'test-version'),
         $managedDirectory,
         new Logger($logDirectory),
-        static fn (): bool => true
+        static fn (): bool => true,
+        $operationalLogger
     );
     backupFailure(fn () => $auditBrokenService->create(), 'Failed Admin backup was reported as successful.');
     $audit = implode("\n", array_map(static fn (string $path): string => (string)file_get_contents($path), glob($logDirectory . '/*.log') ?: []));

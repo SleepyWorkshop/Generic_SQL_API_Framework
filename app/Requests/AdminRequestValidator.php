@@ -97,6 +97,28 @@ final class AdminRequestValidator
             if (!is_string($token) || preg_match('/^[a-f0-9]{48}$/', $token) !== 1 || ($request['confirmed'] ?? null) !== true) $this->invalid([['path' => 'confirmed', 'message' => 'Verified restore confirmation is required.']]);
             return ['action' => $action, 'uploadToken' => $token, 'confirmed' => true];
         }
+        if ($action === 'admin.operational.event') {
+            $this->rejectUnknown($request, ['action', 'event', 'page', 'operation', 'errorCode', 'requestId']);
+            $event = $request['event'] ?? null;
+            $allowed = [
+                'frontend.restore.confirm.opened', 'frontend.restore.confirmed',
+                'frontend.restore.request.started', 'frontend.restore.request.failed',
+                'frontend.restore.request.success', 'frontend.api.request.failed',
+                'frontend.javascript.error',
+            ];
+            if (!is_string($event) || !in_array($event, $allowed, true)) {
+                $this->invalid([['path' => 'event', 'message' => 'Unsupported frontend operational event.']]);
+            }
+            $validated = ['action' => $action, 'event' => $event];
+            foreach (['page', 'operation', 'errorCode', 'requestId'] as $field) {
+                $value = $request[$field] ?? null;
+                if ($value !== null && (!is_string($value) || strlen($value) > 100 || preg_match('/^[A-Za-z0-9_.:\/-]+$/', $value) !== 1)) {
+                    $this->invalid([['path' => $field, 'message' => 'Invalid operational event metadata.']]);
+                }
+                $validated[$field] = $value;
+            }
+            return $validated;
+        }
         throw new ApiRequestException('Invalid admin request.', 'INVALID_ADMIN_REQUEST');
     }
 

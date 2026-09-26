@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Logger.php';
 require_once __DIR__ . '/QueryTimeoutException.php';
+require_once __DIR__ . '/OperationalLogger.php';
 require_once __DIR__ . '/../app/Security/SecurityConfiguration.php';
 
 class QueryEngine
@@ -23,7 +24,14 @@ class QueryEngine
                 $this->db = $database ?? new Database();
                 $this->connection = $this->db->getConnection();
                 $this->logger->timing('database_connection', $this->elapsed($started), ['success' => true]);
+                (new OperationalLogger())->info('database', 'Database connection successful', [
+                    'duration_ms' => round($this->elapsed($started), 2),
+                ]);
             } catch (Throwable $exception) {
+                (new OperationalLogger())->error('database', 'Database connection failed', [
+                    'error_code' => $this->errorCategory($exception),
+                    'duration_ms' => round($this->elapsed($started), 2),
+                ]);
                 $this->logger->audit('database.connection', 'failure', 'ERROR', [
                     'component' => 'database',
                     'errorCategory' => $this->errorCategory($exception),
@@ -122,6 +130,11 @@ class QueryEngine
                 'data' => $rows,
             ];
             $this->logger->timing('query_total', $result['executionTime'], $context + ['rowsReturned' => $result['rowsReturned']]);
+            (new OperationalLogger())->info('database', 'Database query execution successful', [
+                'duration_ms' => $result['executionTime'],
+                'rows_returned' => $result['rowsReturned'],
+                'resource' => is_string($context['resource'] ?? null) ? $context['resource'] : null,
+            ]);
             return $result;
         } catch (Throwable $exception) {
             $converted = $this->isTimeout($exception)
@@ -152,6 +165,13 @@ class QueryEngine
                     'durationMs' => round($this->elapsed($totalStarted), 2),
                 ]
             );
+            (new OperationalLogger())->error('database', $converted instanceof QueryTimeoutException
+                ? 'Database query timeout' : 'Database query execution failed', [
+                'error_code' => $this->errorCategory($converted),
+                'query_phase' => $phase,
+                'duration_ms' => round($this->elapsed($totalStarted), 2),
+                'resource' => is_string($context['resource'] ?? null) ? $context['resource'] : null,
+            ]);
             throw $converted;
         } finally {
             if ($statement) $this->freeStatement($statement);

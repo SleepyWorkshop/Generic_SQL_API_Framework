@@ -98,6 +98,8 @@ if (!is_array($publicRequest)) {
         [['path' => '', 'message' => 'Request body must be a JSON object.']]
     );
 }
+Response::setRequestContext(['action' => is_string($publicRequest['action'] ?? null) ? $publicRequest['action'] : null]);
+(new LoggingMiddleware())->handle($publicRequest);
 
 $setupActions = ['setup.status', 'setup.createAdmin'];
 $authActions = ['auth.csrf', 'auth.login', 'auth.session', 'auth.logout'];
@@ -130,10 +132,6 @@ $authentication->handle($publicRequest);
 (new AdminAuthorizationMiddleware(array_merge($userManagementActions,$apiKeyActions,$roleActions)))->handle($publicRequest);
 (new FrontendUserAuthorizationMiddleware($frontendUserActions))->handle($publicRequest);
 (new CsrfProtectionMiddleware())->handle($publicRequest);
-
-// Execute Middleware
-$middleware = new LoggingMiddleware();
-$middleware->handle($publicRequest);
 
 if (in_array($publicRequest['action'] ?? null, $setupActions, true)) {
     $request = (new SetupRequestValidator())->validate($publicRequest);

@@ -1,10 +1,11 @@
 # Audit and security logging
 
-The backend writes local operational and security records to
-`Backend/logs/YYYY-MM-DD.log`. Security audit records are one compact JSON object
-per line. Existing timing records also use JSON Lines; legacy query diagnostics
-retain their human-readable block format. Logs are never exposed through an API
-or Admin Console page.
+The backend writes security audit records to
+`Backend/logs/audit/YYYY-MM-DD.jsonl`. Each record is one compact JSON object per
+line. Human-readable API, Admin, database, and SQL Parser diagnostics are kept
+in separate subsystem directories as documented in
+[Operational logging](Operational-Logging.md). Logs are never exposed through an
+API or Admin Console page.
 
 ## Audit record format
 
@@ -81,7 +82,7 @@ compress, archive, or ship old logs. Rotation and retention are deployment
 responsibilities:
 
 - Linux deployments should configure `logrotate` or an equivalent service for
-  `Backend/logs/*.log`, retaining files according to organizational incident,
+  `Backend/logs/audit/*.jsonl`, retaining files according to organizational incident,
   privacy, and storage requirements. Use `copytruncate` only after validating
   concurrent append behavior, or rotate between daily filenames. Archives must
   retain restricted ownership/modes and remain outside web roots.

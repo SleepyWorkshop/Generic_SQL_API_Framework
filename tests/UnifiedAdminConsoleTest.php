@@ -365,6 +365,17 @@ try {
     foreach (['admin.backup.history', 'admin.backup.create', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore'] as $backupAction) {
         unifiedAdminAssert(str_contains($adminJavaScript, $backupAction), "Admin Backup & Recovery UI is missing {$backupAction}.");
     }
+    unifiedAdminAssert(
+        str_contains($adminJavaScript, 'const restoreButton = restoreEvent.currentTarget;')
+            && str_contains($adminJavaScript, 'setButtonBusy(restoreButton, "Restoring configuration...")')
+            && strpos($adminJavaScript, 'const restoreButton = restoreEvent.currentTarget;')
+                < strpos($adminJavaScript, 'await confirmAction(', strpos($adminJavaScript, 'const restoreButton = restoreEvent.currentTarget;')),
+        'Restore confirmation does not preserve the button reference across the asynchronous dialog.'
+    );
+    foreach (['frontend.restore.confirm.opened', 'frontend.restore.confirmed', 'frontend.restore.request.started',
+        'frontend.restore.request.failed', 'frontend.restore.request.success'] as $event) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $event), "Admin restore flow is missing frontend operational event {$event}.");
+    }
     unifiedAdminAssert(str_contains($adminHtml, 'data-route="backup-recovery"')
         && str_contains($adminHtml, 'Backup &amp; Recovery')
         && str_contains($adminJavaScript, 'type="file" accept=".zip,application/zip"')

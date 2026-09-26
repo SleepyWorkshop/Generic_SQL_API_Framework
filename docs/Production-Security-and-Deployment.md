@@ -247,7 +247,10 @@ Keep separate logs with separate rotation policy:
 
 - IIS or Nginx access/error logs for request and upstream failures;
 - PHP-FastCGI/PHP-FPM error logs for runtime/startup failures;
-- `Backend/logs/YYYY-MM-DD.log` for application timing, safe SQL, and request IDs.
+- `Backend/logs/{api,admin,database,sqlparser}/YYYY-MM-DD.txt` for human-readable
+  operational diagnostics and request IDs;
+- `Backend/logs/audit/YYYY-MM-DD.jsonl` for structured security audit events.
+- `Backend/logs/YYYY-MM-DD.log` for legacy safe query timing/diagnostic records.
 
 Grant the PHP identity write access to application/PHP log targets and deny browser access. Rotate and retain logs according to volume and organizational policy. Existing application logging records parameter counts/types rather than values; operators must also avoid adding passwords, encryption keys, API keys, cookies, authorization headers, session identifiers, or raw credentials to web-server log formats.
 
@@ -256,6 +259,8 @@ outcomes, severity, and allowlisted actor/target metadata. See
 [Audit and security logging](Audit-and-Security-Logging.md) for the implemented
 taxonomy, fail-open behavior, file modes, concurrency boundary, and OS-owned
 rotation/retention requirements. No centralized collector or SIEM is configured.
+See [Operational logging](Operational-Logging.md) for subsystem coverage,
+correlation, redaction, and date-wise file handling.
 
 Application configuration ZIP scope, SHA-256 integrity, manifest authenticity,
 separate signing/database-key custody, Admin preview/confirmation, disposable

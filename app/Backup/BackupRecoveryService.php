@@ -4,6 +4,7 @@ require_once __DIR__ . '/ApplicationBackupManager.php';
 require_once __DIR__ . '/../Requests/ApiRequestException.php';
 require_once __DIR__ . '/../Health/ApplicationHealthMonitor.php';
 require_once __DIR__ . '/../../core/Logger.php';
+require_once __DIR__ . '/../../core/OperationalLogger.php';
 
 final class BackupRecoveryService
 {
@@ -13,14 +14,16 @@ final class BackupRecoveryService
     private string $directory;
     private Logger $logger;
     private $healthCheck;
+    private OperationalLogger $operationalLogger;
 
-    public function __construct(?ApplicationBackupManager $manager = null, ?string $directory = null, ?Logger $logger = null, ?callable $healthCheck = null)
+    public function __construct(?ApplicationBackupManager $manager = null, ?string $directory = null, ?Logger $logger = null, ?callable $healthCheck = null, ?OperationalLogger $operationalLogger = null)
     {
         $this->manager = $manager ?? new ApplicationBackupManager();
         $configured = getenv(self::DIRECTORY_ENVIRONMENT_VARIABLE);
         $this->directory = rtrim($directory ?? (is_string($configured) && trim($configured) !== ''
             ? trim($configured) : dirname(dirname(__DIR__, 2)) . '/backups'), '/\\');
         $this->logger = $logger ?? new Logger();
+        $this->operationalLogger = $operationalLogger ?? new OperationalLogger();
         $this->healthCheck = $healthCheck ?? function (): bool {
             $checks = (new ApplicationHealthMonitor())->detailed([])['checks'] ?? [];
             return ($checks['configuration']['status'] ?? null) === 'healthy'
@@ -101,11 +104,14 @@ final class BackupRecoveryService
 
     public function previewUpload(string $filename, string $encodedArchive): array
     {
+        $this->operationalLogger->info('admin', 'admin.restore.preview.start', ['filename_length' => strlen($filename)]);
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,180}\.zip$/i', $filename) !== 1) {
+            $this->operationalLogger->warning('admin', 'admin.restore.preview.failed', ['error_code' => 'INVALID_BACKUP_UPLOAD']);
             throw new ApiRequestException('Invalid application backup.', 'INVALID_BACKUP_UPLOAD', [], 422);
         }
         $contents = base64_decode($encodedArchive, true);
         if (!is_string($contents) || $contents === '' || strlen($contents) > self::MAX_UPLOAD_BYTES) {
+            $this->operationalLogger->warning('admin', 'admin.restore.preview.failed', ['error_code' => 'INVALID_BACKUP_UPLOAD']);
             throw new ApiRequestException('Invalid application backup.', 'INVALID_BACKUP_UPLOAD', [], 422);
         }
         $uploadDirectory = $this->directory . DIRECTORY_SEPARATOR . '.restore-uploads';
@@ -122,16 +128,21 @@ final class BackupRecoveryService
             $this->logger->audit('restore.previewed', 'success', 'INFO', [
                 'component' => 'backup', 'recoveryPointId' => $preview['recoveryPointId'], 'operation' => 'restore',
             ]);
+            $this->operationalLogger->info('admin', 'admin.restore.preview.success', [
+                'recovery_point' => $preview['recoveryPointId'],
+            ]);
             return [...$preview, 'uploadToken' => $token, 'selectedFilename' => $filename];
         } catch (Throwable $exception) {
             @unlink($path);
             $this->logger->audit('backup.verified', 'failure', 'WARNING', ['component' => 'backup', 'operation' => 'restore_upload', 'reason' => 'verification_failed']);
+            $this->operationalLogger->warning('admin', 'admin.restore.preview.failed', ['error_code' => 'BACKUP_VERIFICATION_FAILED']);
             throw new ApiRequestException('Invalid application backup.', 'BACKUP_VERIFICATION_FAILED', [], 422);
         }
     }
 
     public function restore(string $uploadToken, bool $confirmed): array
     {
+        $this->operationalLogger->info('admin', 'admin.restore.confirm.submitted');
         if (!$confirmed) throw new ApiRequestException('Explicit restore confirmation is required.', 'RESTORE_CONFIRMATION_REQUIRED', [], 409);
         if (preg_match('/^[a-f0-9]{48}$/', $uploadToken) !== 1) throw new ApiRequestException('Restore upload is unavailable.', 'RESTORE_UPLOAD_UNAVAILABLE', [], 404);
         $path = $this->directory . DIRECTORY_SEPARATOR . '.restore-uploads' . DIRECTORY_SEPARATOR . $uploadToken . '.zip';
@@ -141,12 +152,38 @@ final class BackupRecoveryService
             $preview = $this->manager->preview($path);
             $recoveryPointId = $preview['recoveryPointId'];
             $this->logger->audit('restore.started', 'success', 'NOTICE', ['component' => 'backup', 'recoveryPointId' => $recoveryPointId, 'operation' => 'restore']);
+            $this->operationalLogger->info('admin', 'admin.restore.start', ['recovery_point' => $recoveryPointId]);
             $this->createPreChange('restore');
-            $result = $this->manager->activateRestore($path, $this->healthCheck);
+            $this->operationalLogger->info('admin', 'admin.restore.activation.start', ['recovery_point' => $recoveryPointId]);
+            $healthCheck = function () use ($recoveryPointId): bool {
+                $this->operationalLogger->info('admin', 'admin.restore.health_check.start', ['recovery_point' => $recoveryPointId]);
+                try {
+                    $healthy = ($this->healthCheck)() === true;
+                    $logMethod = $healthy ? 'info' : 'error';
+                    $this->operationalLogger->{$logMethod}(
+                        'admin',
+                        $healthy ? 'admin.restore.health_check.success' : 'admin.restore.health_check.failed',
+                        ['recovery_point' => $recoveryPointId]
+                    );
+                    return $healthy;
+                } catch (Throwable $exception) {
+                    $this->operationalLogger->error('admin', 'admin.restore.health_check.failed', [
+                        'recovery_point' => $recoveryPointId,
+                        'error_code' => 'HEALTH_CHECK_FAILED',
+                    ]);
+                    throw $exception;
+                }
+            };
+            $result = $this->manager->activateRestore($path, $healthCheck);
+            $this->operationalLogger->info('admin', 'admin.restore.activation.success', ['recovery_point' => $recoveryPointId]);
             $this->logger->audit('restore.completed', 'success', 'NOTICE', ['component' => 'backup', 'recoveryPointId' => $recoveryPointId, 'operation' => 'restore']);
             return $result;
         } catch (ApiRequestException $exception) { throw $exception;
         } catch (Throwable $exception) {
+            $this->operationalLogger->error('admin', 'admin.restore.activation.failed', [
+                'recovery_point' => $recoveryPointId,
+                'error_code' => 'CONFIG_ACTIVATION_FAILED',
+            ]);
             $this->logger->audit('restore.activation_failed', 'failure', 'ERROR', ['component' => 'backup', 'recoveryPointId' => $recoveryPointId, 'operation' => 'restore', 'reason' => 'activation_failed']);
             $this->logger->audit('restore.failed', 'failure', 'ERROR', ['component' => 'backup', 'recoveryPointId' => $recoveryPointId, 'operation' => 'restore', 'reason' => 'activation_failed']);
             throw new ApiRequestException('Configuration restore failed and the previous configuration was preserved.', 'RESTORE_FAILED', [], 500);

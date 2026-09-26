@@ -46,6 +46,7 @@ final class CsrfProtectionMiddleware extends Middleware
         'admin.backup.download',
         'admin.backup.preview',
         'admin.backup.restore',
+        'admin.operational.event',
         'insert',
         'update',
         'delete',

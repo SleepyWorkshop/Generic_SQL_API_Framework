@@ -20,6 +20,7 @@ require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../../core/Logger.php';
 require_once __DIR__ . '/../Backup/ConfigurationMutationBackup.php';
 require_once __DIR__ . '/../Backup/BackupRecoveryService.php';
+require_once __DIR__ . '/../../core/OperationalLogger.php';
 
 final class AdminService
 {
@@ -205,11 +206,15 @@ final class AdminService
 
     public function testDatabase(array $database): array
     {
+        (new OperationalLogger())->info('database', 'Database connection test started');
         $resolved = $this->withExistingPassword($database);
         $this->validateDatabaseAuthentication($resolved);
         try {
             ($this->connectionTester)($resolved);
         } catch (Throwable $exception) {
+            (new OperationalLogger())->error('database', 'Database connection test failed', [
+                'error_code' => 'DATABASE_CONNECTION_FAILED',
+            ]);
             throw new ApiRequestException(
                 'Database connection failed.',
                 'DATABASE_CONNECTION_FAILED',
@@ -218,14 +223,19 @@ final class AdminService
             );
         }
         $this->logger->audit('database.connection_test', 'success', 'INFO', ['component' => 'database']);
+        (new OperationalLogger())->info('database', 'Database connection test successful');
         return ['connected' => true];
     }
 
     public function testCurrentDatabase(): array
     {
+        (new OperationalLogger())->info('database', 'Database connection test started');
         try {
             $database = DatabaseConfigurationResolver::load($this->databasePath);
         } catch (Throwable $exception) {
+            (new OperationalLogger())->error('database', 'Database configuration load failed', [
+                'error_code' => 'DATABASE_CONFIGURATION_UNAVAILABLE',
+            ]);
             throw new ApiRequestException(
                 'Database configuration is unavailable.',
                 'DATABASE_CONFIGURATION_UNAVAILABLE',
@@ -237,12 +247,16 @@ final class AdminService
         try {
             ($this->connectionTester)($database);
         } catch (Throwable $exception) {
+            (new OperationalLogger())->error('database', 'Database connection test failed', [
+                'error_code' => 'DATABASE_CONNECTION_FAILED',
+            ]);
             $this->logger->audit('database.connection_test', 'failure', 'WARNING', [
                 'reason' => 'connection_failed', 'component' => 'database',
             ]);
             throw new ApiRequestException('Database connection failed.', 'DATABASE_CONNECTION_FAILED', [], 422);
         }
         $this->logger->audit('database.connection_test', 'success', 'INFO', ['component' => 'database']);
+        (new OperationalLogger())->info('database', 'Database connection test successful');
         return ['connected' => true];
     }
 
@@ -443,14 +457,16 @@ final class AdminService
 
     public function controlDatabase(string $operation): array
     {
+        (new OperationalLogger())->info('database', 'Database runtime operation started', ['operation' => $operation]);
         if ($operation === 'disconnect') {
             $result = $this->databaseAvailability->setAvailable(false);
             $this->runtimeAudit('database', $operation, 'success', $result);
+            (new OperationalLogger())->info('database', 'Database disconnect successful');
             return $result;
         }
         if ($operation === 'restart') $this->databaseAvailability->setAvailable(false);
-        try { $this->testCurrentDatabase(); $result = $this->databaseAvailability->setAvailable(true); $this->runtimeAudit('database', $operation, 'success', $result); return $result; }
-        catch (Throwable $exception) { $this->databaseAvailability->setAvailable(false); $this->runtimeAudit('database', $operation, 'failure', [], 'connection_failed'); throw $exception; }
+        try { $this->testCurrentDatabase(); $result = $this->databaseAvailability->setAvailable(true); $this->runtimeAudit('database', $operation, 'success', $result); (new OperationalLogger())->info('database', 'Database runtime operation successful', ['operation' => $operation]); return $result; }
+        catch (Throwable $exception) { $this->databaseAvailability->setAvailable(false); $this->runtimeAudit('database', $operation, 'failure', [], 'connection_failed'); (new OperationalLogger())->error('database', 'Database runtime operation failed', ['operation' => $operation, 'error_code' => 'DATABASE_UNAVAILABLE']); throw $exception; }
     }
 
     public function backupHistory(): array
@@ -476,6 +492,17 @@ final class AdminService
     public function restoreBackup(string $uploadToken, bool $confirmed): array
     {
         return $this->backupRecovery->restore($uploadToken, $confirmed);
+    }
+
+    public function recordFrontendOperationalEvent(array $event): array
+    {
+        (new OperationalLogger())->info('admin', $event['event'], array_filter([
+            'page' => $event['page'] ?? null,
+            'operation' => $event['operation'] ?? null,
+            'error_code' => $event['errorCode'] ?? null,
+            'browser_request_id' => $event['requestId'] ?? null,
+        ], static fn ($value): bool => $value !== null));
+        return ['recorded' => true];
     }
 
     private function configurationAudit(string $category): void

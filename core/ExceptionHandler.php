@@ -5,6 +5,7 @@ require_once __DIR__ . '/Logger.php';
 require_once __DIR__ . '/../app/Requests/ApiRequestException.php';
 require_once __DIR__ . '/../app/Security/DatabaseCredentialException.php';
 require_once __DIR__ . '/QueryTimeoutException.php';
+require_once __DIR__ . '/OperationalLogger.php';
 
 final class ExceptionHandler
 {
@@ -115,6 +116,12 @@ final class ExceptionHandler
                 'reason' => 'request_failed',
             ]);
             $logger->error('Application failure', [], $details);
+            (new OperationalLogger())->error('api', 'API request failed', [
+                'error_code' => $event,
+                'exception_category' => $category,
+                'duration_ms' => defined('API_REQUEST_STARTED')
+                    ? round((microtime(true) - API_REQUEST_STARTED) * 1000, 2) : null,
+            ]);
         } catch (Throwable $loggingFailure) {
             // Error reporting must never replace the primary safe response.
         }

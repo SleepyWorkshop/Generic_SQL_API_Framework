@@ -99,6 +99,7 @@
         error = new Error(message);
       error.code = body.error && body.error.code;
       error.details = body.error && body.error.details;
+      error.requestId = body.meta && body.meta.requestId;
       throw error;
     }
     return body;
@@ -106,6 +107,39 @@
   async function loadCsrf() {
     csrfToken = row(await call({ action: "auth.csrf" })).csrfToken || "";
   }
+  function reportFrontendEvent(event, context = {}) {
+    if (!csrfToken) return Promise.resolve();
+    const metadata = { ...context };
+    metadata.page ||= currentRoute();
+    return call(
+      {
+        action: "admin.operational.event",
+        event,
+        ...metadata,
+      },
+      true,
+    ).catch(() => {});
+  }
+  function visibleError(error, fallback = "The operation failed.") {
+    const message = error && error.message ? error.message : fallback;
+    return error && error.requestId
+      ? `${message} Error ID: ${error.requestId}`
+      : message;
+  }
+  addEventListener("error", () => {
+    notify("An unexpected Admin Console error occurred. Refresh and try again.", true);
+    void reportFrontendEvent("frontend.javascript.error", {
+      operation: "runtime",
+      errorCode: "JAVASCRIPT_RUNTIME_ERROR",
+    });
+  });
+  addEventListener("unhandledrejection", () => {
+    notify("An unexpected Admin Console error occurred. Refresh and try again.", true);
+    void reportFrontendEvent("frontend.javascript.error", {
+      operation: "promise",
+      errorCode: "UNHANDLED_PROMISE_REJECTION",
+    });
+  });
   function setButtonBusy(button, label) {
     const original = button.innerHTML;
     button.disabled = true;
@@ -1289,10 +1323,14 @@
           event.currentTarget.value = "";
         });
         target.querySelector("#confirm-restore").addEventListener("click", async (restoreEvent) => {
+          const restoreButton = restoreEvent.currentTarget;
+          void reportFrontendEvent("frontend.restore.confirm.opened", { operation: "restore" });
           if (!(await confirmAction("Restore this verified recovery point? The current application configuration will be replaced.", "Restore Configuration"))) return;
-          const done = setButtonBusy(restoreEvent.currentTarget, "Restoring…");
+          const done = setButtonBusy(restoreButton, "Restoring configuration...");
           try {
-            await call(
+            void reportFrontendEvent("frontend.restore.confirmed", { operation: "restore" });
+            void reportFrontendEvent("frontend.restore.request.started", { operation: "restore" });
+            const response = await call(
               {
                 action: "admin.backup.restore",
                 uploadToken: preview.uploadToken,
@@ -1300,11 +1338,43 @@
               },
               true,
             );
-            notify("Configuration restore completed and passed health validation.");
-            await backupRecoveryView();
-          } catch (error) {
-            notify(error.message, true);
+            void reportFrontendEvent("frontend.restore.request.success", {
+              operation: "restore",
+              requestId: response.meta && response.meta.requestId,
+            });
             done();
+            notify("Restore completed successfully.");
+            try {
+              const session = row(await call({ action: "auth.session" }));
+              if (
+                session.authenticated &&
+                session.user &&
+                session.user.backendRole === "system-administrator"
+              ) {
+                currentUser = session.user;
+                await backupRecoveryView();
+              } else {
+                loginView();
+                notify("Restore completed successfully. Sign in again to continue.");
+              }
+            } catch (refreshError) {
+              if (refreshError.code === "AUTHENTICATION_REQUIRED") {
+                loginView();
+                notify("Restore completed successfully. Sign in again to continue.");
+              } else {
+                notify("Restore completed successfully. Refresh the Admin Console to reload its state.");
+              }
+            }
+            return;
+          } catch (error) {
+            void reportFrontendEvent("frontend.restore.request.failed", {
+              operation: "restore",
+              errorCode: error.code || "REQUEST_FAILED",
+              requestId: error.requestId,
+            });
+            notify(visibleError(error, "Restore failed. The configuration was not activated."), true);
+            done();
+            if (error.code === "AUTHENTICATION_REQUIRED") loginView();
           }
         });
       } catch (error) {
