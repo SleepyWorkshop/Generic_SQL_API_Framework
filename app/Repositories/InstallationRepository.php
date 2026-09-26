@@ -30,7 +30,7 @@ final class InstallationRepository
         JsonFileStore::save($this->path, $configuration);
     }
 
-    private function validate(array $configuration): void
+    public function validate(array $configuration): void
     {
         if (array_diff(array_keys($configuration), ['version', 'installationId', 'initialized']) !== []
             || ($configuration['version'] ?? null) !== 1

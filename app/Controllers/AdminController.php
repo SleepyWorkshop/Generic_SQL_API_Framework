@@ -34,6 +34,11 @@ final class AdminController extends BaseController
         elseif ($action === 'admin.cors.save') $result = $this->service->saveCors($request['cors']);
         elseif ($action === 'admin.authentication.save') $result = $this->service->saveAuthentication($request['mode']);
         elseif ($action === 'admin.runtime.save') $result = $this->service->saveRuntime($request['runtime']);
+        elseif ($action === 'admin.backup.history') $result = ['recoveryPoints' => $this->service->backupHistory()];
+        elseif ($action === 'admin.backup.create') $result = $this->service->createBackup();
+        elseif ($action === 'admin.backup.download') $result = $this->service->downloadBackup($request['recoveryPointId']);
+        elseif ($action === 'admin.backup.preview') $result = $this->service->previewBackupRestore($request['filename'], $request['archive']);
+        elseif ($action === 'admin.backup.restore') $result = $this->service->restoreBackup($request['uploadToken'], $request['confirmed']);
         else $result = $this->service->saveAuthentication($request['mode']);
 
         $this->success([$result], 'Admin operation completed.');

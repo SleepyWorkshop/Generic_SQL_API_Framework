@@ -87,7 +87,7 @@ class Logger
             $message
         );
         $message = (string)preg_replace_callback(
-            '/(?i)((?:["\']?)(?:password|pwd|uid|x-api-key|api[_-]?key|csrf[_-]?token|session[_-]?id|GENERIC_SQL_API_ENCRYPTION_KEY)(?:["\']?)\s*[=:]\s*)("(?:\\\\.|[^"\\\\])*"|[^;"\'\s,}]+)/',
+            '/(?i)((?:["\']?)(?:password|pwd|uid|x-api-key|api[_-]?key|csrf[_-]?token|session[_-]?id|GENERIC_SQL_API_ENCRYPTION_KEY|GENERIC_BACKUP_SIGNING_KEY)(?:["\']?)\s*[=:]\s*)("(?:\\\\.|[^"\\\\])*"|[^;"\'\s,}]+)/',
             static fn (array $match): string => $match[1]
                 . (str_starts_with($match[2], '"') ? '"[REDACTED]"' : '[REDACTED]'),
             $message
@@ -95,6 +95,10 @@ class Logger
         $environmentKey = getenv('GENERIC_SQL_API_ENCRYPTION_KEY');
         if (is_string($environmentKey) && $environmentKey !== '') {
             $message = str_replace($environmentKey, '[REDACTED]', $message);
+        }
+        $backupSigningKey = getenv('GENERIC_BACKUP_SIGNING_KEY');
+        if (is_string($backupSigningKey) && $backupSigningKey !== '') {
+            $message = str_replace($backupSigningKey, '[REDACTED]', $message);
         }
         return $message;
     }
@@ -200,6 +204,7 @@ class Logger
             'targetId', 'targetUsername', 'keyId', 'fingerprint', 'ownerId',
             'reason', 'errorCategory', 'configurationCategory', 'identityType',
             'identityHash', 'pid', 'port', 'durationMs',
+            'recoveryPointId', 'operation', 'verification', 'authenticity',
         ];
         $safe = [];
         foreach ($allowed as $field) {

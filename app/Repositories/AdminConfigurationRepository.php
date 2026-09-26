@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../Configuration/RuntimeControls.php';
+require_once __DIR__ . '/../Backup/ConfigurationMutationBackup.php';
 
 final class AdminConfigurationRepository
 {
@@ -53,6 +54,7 @@ final class AdminConfigurationRepository
             $this->validate($configuration);
             $result = $operation($configuration);
             $this->validate($configuration);
+            if ($this->runtimePath) ConfigurationMutationBackup::before('runtime_security_configuration');
             JsonFileStore::save($this->path, $configuration);
             return $result;
         } finally {

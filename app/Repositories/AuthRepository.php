@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../Authorization/RoleModel.php';
 require_once __DIR__ . '/../Security/UserProfilePolicy.php';
+require_once __DIR__ . '/../Backup/ConfigurationMutationBackup.php';
 
 final class AuthRepository
 {
@@ -81,25 +82,26 @@ final class AuthRepository
                 }
             }
             return false;
-        });
+        }, false);
     }
 
-    public function update(callable $operation)
+    public function update(callable $operation, bool $critical = true)
     {
         $this->bootstrapRuntimeConfiguration();
-        return $this->withLock(function () use ($operation) {
+        return $this->withLock(function () use ($operation, $critical) {
             $configuration = JsonFileStore::load($this->path);
             if (in_array($configuration['version'] ?? null, [1, 2, 3], true)) {
                 $configuration = $this->migrateLegacyConfiguration($configuration);
             }
             $this->validate($configuration);
             $result = $operation($configuration);
+            if ($critical && $this->runtimePath) ConfigurationMutationBackup::before('authentication_users');
             $this->save($configuration);
             return $result;
         });
     }
 
-    private function validate(array $configuration): void
+    public function validate(array $configuration): void
     {
         if (array_diff(array_keys($configuration), ['version', 'users']) !== []
             || ($configuration['version'] ?? null) !== 4

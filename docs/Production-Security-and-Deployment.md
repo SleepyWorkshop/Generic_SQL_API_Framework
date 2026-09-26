@@ -257,12 +257,12 @@ outcomes, severity, and allowlisted actor/target metadata. See
 taxonomy, fail-open behavior, file modes, concurrency boundary, and OS-owned
 rotation/retention requirements. No centralized collector or SIEM is configured.
 
-Application configuration backup scope, manifest verification, encryption-key
-custody, disposable sessions/runtime state, SQL Server-native backup ownership,
-and tested restore sequencing are documented in
+Application configuration ZIP scope, SHA-256 integrity, manifest authenticity,
+separate signing/database-key custody, Admin preview/confirmation, disposable
+sessions/runtime state, SQL Server-native backup ownership, and tested restore sequencing are documented in
 [Backup and recovery](Backup-and-Recovery.md). Backup bundles must remain outside
-all document roots and the repository; matching encryption keys are protected
-and recovered through a separate operational channel.
+all document roots and the repository; matching signing and encryption keys are
+protected and recovered through separate operational channels.
 
 Public liveness/readiness semantics, authenticated detailed diagnostics,
 database-health caching, safe dependency categories, and IIS/Nginx monitoring

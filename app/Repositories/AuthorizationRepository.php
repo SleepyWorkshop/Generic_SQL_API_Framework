@@ -3,13 +3,16 @@
 require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../Authorization/RoleModel.php';
+require_once __DIR__ . '/../Backup/ConfigurationMutationBackup.php';
 
 final class AuthorizationRepository
 {
     private string $path;
+    private bool $runtimePath;
 
     public function __construct(?string $path = null)
     {
+        $this->runtimePath = $path === null;
         $this->path = $path ?? RuntimeConfiguration::path(RuntimeConfiguration::AUTHORIZATION_FILE);
     }
 
@@ -31,6 +34,7 @@ final class AuthorizationRepository
     public function save(array $value): void
     {
         $this->validate($value);
+        if ($this->runtimePath) ConfigurationMutationBackup::before('authorization');
         JsonFileStore::save($this->path, $value);
     }
 
@@ -59,7 +63,7 @@ final class AuthorizationRepository
         return $value;
     }
 
-    private function validate(array $value): void
+    public function validate(array $value): void
     {
         if (($value['version'] ?? null) !== 3
             || array_diff(array_keys($value), ['version', 'publicRoles', 'legacyApiKeyRoles', 'roles']) !== []

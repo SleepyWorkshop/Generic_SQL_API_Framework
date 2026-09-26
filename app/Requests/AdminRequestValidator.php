@@ -30,6 +30,8 @@ final class AdminRequestValidator
         'admin.database.disconnect',
         'admin.database.restart',
         'admin.settings.get',
+        'admin.backup.history',
+        'admin.backup.create',
     ];
 
     public function validate(array $request): array
@@ -74,6 +76,26 @@ final class AdminRequestValidator
                 $this->invalid([['path' => rtrim($path, '.'), 'message' => $exception->getMessage()]]);
             }
             return ['action' => $action, 'runtime' => $runtime];
+        }
+        if ($action === 'admin.backup.download') {
+            $this->rejectUnknown($request, ['action', 'recoveryPointId']);
+            $id = $request['recoveryPointId'] ?? null;
+            if (!is_string($id) || preg_match('/^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{12}$/', $id) !== 1) $this->invalid([['path' => 'recoveryPointId', 'message' => 'Invalid recovery point.']]);
+            return ['action' => $action, 'recoveryPointId' => $id];
+        }
+        if ($action === 'admin.backup.preview') {
+            $this->rejectUnknown($request, ['action', 'filename', 'archive']);
+            $filename = $request['filename'] ?? null;
+            $archive = $request['archive'] ?? null;
+            if (!is_string($filename) || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,180}\.zip$/i', $filename) !== 1) $this->invalid([['path' => 'filename', 'message' => 'A ZIP backup file is required.']]);
+            if (!is_string($archive) || $archive === '' || strlen($archive) > 28 * 1024 * 1024 || preg_match('/^[A-Za-z0-9+\/=\r\n]+$/', $archive) !== 1) $this->invalid([['path' => 'archive', 'message' => 'Backup upload is invalid or too large.']]);
+            return ['action' => $action, 'filename' => $filename, 'archive' => $archive];
+        }
+        if ($action === 'admin.backup.restore') {
+            $this->rejectUnknown($request, ['action', 'uploadToken', 'confirmed']);
+            $token = $request['uploadToken'] ?? null;
+            if (!is_string($token) || preg_match('/^[a-f0-9]{48}$/', $token) !== 1 || ($request['confirmed'] ?? null) !== true) $this->invalid([['path' => 'confirmed', 'message' => 'Verified restore confirmation is required.']]);
+            return ['action' => $action, 'uploadToken' => $token, 'confirmed' => true];
         }
         throw new ApiRequestException('Invalid admin request.', 'INVALID_ADMIN_REQUEST');
     }

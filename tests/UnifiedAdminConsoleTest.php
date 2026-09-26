@@ -362,6 +362,17 @@ try {
     }
     unifiedAdminAssert(str_contains($adminJavaScript, 'SQL query timeout (seconds)'), 'Configured query timeout is missing from the Admin Console.');
     unifiedAdminAssert(str_contains($adminJavaScript, 'admin.runtime.save'), 'Runtime configuration save is missing from the Admin Console.');
+    foreach (['admin.backup.history', 'admin.backup.create', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore'] as $backupAction) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $backupAction), "Admin Backup & Recovery UI is missing {$backupAction}.");
+    }
+    unifiedAdminAssert(str_contains($adminHtml, 'data-route="backup-recovery"')
+        && str_contains($adminHtml, 'Backup &amp; Recovery')
+        && str_contains($adminJavaScript, 'type="file" accept=".zip,application/zip"')
+        && str_contains($adminJavaScript, 'Restore Configuration')
+        && str_contains($adminJavaScript, 'confirmed: true')
+        && str_contains($adminJavaScript, 'URL.createObjectURL')
+        && !str_contains($adminJavaScript, 'webkitdirectory'),
+        'Admin Backup & Recovery does not use native ZIP selection/download with explicit confirmation.');
     unifiedAdminAssert(!str_contains(strtolower($adminJavaScript), 'test saved configuration'), 'Removed saved database test remains in the Admin Console.');
     unifiedAdminAssert(!str_contains($adminJavaScript, 'Runtime access'), 'Database runtime lifecycle remains under Configuration.');
     unifiedAdminAssert(str_contains($adminJavaScript, 'data-database-runtime'), 'Database runtime lifecycle is missing from System Health.');

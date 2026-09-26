@@ -41,6 +41,7 @@ $applicationVersion = is_array($application) && is_string($application['version'
             <a href="/admin/configuration" data-route="configuration" title="Configuration"><span class="nav-icon" aria-hidden="true">C</span><span class="nav-label">Configuration</span></a>
             <a href="/admin/users" data-route="users" title="Users"><span class="nav-icon" aria-hidden="true">U</span><span class="nav-label">Users</span></a>
             <a href="/admin/api-keys" data-route="api-keys" title="API Keys"><span class="nav-icon" aria-hidden="true">K</span><span class="nav-label">API Keys</span></a>
+            <a href="/admin/backup-recovery" data-route="backup-recovery" title="Backup &amp; Recovery"><span class="nav-icon" aria-hidden="true">B</span><span class="nav-label">Backup &amp; Recovery</span></a>
         </nav>
         <div class="sidebar-footer">
             <button id="logout" class="quiet" type="button" hidden title="Logout"><span class="nav-icon" aria-hidden="true">↪</span><span class="nav-label">Logout</span></button>

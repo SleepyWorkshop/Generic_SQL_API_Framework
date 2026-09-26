@@ -43,7 +43,9 @@ $contentType = strtolower(trim(explode(';', (string)($_SERVER['CONTENT_TYPE'] ??
 if ($contentType !== 'application/json') {
     Response::error('Content-Type must be application/json.', 415, 'UNSUPPORTED_MEDIA_TYPE');
 }
-$request = json_decode(RequestBodyReader::read(), true);
+// Backup ZIP uploads are base64 encoded in the authenticated Admin request.
+// The validator and recovery service apply the lower decoded-archive limits.
+$request = json_decode(RequestBodyReader::read(null, null, 30 * 1024 * 1024), true);
 if (json_last_error() !== JSON_ERROR_NONE) Response::error('Invalid JSON request.', 400, 'INVALID_JSON');
 if (!is_array($request) || array_is_list($request)) {
     Response::error('Invalid request.', 400, 'INVALID_REQUEST', [['path' => '', 'message' => 'Request body must be a JSON object.']]);
@@ -66,6 +68,8 @@ $adminActions = [
     'admin.settings.get', 'admin.server.save',
     'admin.cors.save', 'admin.authentication.save',
     'admin.runtime.save',
+    'admin.backup.history', 'admin.backup.create', 'admin.backup.download',
+    'admin.backup.preview', 'admin.backup.restore',
 ];
 $allActions = array_merge($setupActions, $authActions, $userActions, $apiKeyActions, $roleActions, $adminActions);
 if (!in_array($request['action'] ?? null, $allActions, true)) {

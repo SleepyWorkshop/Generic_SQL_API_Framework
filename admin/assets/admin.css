@@ -542,6 +542,12 @@ tr:last-child td {
   max-width: 100%;
   flex: 0 0 auto;
 }
+.backup-preview ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
 .check {
   display: flex;
   align-items: center;

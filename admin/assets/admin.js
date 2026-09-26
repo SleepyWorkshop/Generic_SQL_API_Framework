@@ -1154,6 +1154,166 @@
     };
   }
 
+  function fileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => {
+        const value = String(reader.result || ""),
+          separator = value.indexOf(",");
+        separator === -1
+          ? reject(new Error("The selected backup could not be read."))
+          : resolve(value.slice(separator + 1));
+      });
+      reader.addEventListener("error", () =>
+        reject(new Error("The selected backup could not be read.")),
+      );
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function downloadArchive(download) {
+    const binary = atob(download.archive),
+      bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1)
+      bytes[index] = binary.charCodeAt(index);
+    const url = URL.createObjectURL(
+        new Blob([bytes], { type: download.mediaType || "application/zip" }),
+      ),
+      link = document.createElement("a");
+    link.href = url;
+    link.download = download.filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function backupPreviewMarkup(preview) {
+    const list = (values) =>
+      values.length
+        ? `<ul>${values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>`
+        : "<p>None</p>";
+    return `<section class="section-card stack backup-preview" aria-live="polite">
+      <div><h2>Backup Verified</h2><p class="help">Integrity and authenticity checks passed. Selecting a file has not changed the application.</p></div>
+      <dl class="detail-list"><dt>Recovery point</dt><dd>${escapeHtml(preview.recoveryPointId)}</dd><dt>Created</dt><dd>${escapeHtml(preview.createdAt)}</dd><dt>Application version</dt><dd>${escapeHtml(preview.applicationVersion)}</dd><dt>Backup format</dt><dd>${escapeHtml(preview.formatVersion)}</dd><dt>Verification</dt><dd><span class="badge">Valid</span></dd><dt>Authenticity</dt><dd><span class="badge">Valid</span></dd><dt>Schema compatible</dt><dd>${preview.schemaCompatible ? "Yes" : "No"}</dd><dt>Encryption key available</dt><dd>${preview.encryptionKeyAvailable ? "Yes" : "No"}</dd></dl>
+      <div class="row"><div><h3>Files that will change</h3>${list(preview.changedFiles || [])}</div><div><h3>Files unchanged</h3>${list(preview.unchangedFiles || [])}</div></div>
+      <p class="warning">Restoring replaces the current application configuration. SQL Server data is not part of this recovery point.</p>
+      <div class="actions"><button type="button" class="danger" id="confirm-restore">Restore Configuration</button><button type="button" class="secondary" id="cancel-restore">Cancel</button></div>
+    </section>`;
+  }
+
+  async function backupRecoveryView() {
+    loading();
+    const history = row(await call({ action: "admin.backup.history" }))
+        .recoveryPoints || [];
+    title.textContent = "Backup & Recovery";
+    content.className = "panel stack";
+    content.innerHTML = `<section class="section-card stack"><div><h2>Application Configuration Backup</h2><p class="help">Create a signed ZIP recovery point. Application backups do not contain SQL Server data, encryption keys, sessions, runtime state, or plaintext secrets.</p></div><div><button id="create-backup">Create Backup</button></div></section>
+      <section class="section-card stack"><div><h2>Verify Backup & Restore</h2><p class="help">Select an Application Backup ZIP using the native file picker. It will be uploaded, verified, and previewed before explicit confirmation is available.</p></div><div class="actions"><button type="button" class="secondary" id="select-restore-backup">Restore Backup</button><span class="help" id="selected-backup-name">No backup selected.</span></div><input id="restore-backup" type="file" accept=".zip,application/zip" hidden><div id="restore-preview"></div></section>
+      <section class="section-card stack"><div><h2>Recovery Points</h2><p class="help">Verified application configuration recovery points stored by this installation.</p></div>${
+        history.length
+          ? `<div class="table-wrap"><table><thead><tr><th>Created</th><th>Recovery Point</th><th>Size</th><th>Version</th><th>Verification</th><th>Authenticity</th><th>Actions</th></tr></thead><tbody>${history
+              .map(
+                (point) =>
+                  `<tr><td>${escapeHtml(point.createdAt || "Unavailable")}</td><td>${escapeHtml(point.recoveryPointId || point.filename)}</td><td>${escapeHtml(point.size)} bytes</td><td>${escapeHtml(point.applicationVersion || "Unknown")}</td><td><span class="badge${point.verification === "valid" ? "" : " disabled"}">${escapeHtml(point.verification)}</span></td><td><span class="badge${point.authenticity === "valid" ? "" : " disabled"}">${escapeHtml(point.authenticity)}</span></td><td>${point.recoveryPointId ? `<button type="button" class="small secondary" data-download-backup="${escapeHtml(point.recoveryPointId)}">Download</button>` : "Unavailable"}</td></tr>`,
+              )
+              .join("")}</tbody></table></div>`
+          : '<div class="empty">No recovery points have been created.</div>'
+      }</section>`;
+
+    content.querySelector("#create-backup").addEventListener("click", async (event) => {
+      const done = setButtonBusy(event.currentTarget, "Creating and verifying…");
+      try {
+        const created = row(await call({ action: "admin.backup.create" }, true));
+        const download = row(
+          await call(
+            { action: "admin.backup.download", recoveryPointId: created.recoveryPointId },
+            true,
+          ),
+        );
+        downloadArchive(download);
+        notify("Backup verified and prepared for download.");
+        await backupRecoveryView();
+      } catch (error) {
+        notify(error.message, true);
+      } finally {
+        done();
+      }
+    });
+    content.querySelectorAll("[data-download-backup]").forEach((button) =>
+      button.addEventListener("click", async () => {
+        const done = setButtonBusy(button, "Preparing…");
+        try {
+          downloadArchive(
+            row(
+              await call(
+                {
+                  action: "admin.backup.download",
+                  recoveryPointId: button.dataset.downloadBackup,
+                },
+                true,
+              ),
+            ),
+          );
+        } catch (error) {
+          notify(error.message, true);
+        } finally {
+          done();
+        }
+      }),
+    );
+    const restoreInput = content.querySelector("#restore-backup");
+    content
+      .querySelector("#select-restore-backup")
+      .addEventListener("click", () => restoreInput.click());
+    restoreInput.addEventListener("change", async (event) => {
+      const file = event.currentTarget.files && event.currentTarget.files[0],
+        target = content.querySelector("#restore-preview");
+      if (!file) return;
+      content.querySelector("#selected-backup-name").textContent = file.name;
+      target.innerHTML = '<p><span class="spinner"></span> Uploading and verifying backup…</p>';
+      try {
+        const preview = row(
+          await call(
+            {
+              action: "admin.backup.preview",
+              filename: file.name,
+              archive: await fileAsBase64(file),
+            },
+            true,
+          ),
+        );
+        target.innerHTML = backupPreviewMarkup(preview);
+        target.querySelector("#cancel-restore").addEventListener("click", () => {
+          target.innerHTML = "";
+          event.currentTarget.value = "";
+        });
+        target.querySelector("#confirm-restore").addEventListener("click", async (restoreEvent) => {
+          if (!(await confirmAction("Restore this verified recovery point? The current application configuration will be replaced.", "Restore Configuration"))) return;
+          const done = setButtonBusy(restoreEvent.currentTarget, "Restoring…");
+          try {
+            await call(
+              {
+                action: "admin.backup.restore",
+                uploadToken: preview.uploadToken,
+                confirmed: true,
+              },
+              true,
+            );
+            notify("Configuration restore completed and passed health validation.");
+            await backupRecoveryView();
+          } catch (error) {
+            notify(error.message, true);
+            done();
+          }
+        });
+      } catch (error) {
+        target.innerHTML = '<p class="dialog-error" role="alert">Invalid Application Backup</p>';
+        notify(error.message, true);
+      }
+    });
+  }
+
   function currentRoute() {
     const path = location.pathname.replace(/\/$/, "");
     if (path === "" || path === "/admin" || path === "/admin/health")
@@ -1173,6 +1333,7 @@
       else if (route === "configuration") await configurationView();
       else if (route === "users") await usersView();
       else if (route === "api-keys") await apiKeysView();
+      else if (route === "backup-recovery") await backupRecoveryView();
       else await healthView();
     } catch (error) {
       if (error.code === "AUTHENTICATION_REQUIRED") loginView();

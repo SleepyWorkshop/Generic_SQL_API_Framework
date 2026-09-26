@@ -18,11 +18,14 @@ require_once __DIR__ . '/../Health/ApplicationHealthMonitor.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../../core/Logger.php';
+require_once __DIR__ . '/../Backup/ConfigurationMutationBackup.php';
+require_once __DIR__ . '/../Backup/BackupRecoveryService.php';
 
 final class AdminService
 {
     private AdminConfigurationRepository $configuration;
     private string $databasePath;
+    private bool $runtimeDatabasePath;
     private $connectionTester;
     private ApiProcessManager $processManager;
     private SqlParserProcessManager $parserProcessManager;
@@ -32,6 +35,7 @@ final class AdminService
     private ApplicationRuntimeManager $applicationRuntime;
     private Logger $logger;
     private ApplicationHealthMonitor $healthMonitor;
+    private BackupRecoveryService $backupRecovery;
 
     public function __construct(
         ?AdminConfigurationRepository $configuration = null,
@@ -44,9 +48,11 @@ final class AdminService
         ?DatabaseAvailabilityManager $databaseAvailability = null,
         ?Logger $logger = null,
         ?ApplicationHealthMonitor $healthMonitor = null,
-        ?ApplicationRuntimeManager $applicationRuntime = null
+        ?ApplicationRuntimeManager $applicationRuntime = null,
+        ?BackupRecoveryService $backupRecovery = null
     ) {
         $this->configuration = $configuration ?? new AdminConfigurationRepository();
+        $this->runtimeDatabasePath = $databasePath === null;
         $this->databasePath = $databasePath
             ?? dirname(__DIR__, 2) . '/database/config/database.json';
         $this->connectionTester = $connectionTester ?? function (array $database): void {
@@ -69,6 +75,7 @@ final class AdminService
             'databaseAvailable' => fn (): bool => $this->databaseAvailability->available(),
             'databaseTester' => $this->connectionTester,
         ]);
+        $this->backupRecovery = $backupRecovery ?? new BackupRecoveryService();
     }
 
     public function status(): array
@@ -255,6 +262,7 @@ final class AdminService
             if (DatabaseConfigurationResolver::resolve($encrypted) !== $resolved) {
                 throw new RuntimeException('Encrypted database configuration verification failed.');
             }
+            if ($this->runtimeDatabasePath) ConfigurationMutationBackup::before('database_configuration');
             JsonFileStore::save($this->databasePath, $encrypted);
         } catch (DatabaseCredentialException $exception) {
             $this->logger->audit('configuration.database', 'failure', 'ERROR', [
@@ -443,6 +451,31 @@ final class AdminService
         if ($operation === 'restart') $this->databaseAvailability->setAvailable(false);
         try { $this->testCurrentDatabase(); $result = $this->databaseAvailability->setAvailable(true); $this->runtimeAudit('database', $operation, 'success', $result); return $result; }
         catch (Throwable $exception) { $this->databaseAvailability->setAvailable(false); $this->runtimeAudit('database', $operation, 'failure', [], 'connection_failed'); throw $exception; }
+    }
+
+    public function backupHistory(): array
+    {
+        return $this->backupRecovery->history();
+    }
+
+    public function createBackup(): array
+    {
+        return $this->backupRecovery->create();
+    }
+
+    public function downloadBackup(string $recoveryPointId): array
+    {
+        return $this->backupRecovery->download($recoveryPointId);
+    }
+
+    public function previewBackupRestore(string $filename, string $archive): array
+    {
+        return $this->backupRecovery->previewUpload($filename, $archive);
+    }
+
+    public function restoreBackup(string $uploadToken, bool $confirmed): array
+    {
+        return $this->backupRecovery->restore($uploadToken, $confirmed);
     }
 
     private function configurationAudit(string $category): void
