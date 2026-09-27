@@ -42,6 +42,19 @@
     );
   const row = (response) =>
     response.data && response.data[0] ? response.data[0] : {};
+  function formatAdminDate(value, fallback = "None") {
+    if (!value) return fallback;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime())
+      ? String(value)
+      : new Intl.DateTimeFormat(undefined, {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(parsed);
+  }
   const roleLabel = (role) =>
     ({
       "system-administrator": "Super Admin",
@@ -178,6 +191,18 @@
           .join("")}</dl>`
       : "";
   }
+  function backupChangeList(changes = []) {
+    if (!changes.length)
+      return '<section class="backup-change-section" aria-labelledby="backup-change-title"><h3 id="backup-change-title">Changes</h3><p class="help">No configuration changes detected.</p></section>';
+    return `<section class="backup-change-section" aria-labelledby="backup-change-title"><h3 id="backup-change-title">Changes</h3><ul class="backup-change-list">${changes
+      .map((change) => {
+        const type = ["added", "modified", "deleted"].includes(change.type)
+          ? change.type
+          : "modified";
+        return `<li><span class="badge change-${type}">${escapeHtml(type.toUpperCase())}</span><code>${escapeHtml(change.path)}</code></li>`;
+      })
+      .join("")}</ul></section>`;
+  }
   function backupDialogMarkup({
     titleText,
     description,
@@ -187,10 +212,11 @@
     danger = false,
     closeOnly = false,
     error = false,
+    supplementalHtml = "",
   }) {
     return `<div class="user-dialog__surface backup-dialog__surface">
       <header class="user-dialog__header"><h2 id="backup-dialog-title">${escapeHtml(titleText)}</h2><button type="button" class="dialog-close" data-backup-dialog-close aria-label="Close">×</button></header>
-      <div class="user-dialog__body stack"><p id="backup-dialog-description" class="${error ? "dialog-error" : "help"}" ${error ? 'role="alert"' : ""}>${escapeHtml(description)}</p>${dialogDetails(details)}</div>
+      <div class="user-dialog__body stack"><p id="backup-dialog-description" class="${error ? "dialog-error" : "help"}" ${error ? 'role="alert"' : ""}>${escapeHtml(description)}</p>${dialogDetails(details)}${supplementalHtml}</div>
       <footer class="dialog-actions user-dialog__footer">${closeOnly ? "" : `<button type="button" class="secondary" data-backup-dialog-cancel>${escapeHtml(cancelLabel)}</button>`}<button type="button" class="${danger ? "danger" : ""}" data-backup-dialog-confirm>${escapeHtml(confirmLabel)}</button></footer>
     </div>`;
   }
@@ -1102,7 +1128,6 @@
       "logging",
       "sessions",
       "encryption",
-      "backup",
     ]
       .filter((name) => checks[name])
       .map((name) =>
@@ -1398,21 +1423,25 @@
             ? "Manual"
             : "Legacy"
         : "None",
-      lastStatus = lastBackup ? lastBackup.verification : "Unavailable";
-    content.innerHTML = `<section class="backup-overview" aria-labelledby="backup-overview-title"><div class="backup-section-heading"><div><h2 id="backup-overview-title">Backup Overview</h2><p class="help">Signed application-configuration recovery points. SQL Server data and secret keys are excluded.</p></div><button id="create-backup" type="button">Create Backup</button></div><div class="backup-summary-grid"><article class="backup-summary"><span>Last backup</span><strong>${escapeHtml(lastBackup?.createdAt || "None")}</strong></article><article class="backup-summary"><span>Last scheduled attempt</span><strong>${escapeHtml(lastAttempt ? `${lastAttempt.attemptedAt} — ${lastAttempt.status}` : "None")}</strong></article><article class="backup-summary"><span>Next scheduled backup</span><strong>${escapeHtml(schedule.nextBackupAt || "Disabled")}</strong></article><article class="backup-summary"><span>Backup status</span><strong><span class="badge ${lastStatus === "valid" ? "verified" : "disabled"}">${escapeHtml(lastBackup ? `${lastType} · ${lastStatus}` : "No recovery point")}</span></strong></article></div></section>
+      lastStatus = lastBackup
+        ? lastBackup.verification === "valid" && lastBackup.authenticity === "valid"
+          ? "Verified"
+          : "Failed"
+        : "Unavailable";
+    content.innerHTML = `<section class="backup-overview" aria-labelledby="backup-overview-title"><div class="backup-section-heading"><div><h2 id="backup-overview-title">Backup Overview</h2><p class="help">Signed application-configuration recovery points. SQL Server data and secret keys are excluded.</p></div><button id="create-backup" type="button">Create Backup</button></div><div class="backup-summary-grid"><article class="backup-summary"><span>Last backup</span><strong title="${escapeHtml(lastBackup?.createdAt || "")}">${escapeHtml(formatAdminDate(lastBackup?.createdAt))}</strong></article><article class="backup-summary"><span>Last scheduled attempt</span><strong title="${escapeHtml(lastAttempt?.attemptedAt || "")}">${escapeHtml(lastAttempt ? `${formatAdminDate(lastAttempt.attemptedAt)} — ${lastAttempt.status}` : "None")}</strong></article><article class="backup-summary"><span>Next scheduled backup</span><strong title="${escapeHtml(schedule.nextBackupAt || "")}">${escapeHtml(formatAdminDate(schedule.nextBackupAt, "Disabled"))}</strong></article><article class="backup-summary"><span>Backup status</span><strong><span class="badge ${lastStatus === "Verified" ? "verified" : "disabled"}">${escapeHtml(lastBackup ? `${lastType} · ${lastStatus}` : "No recovery point")}</span></strong></article></div></section>
       <section class="section-card stack" aria-labelledby="automatic-backups-title"><div class="backup-section-heading"><div><h2 id="automatic-backups-title">Automatic Backups</h2><p class="help">The operating-system scheduler runs the backup CLI. Saving settings does not create an OS task or PHP daemon.</p></div></div><form id="backup-schedule" class="backup-schedule-grid"><label class="backup-switch-row"><span><strong>Enable scheduled backups</strong><small>Allow the scheduled CLI to create recovery points.</small></span><span class="switch"><input name="enabled" type="checkbox" ${backupConfiguration.enabled ? "checked" : ""}><span class="slider"></span></span></label><label>Frequency<select name="frequency"><option value="hourly" ${backupConfiguration.frequency === "hourly" ? "selected" : ""}>Hourly</option><option value="daily" ${backupConfiguration.frequency === "daily" ? "selected" : ""}>Daily</option><option value="weekly" ${backupConfiguration.frequency === "weekly" ? "selected" : ""}>Weekly</option></select></label><label>Time<input name="time" type="time" required value="${escapeHtml(backupConfiguration.time)}"></label><label>Retention<input name="retention" type="number" min="1" max="365" required value="${escapeHtml(backupConfiguration.retention)}"><small>Number of verified managed recovery points to retain.</small></label><div class="backup-form-action"><button>Save Schedule</button></div></form></section>
       <section class="section-card stack" aria-labelledby="recovery-points-title"><div class="backup-section-heading"><div><h2 id="recovery-points-title">Recovery Points</h2><p class="help">Verified manual, scheduled, and legacy application backups.</p></div></div>${
         history.length
-          ? `<div class="table-wrap backup-table-wrap"><table class="backup-table"><thead><tr><th>Recovery Point</th><th>Date</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead><tbody>${history
+          ? `<div class="table-wrap backup-table-wrap recovery-points-scroll" tabindex="0" aria-label="Recovery points"><table class="backup-table"><thead><tr><th>Recovery Point</th><th>Date</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead><tbody>${history
               .map(
                 (point) => {
                   const type = point.type === "scheduled" ? "Scheduled" : point.type === "manual" ? "Manual" : "Legacy",
                     status = point.verification === "valid" && point.authenticity === "valid" ? "Verified" : "Failed";
-                  return `<tr><td class="recovery-point-id" title="${escapeHtml(point.recoveryPointId || point.filename)}">${escapeHtml(point.recoveryPointId || point.filename)}</td><td>${escapeHtml(point.createdAt || "Unavailable")}</td><td><span class="badge type-${type.toLowerCase()}">${type}</span></td><td><span class="badge ${status === "Verified" ? "verified" : "disabled"}">${status}</span></td><td>${point.recoveryPointId ? `<button type="button" class="small secondary" data-download-backup="${escapeHtml(point.recoveryPointId)}">Download</button>` : "Unavailable"}</td></tr>`;
+                  return `<tr><td class="recovery-point-id" title="${escapeHtml(point.recoveryPointId || point.filename)}">${escapeHtml(point.recoveryPointId || point.filename)}</td><td title="${escapeHtml(point.createdAt || "")}">${escapeHtml(formatAdminDate(point.createdAt, "Unavailable"))}</td><td><span class="badge type-${type.toLowerCase()}">${type}</span></td><td><span class="badge ${status === "Verified" ? "verified" : "disabled"}">${status}</span></td><td>${point.recoveryPointId ? `<button type="button" class="small secondary" data-download-backup="${escapeHtml(point.recoveryPointId)}">Download</button>` : "Unavailable"}</td></tr>`;
                 },
               )
               .join("")}</tbody></table></div>`
-          : '<div class="empty">No recovery points have been created.</div>'
+          : '<div class="empty"><strong>No Recovery Points</strong><span>No verified application recovery points are currently available.</span></div>'
       }</section>
       <section class="section-card stack" aria-labelledby="restore-backup-title"><div class="backup-section-heading"><div><h2 id="restore-backup-title">Restore</h2><p class="help">Select a signed Application Backup ZIP. Preview validates it without changing configuration.</p></div></div><div class="restore-file-row"><button type="button" class="secondary" id="select-restore-backup">Select Recovery Point</button><span class="selected-file" id="selected-backup-name">No file selected.</span><button type="button" id="preview-restore" disabled>Preview Restore</button></div><input id="restore-backup" type="file" accept=".zip,application/zip" hidden></section>`;
 
@@ -1511,9 +1540,10 @@
     previewButton.addEventListener("click", async () => {
       const file = restoreInput.files && restoreInput.files[0];
       if (!file) return;
-      const done = setButtonBusy(previewButton, "Validating…");
+      let preview = null;
+      const doneValidating = setButtonBusy(previewButton, "Validating…");
       try {
-        const preview = row(
+        preview = row(
           await call(
             {
               action: "admin.backup.preview",
@@ -1523,75 +1553,6 @@
             true,
           ),
         );
-        const continueRestore = await backupDialogChoice({
-          titleText: "Restore Preview",
-          description: "Integrity, authenticity, schema, and encryption-key checks passed. No configuration has been changed.",
-          details: [
-            ["Recovery Point", preview.recoveryPointId],
-            ["Created", preview.createdAt],
-            ["Type", preview.trigger === "scheduled" ? "Scheduled" : preview.trigger === "manual" ? "Manual" : "Legacy"],
-            ["Configuration files", String((preview.files || []).length)],
-            ["Files changing", String((preview.changedFiles || []).length)],
-            ["Warnings", (preview.warnings || []).length ? preview.warnings.join(", ") : "None"],
-          ],
-          confirmLabel: "Continue to Restore",
-        });
-        if (!continueRestore) return;
-        void reportFrontendEvent("frontend.restore.confirm.opened", { operation: "restore" });
-        let sessionInvalidated = false;
-        const restoreResult = await backupOperationDialog({
-          titleText: "Restore Configuration?",
-          description: "This will replace the current application configuration. The previous configuration is preserved for rollback if activation or its health check fails. Active sessions may be affected.",
-          details: [["Recovery Point", preview.recoveryPointId]],
-          confirmLabel: "Restore Configuration",
-          loadingLabel: "Restoring Configuration…",
-          danger: true,
-          successTitle: "Restore Completed",
-          successDescription: () => sessionInvalidated
-            ? "The configuration was restored successfully. Your session was invalidated; please sign in again."
-            : "The configuration was restored successfully and passed the activation health check.",
-          successDetails: () => [["Recovery Point", preview.recoveryPointId], ["Status", "Restored Successfully"]],
-          failureTitle: "Restore Failed",
-          failureDescription: (error) => error.code === "RESTORE_ROLLBACK_FAILED"
-            ? "The restore failed and automatic rollback was incomplete. Contact an administrator and use the request ID for investigation."
-            : "The restore was not activated. The previous configuration was preserved.",
-          onFailure: (error) => {
-            void reportFrontendEvent("frontend.restore.request.failed", {
-              operation: "restore",
-              errorCode: error.code || "REQUEST_FAILED",
-              requestId: error.requestId,
-            });
-          },
-          run: async () => {
-            void reportFrontendEvent("frontend.restore.confirmed", { operation: "restore" });
-            void reportFrontendEvent("frontend.restore.request.started", { operation: "restore" });
-            const response = await call(
-              {
-                action: "admin.backup.restore",
-                uploadToken: preview.uploadToken,
-                confirmed: true,
-              },
-              true,
-            );
-            void reportFrontendEvent("frontend.restore.completed", {
-              operation: "restore",
-              requestId: response.meta && response.meta.requestId,
-            });
-            try {
-              const session = row(await call({ action: "auth.session" }));
-              sessionInvalidated = !session.authenticated || !session.user
-                || session.user.backendRole !== "system-administrator";
-              if (!sessionInvalidated) currentUser = session.user;
-            } catch (refreshError) {
-              sessionInvalidated = refreshError.code === "AUTHENTICATION_REQUIRED";
-            }
-            return response;
-          },
-        });
-        if (restoreResult === "success") {
-          if (sessionInvalidated) loginView();
-          else await backupRecoveryView();
-        }
       } catch (error) {
         await backupDialogChoice({
           titleText: "Restore Preview Failed",
@@ -1602,7 +1563,84 @@
           error: true,
         });
       } finally {
-        done();
+        doneValidating();
+      }
+      if (!preview) return;
+
+      const changes = Array.isArray(preview.changes) ? preview.changes : [],
+        filesChanging = Number.isInteger(preview.filesChanging)
+          ? preview.filesChanging
+          : changes.length;
+      const continueRestore = await backupDialogChoice({
+        titleText: "Restore Preview",
+        description: "Integrity, authenticity, schema, and encryption-key checks passed. No configuration has been changed.",
+        details: [
+          ["Recovery Point", preview.recoveryPointId],
+          ["Created", formatAdminDate(preview.createdAt, "Unavailable")],
+          ["Type", preview.trigger === "scheduled" ? "Scheduled" : preview.trigger === "manual" ? "Manual" : "Legacy"],
+          ["Configuration files", String(preview.configurationFiles ?? (preview.files || []).length)],
+          ["Files changing", String(filesChanging)],
+          ["Warnings", (preview.warnings || []).length ? preview.warnings.join(", ") : "None"],
+        ],
+        supplementalHtml: backupChangeList(changes),
+        confirmLabel: "Continue to Restore",
+      });
+      if (!continueRestore) return;
+      void reportFrontendEvent("frontend.restore.confirm.opened", { operation: "restore" });
+      let sessionInvalidated = false;
+      const restoreResult = await backupOperationDialog({
+        titleText: "Restore Configuration?",
+        description: "This will replace the current application configuration. The previous configuration is preserved for rollback if activation or its health check fails. Active sessions may be affected.",
+        details: [["Recovery Point", preview.recoveryPointId], ["Files changing", String(filesChanging)]],
+        supplementalHtml: backupChangeList(changes),
+        confirmLabel: "Restore Configuration",
+        loadingLabel: "Restoring Configuration…",
+        danger: true,
+        successTitle: "Restore Completed",
+        successDescription: () => sessionInvalidated
+          ? "The configuration was restored successfully. Your session was invalidated; please sign in again."
+          : "The configuration was restored successfully and passed the activation health check.",
+        successDetails: () => [["Recovery Point", preview.recoveryPointId], ["Status", "Restored Successfully"]],
+        failureTitle: "Restore Failed",
+        failureDescription: (error) => error.code === "RESTORE_ROLLBACK_FAILED"
+          ? "The restore failed and automatic rollback was incomplete. Contact an administrator and use the request ID for investigation."
+          : "The restore was not activated. The previous configuration was preserved.",
+        onFailure: (error) => {
+          void reportFrontendEvent("frontend.restore.request.failed", {
+            operation: "restore",
+            errorCode: error.code || "REQUEST_FAILED",
+            requestId: error.requestId,
+          });
+        },
+        run: async () => {
+          void reportFrontendEvent("frontend.restore.confirmed", { operation: "restore" });
+          void reportFrontendEvent("frontend.restore.request.started", { operation: "restore" });
+          const response = await call(
+            {
+              action: "admin.backup.restore",
+              uploadToken: preview.uploadToken,
+              confirmed: true,
+            },
+            true,
+          );
+          void reportFrontendEvent("frontend.restore.completed", {
+            operation: "restore",
+            requestId: response.meta && response.meta.requestId,
+          });
+          try {
+            const session = row(await call({ action: "auth.session" }));
+            sessionInvalidated = !session.authenticated || !session.user
+              || session.user.backendRole !== "system-administrator";
+            if (!sessionInvalidated) currentUser = session.user;
+          } catch (refreshError) {
+            sessionInvalidated = refreshError.code === "AUTHENTICATION_REQUIRED";
+          }
+          return response;
+        },
+      });
+      if (restoreResult === "success") {
+        if (sessionInvalidated) loginView();
+        else await backupRecoveryView();
       }
     });
   }

@@ -121,17 +121,25 @@ final class ApplicationBackupManager
         $manifest = $this->verifyArchive($archivePath, true);
         $changed = [];
         $unchanged = [];
+        $changes = [];
         foreach ($manifest['files'] as $file) {
             $logical = $file['path'];
             $current = $this->loadAndValidateSource($logical, $this->sources[$logical], true);
             $same = hash_equals(hash('sha256', $this->encodeJson($current)), $file['sha256']);
-            if ($same) $unchanged[] = $logical; else $changed[] = $logical;
+            if ($same) {
+                $unchanged[] = $logical;
+            } else {
+                $changed[] = $logical;
+                $changes[] = ['path' => $logical, 'type' => 'modified'];
+            }
         }
         return [
             'recoveryPointId' => $manifest['recoveryPointId'], 'createdAt' => $manifest['createdAt'],
             'applicationVersion' => $manifest['application']['version'], 'formatVersion' => $manifest['formatVersion'],
             'trigger' => $manifest['trigger'] ?? 'legacy', 'createdBy' => $manifest['createdBy'] ?? null,
-            'files' => array_column($manifest['files'], 'path'), 'changedFiles' => $changed, 'unchangedFiles' => $unchanged,
+            'files' => array_column($manifest['files'], 'path'), 'configurationFiles' => count($manifest['files']),
+            'changedFiles' => $changed, 'filesChanging' => count($changes), 'changes' => $changes,
+            'unchangedFiles' => $unchanged,
             'schemaCompatible' => true, 'encryptionKeyAvailable' => true,
             'verification' => 'valid', 'authenticity' => 'valid', 'warnings' => [],
         ];

@@ -83,7 +83,9 @@ try {
         'sqlParser' => ['running' => false, 'healthy' => false, 'status' => 'stopped', 'pid' => null, 'port' => null],
     ];
     $detail = $monitor->detailed($processes);
-    healthAssert(isset($detail['status'], $detail['checks']['database'], $detail['checks']['filesystem']) && $tests === 1, 'Detailed health schema or database test is invalid.');
+    healthAssert(isset($detail['status'], $detail['checks']['database'], $detail['checks']['filesystem'])
+        && !isset($detail['checks']['backup']) && $detail['status'] === 'healthy'
+        && $tests === 1, 'Detailed health schema, aggregation, or database test is invalid.');
     $monitor->detailed($processes);
     healthAssert($tests === 1, 'Database health cache did not prevent repeated expensive connectivity work.');
     $serialized = json_encode($detail, JSON_THROW_ON_ERROR);
@@ -129,12 +131,14 @@ try {
     $lowDisk = new ApplicationHealthMonitor([
         'configurationDirectory' => $configuration, 'databasePath' => $database,
         'runtimeDirectory' => $runtime, 'logDirectory' => $logs, 'sessionDirectory' => $sessions,
-        'backupDirectory' => $backups, 'databaseAvailable' => static fn (): bool => true,
+        'databaseAvailable' => static fn (): bool => true,
         'diskWarningBytes' => 100, 'diskCriticalBytes' => 10, 'diskSpace' => static fn (): int => 50,
     ]);
     healthAssert($lowDisk->detailed($processes)['checks']['filesystem']['status'] === 'degraded', 'Low disk space was not classified as warning.');
     @rmdir($backups);
-    healthAssert($monitor->detailed($processes)['checks']['backup']['category'] === 'unavailable', 'Backup directory capability failure was not detected.');
+    $withoutBackupDirectory = $monitor->detailed($processes);
+    healthAssert(!isset($withoutBackupDirectory['checks']['backup'])
+        && $withoutBackupDirectory['status'] === 'healthy', 'Backup availability still affects System Health.');
 
     $authFailure = new ApplicationHealthMonitor([
         'configurationDirectory' => $configuration, 'databasePath' => $database,

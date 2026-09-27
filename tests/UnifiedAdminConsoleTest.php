@@ -393,9 +393,25 @@ try {
         && !str_contains($adminJavaScript, 'webkitdirectory'),
         'Admin Backup & Recovery does not use native ZIP selection/download with explicit confirmation.');
     foreach (['.backup-summary-grid', '.backup-schedule-grid', '.backup-table-wrap', '.recovery-point-id',
-        '.restore-file-row', 'dialog.backup-dialog'] as $backupStyle) {
+        '.recovery-points-scroll', '.backup-change-list', '.restore-file-row', 'dialog.backup-dialog'] as $backupStyle) {
         unifiedAdminAssert(str_contains($adminCss, $backupStyle), "Backup & Recovery CSS is missing {$backupStyle}.");
     }
+    unifiedAdminAssert(str_contains($adminJavaScript, 'No Recovery Points')
+        && str_contains($adminJavaScript, 'No verified application recovery points are currently available.')
+        && str_contains($adminJavaScript, 'tabindex="0" aria-label="Recovery points"')
+        && str_contains($adminCss, '--recovery-visible-rows: 10')
+        && str_contains($adminCss, 'position: sticky'), 'Recovery points do not provide a bounded, accessible scrolling table or empty state.');
+    foreach (['No configuration changes detected.', '["added", "modified", "deleted"]', 'backupChangeList(changes)',
+        'preview.configurationFiles', 'preview.filesChanging', 'preview.changes'] as $previewUi) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $previewUi), "Restore preview is missing {$previewUi} support.");
+    }
+    unifiedAdminAssert(strpos($adminJavaScript, 'doneValidating();') < strpos($adminJavaScript, 'if (!preview) return;'),
+        'Restore preview validation state is not cleared before the preview dialog opens.');
+    unifiedAdminAssert(!str_contains($adminJavaScript, '"encryption",\n      "backup",')
+        && !str_contains((string)file_get_contents(__DIR__ . '/../app/Health/ApplicationHealthMonitor.php'), "'backup' => \$this->backupHealth()"),
+        'Backup remains in the System Health response or UI aggregation.');
+    unifiedAdminAssert(str_contains((string)file_get_contents(__DIR__ . '/../app/Health/ApplicationHealthMonitor.php'), 'public function restoreSafety(): array'),
+        'Restore safety health validation was removed while separating Backup from System Health.');
     unifiedAdminAssert(!str_contains(strtolower($adminJavaScript), 'test saved configuration'), 'Removed saved database test remains in the Admin Console.');
     unifiedAdminAssert(!str_contains($adminJavaScript, 'Runtime access'), 'Database runtime lifecycle remains under Configuration.');
     unifiedAdminAssert(str_contains($adminJavaScript, 'data-database-runtime'), 'Database runtime lifecycle is missing from System Health.');

@@ -178,7 +178,9 @@ try {
     backupFailure(fn () => SafeZipArchive::create($backupParent . '/duplicate-too-large.zip', ['large.bin' => str_repeat('x', SafeZipArchive::MAX_ENTRY_BYTES + 1)]), 'Oversized ZIP entry was accepted.');
 
     $preview = $manager->preview($bundlePath);
-    backupAssert($preview['verification'] === 'valid' && $preview['authenticity'] === 'valid' && $preview['changedFiles'] === [], 'Restore preview is invalid.');
+    backupAssert($preview['verification'] === 'valid' && $preview['authenticity'] === 'valid'
+        && $preview['configurationFiles'] === 6 && $preview['filesChanging'] === 0
+        && $preview['changedFiles'] === [] && $preview['changes'] === [], 'Restore preview is invalid.');
     $restorePath = $backupParent . '/restore-stage';
     $restore = $manager->stageRestore($bundlePath, $restorePath);
     backupAssert($restore['ready'] && $restore['files'] === 6 && is_file($restorePath . '/signature.json'), 'ZIP restore staging failed.');
@@ -187,7 +189,14 @@ try {
     $changedAdmin = AdminConfigurationRepository::defaults();
     $changedAdmin['server']['adminPort'] = 8099;
     backupWriteFixture($runtimePath . '/admin.json', $changedAdmin);
-    backupAssert(in_array('config/admin.json', $manager->preview($bundlePath)['changedFiles'], true), 'Preview did not report changed configuration.');
+    $changedPreview = $manager->preview($bundlePath);
+    backupAssert($changedPreview['filesChanging'] === 1
+        && $changedPreview['changedFiles'] === ['config/admin.json']
+        && $changedPreview['changes'] === [['path' => 'config/admin.json', 'type' => 'modified']], 'Preview did not report exact changed configuration metadata.');
+    $previewMetadata = json_encode($changedPreview['changes'], JSON_THROW_ON_ERROR);
+    foreach (['fake-user-password', 'fake-api-secret', 'fake-database-password', $key, $signingContents] as $secret) {
+        backupAssert(!str_contains($previewMetadata, $secret), 'Restore preview change metadata exposed secret material.');
+    }
     $activated = $manager->activateRestore($bundlePath, static fn (): bool => true);
     backupAssert($activated['restored'] && JsonFileStore::load($runtimePath . '/admin.json')['server']['adminPort'] !== 8099, 'Atomic restore activation failed.');
     $changedAdmin['server']['adminPort'] = 8098;

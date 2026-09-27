@@ -18,7 +18,6 @@ final class ApplicationHealthMonitor
     private string $runtimeDirectory;
     private string $logDirectory;
     private string $sessionDirectory;
-    private ?string $backupDirectory;
     private string $databaseCachePath;
     private int $databaseCacheTtl;
     private int $diskWarningBytes;
@@ -40,9 +39,6 @@ final class ApplicationHealthMonitor
             $savePath = (string)end($parts);
         }
         $this->sessionDirectory = $savePath !== '' ? $savePath : sys_get_temp_dir();
-        $configuredBackup = $options['backupDirectory'] ?? getenv('GENERIC_BACKUP_DIR');
-        $this->backupDirectory = is_string($configuredBackup) && trim($configuredBackup) !== ''
-            ? rtrim(trim($configuredBackup), '/\\') : null;
         $this->databaseCachePath = $options['databaseCachePath']
             ?? $this->runtimeDirectory . '/health/database-health.json';
         $this->databaseCacheTtl = max(1, (int)($options['databaseCacheTtl'] ?? 15));
@@ -94,7 +90,6 @@ final class ApplicationHealthMonitor
             'logging' => $this->loggingHealth(),
             'sessions' => $this->sessionHealth(),
             'encryption' => $this->encryptionHealth(),
-            'backup' => $this->backupHealth(),
             'processes' => ['status' => $this->processAggregate($processes), 'services' => $processes],
         ];
         $statuses = array_column($checks, 'status');
@@ -277,14 +272,6 @@ final class ApplicationHealthMonitor
         $check = $this->directoryHealth($this->sessionDirectory, true);
         return ['status' => $check['status'], 'category' => $check['status'] === 'healthy'
             ? 'operational' : 'unavailable'];
-    }
-
-    private function backupHealth(): array
-    {
-        if ($this->backupDirectory === null) return ['status' => 'degraded', 'category' => 'not_configured'];
-        $check = $this->directoryHealth($this->backupDirectory, true);
-        return ['status' => $check['status'] === 'healthy' ? 'healthy' : 'degraded',
-            'category' => $check['status'] === 'healthy' ? 'capable' : 'unavailable'];
     }
 
     private function directoryHealth(string $path, bool $writable): array

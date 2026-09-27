@@ -30,8 +30,9 @@ Readiness validates the supported runtime configuration file set and versions,
 the writable runtime directory, the explicit database availability gate, and
 the ability to decrypt and validate database configuration. It deliberately
 does not open SQL connections. SQL Parser state is independent and cannot make
-the API unready. Logging and backup capability are diagnostic/degraded states,
-not readiness blockers.
+the API unready. Logging capability is a diagnostic/degraded state, not a
+readiness blocker. Backup scheduling and recovery-point status are reported
+only on Admin → Backup & Recovery and do not affect System Health.
 
 The database readiness categories are `database_available`,
 `database_disconnected`, `configuration_missing`, `configuration_invalid`, and
@@ -55,8 +56,6 @@ safe checks for:
 - fail-open logging capability;
 - PHP session-directory availability;
 - encryption-key presence and usability, without exposing key material;
-- optional `GENERIC_BACKUP_DIR` capability, without creating or verifying a
-  backup;
 - Admin/API/SQL Parser running, stopped, stale, crashed, or unresponsive state
   as determined by the existing process managers.
 
@@ -70,14 +69,15 @@ Server connection load.
 
 Directory checks are shallow: exists/readable/writable plus `disk_free_space`.
 They do not traverse files. Default warning and critical free-space thresholds
-are 1 GiB and 256 MiB; these classify diagnostics only. A missing logging or
-backup directory is degraded because audit logging is intentionally fail-open
-and backup execution is not part of request serving. A required runtime,
-configuration, session, or database dependency can be unhealthy.
+are 1 GiB and 256 MiB; these classify diagnostics only. A missing logging
+directory is degraded because audit logging is intentionally fail-open. A
+required runtime, configuration, session, or database dependency can be
+unhealthy.
 
-`GENERIC_BACKUP_DIR` means only that an operator-designated backup destination
-is configured and writable. It does not prove that a recent or verified backup
-exists. Backup verification remains an explicit operator operation.
+Removing backup scheduling from System Health does not affect restore safety.
+Every activation still runs `ApplicationHealthMonitor::restoreSafety()` after
+staging and validation; a failure triggers rollback to the previous
+configuration.
 
 ## Hosting layers
 
