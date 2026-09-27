@@ -35,9 +35,9 @@ $oldKey = getenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE);
 try {
     foreach ([$configuration, $runtime, $logs, $sessions, $backups] as $path) mkdir($path, 0700, true);
     healthWrite($configuration . '/auth.json', ['version' => 4, 'users' => []]);
-    healthWrite($configuration . '/installation.json', ['version' => 1, 'installationId' => 'fake-installation', 'initialized' => true]);
-    healthWrite($configuration . '/admin.json', ['version' => 5, 'server' => [], 'cors' => [], 'authentication' => [], 'runtime' => []]);
-    healthWrite($configuration . '/authorization.json', ['version' => 3, 'roles' => []]);
+    healthWrite($configuration . '/installation.json', ['version' => 1, 'installationId' => str_repeat('a', 64), 'initialized' => true]);
+    healthWrite($configuration . '/admin.json', RuntimeConfiguration::adminDefaults());
+    healthWrite($configuration . '/authorization.json', RuntimeConfiguration::authorizationDefaults());
     healthWrite($configuration . '/api-keys.json', ['version' => 3, 'keys' => []]);
     healthWrite($configuration . '/database-state.json', ['version' => 1, 'available' => true]);
     healthWrite($configuration . '/application-runtime-state.json', [
@@ -73,6 +73,9 @@ try {
     healthAssert($live['status'] === 'healthy' && $live['port'] === 8000, 'Liveness did not report a lightweight success response.');
     $ready = $monitor->readiness();
     healthAssert($ready['status'] === 'healthy' && array_keys($ready['checks']) === ['configuration', 'runtime', 'database'], 'Readiness schema or success state is invalid.');
+    $restoreSafety = $monitor->restoreSafety();
+    healthAssert($restoreSafety['healthy'] === true
+        && $restoreSafety['check'] === 'configuration_and_encryption', 'Valid schema-version 6 configuration failed restore safety validation.');
 
     $processes = [
         'adminConsole' => ['running' => true, 'healthy' => true, 'status' => 'running', 'pid' => 10, 'port' => 8090],
@@ -107,9 +110,13 @@ try {
 
     healthWrite($configuration . '/admin.json', ['version' => 999]);
     healthAssert($monitor->readiness()['checks']['configuration']['category'] === 'configuration_invalid', 'Invalid configuration schema was not detected.');
+    $invalidRestoreSafety = $monitor->restoreSafety();
+    healthAssert($invalidRestoreSafety['healthy'] === false
+        && $invalidRestoreSafety['check'] === 'configuration.admin.json'
+        && $invalidRestoreSafety['errorCode'] === 'CONFIGURATION_INVALID', 'Restore safety did not provide a safe configuration diagnostic.');
     @unlink($configuration . '/admin.json');
     healthAssert($monitor->readiness()['checks']['configuration']['category'] === 'configuration_missing', 'Missing configuration was not detected.');
-    healthWrite($configuration . '/admin.json', ['version' => 5, 'server' => [], 'cors' => [], 'authentication' => [], 'runtime' => []]);
+    healthWrite($configuration . '/admin.json', RuntimeConfiguration::adminDefaults());
 
     @rmdir($sessions);
     $sessionFailure = $monitor->detailed($processes);

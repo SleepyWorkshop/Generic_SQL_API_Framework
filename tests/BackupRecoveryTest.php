@@ -222,16 +222,31 @@ try {
     backupAssert($restoreResult['restored'] === true && $restoreResult['health'] === 'healthy', 'Confirmed Admin restore did not activate safely.');
     $missingUploadFailure = backupFailure(fn () => $service->restore(str_repeat('f', 48), true), 'Missing staged restore upload was accepted.');
     backupAssert($missingUploadFailure instanceof ApiRequestException && $missingUploadFailure->getErrorCode() === 'RESTORE_UPLOAD_UNAVAILABLE', 'Missing staged restore returned the wrong structured error.');
-    $failedRestoreService = new BackupRecoveryService($manager, $managedDirectory, new Logger($logDirectory), static fn (): bool => false, $operationalLogger, $scheduleProvider);
+    $beforeFailedRestore = AdminConfigurationRepository::defaults();
+    $beforeFailedRestore['server']['adminPort'] = 8097;
+    backupWriteFixture($runtimePath . '/admin.json', $beforeFailedRestore);
+    $failedRestoreService = new BackupRecoveryService($manager, $managedDirectory, new Logger($logDirectory), static fn (): array => [
+        'healthy' => false,
+        'check' => 'configuration.load',
+        'errorCode' => 'CONFIGURATION_INVALID',
+        'reason' => 'configuration_invalid',
+    ], $operationalLogger, $scheduleProvider);
     $failedPreview = $failedRestoreService->previewUpload('selected-backup.zip', $download['archive']);
     $healthFailure = backupFailure(fn () => $failedRestoreService->restore($failedPreview['uploadToken'], true), 'Post-restore health failure was reported as success.');
     backupAssert($healthFailure instanceof ApiRequestException && $healthFailure->getErrorCode() === 'RESTORE_FAILED', 'Post-restore health failure was not sanitized.');
+    backupAssert(JsonFileStore::load($runtimePath . '/admin.json')['server']['adminPort'] === 8097, 'Failed restore did not preserve the complete previous configuration.');
     $operationalRestoreLog = (string)file_get_contents($operationalDirectory . '/admin/' . date('Y-m-d') . '.txt');
     foreach (['admin.restore.preview.start', 'admin.restore.preview.success', 'admin.restore.confirm.submitted',
         'admin.restore.start', 'admin.restore.activation.start', 'admin.restore.activation.success',
         'admin.restore.activation.failed', 'admin.restore.health_check.start',
         'admin.restore.health_check.success', 'admin.restore.health_check.failed'] as $event) {
         backupAssert(str_contains($operationalRestoreLog, $event), "Restore operational event {$event} is missing.");
+    }
+    foreach (['Check: configuration.load', 'Error Code: CONFIGURATION_INVALID', 'Reason: configuration_invalid', 'Rollback: preserved'] as $diagnostic) {
+        backupAssert(str_contains($operationalRestoreLog, $diagnostic), "Restore diagnostic {$diagnostic} is missing.");
+    }
+    foreach (['fake-user-password', 'fake-api-secret', 'fake-database-password', $key, $signingContents] as $secret) {
+        backupAssert(!str_contains($operationalRestoreLog, $secret), 'Restore diagnostics exposed secret material.');
     }
 
     putenv('GENERIC_RUNTIME_CONFIG_DIR=' . $runtimePath);
@@ -315,6 +330,10 @@ try {
         'action' => 'admin.operational.event', 'event' => 'frontend.restore.confirmed',
         'page' => 'backup-recovery', 'operation' => 'restore',
     ])['event'] === 'frontend.restore.confirmed', 'Allowlisted restore frontend event was rejected.');
+    backupAssert($validator->validate([
+        'action' => 'admin.operational.event', 'event' => 'frontend.restore.completed',
+        'page' => 'backup-recovery', 'operation' => 'restore', 'requestId' => 'safe-request-id',
+    ])['event'] === 'frontend.restore.completed', 'Restore completion event was rejected.');
     backupFailure(fn () => $validator->validate([
         'action' => 'admin.operational.event', 'event' => 'frontend.unrestricted.payload',
     ]), 'Unrestricted frontend log event was accepted.');

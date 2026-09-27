@@ -368,15 +368,20 @@ try {
     foreach (['Automatic Backups', 'Enable scheduled backups', '>Hourly<', '>Daily<', '>Weekly<', '"Manual"', '"Scheduled"', '"Legacy"'] as $scheduleUi) {
         unifiedAdminAssert(str_contains($adminJavaScript, $scheduleUi), "Admin Backup & Recovery UI is missing {$scheduleUi}.");
     }
-    unifiedAdminAssert(
-        str_contains($adminJavaScript, 'const restoreButton = restoreEvent.currentTarget;')
-            && str_contains($adminJavaScript, 'setButtonBusy(restoreButton, "Restoring configuration...")')
-            && strpos($adminJavaScript, 'const restoreButton = restoreEvent.currentTarget;')
-                < strpos($adminJavaScript, 'await confirmAction(', strpos($adminJavaScript, 'const restoreButton = restoreEvent.currentTarget;')),
-        'Restore confirmation does not preserve the button reference across the asynchronous dialog.'
-    );
+    foreach (['Create Backup?', 'Backup Created', 'Disable Scheduled Backups?', 'Restore Preview',
+        'Continue to Restore', 'Restore Configuration?', 'Restoring Configuration…', 'Restore Completed',
+        'Restore Failed', 'Your session was invalidated'] as $dialogText) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $dialogText), "Backup workflow dialog is missing {$dialogText}.");
+    }
+    unifiedAdminAssert(str_contains($adminHtml, 'id="backup-dialog"')
+        && str_contains($adminJavaScript, 'function backupDialogChoice(')
+        && str_contains($adminJavaScript, 'function backupOperationDialog(')
+        && str_contains($adminJavaScript, 'backupDialog.dataset.busy = "true"')
+        && str_contains($adminJavaScript, 'event.key !== "Tab"')
+        && str_contains($adminJavaScript, 'event.preventDefault()'),
+        'Backup workflow dialog lacks reusable modal, duplicate-submit, focus-trap, or safe Escape handling.');
     foreach (['frontend.restore.confirm.opened', 'frontend.restore.confirmed', 'frontend.restore.request.started',
-        'frontend.restore.request.failed', 'frontend.restore.request.success'] as $event) {
+        'frontend.restore.request.failed', 'frontend.restore.completed'] as $event) {
         unifiedAdminAssert(str_contains($adminJavaScript, $event), "Admin restore flow is missing frontend operational event {$event}.");
     }
     unifiedAdminAssert(str_contains($adminHtml, 'data-route="backup-recovery"')
@@ -387,6 +392,10 @@ try {
         && str_contains($adminJavaScript, 'URL.createObjectURL')
         && !str_contains($adminJavaScript, 'webkitdirectory'),
         'Admin Backup & Recovery does not use native ZIP selection/download with explicit confirmation.');
+    foreach (['.backup-summary-grid', '.backup-schedule-grid', '.backup-table-wrap', '.recovery-point-id',
+        '.restore-file-row', 'dialog.backup-dialog'] as $backupStyle) {
+        unifiedAdminAssert(str_contains($adminCss, $backupStyle), "Backup & Recovery CSS is missing {$backupStyle}.");
+    }
     unifiedAdminAssert(!str_contains(strtolower($adminJavaScript), 'test saved configuration'), 'Removed saved database test remains in the Admin Console.');
     unifiedAdminAssert(!str_contains($adminJavaScript, 'Runtime access'), 'Database runtime lifecycle remains under Configuration.');
     unifiedAdminAssert(str_contains($adminJavaScript, 'data-database-runtime'), 'Database runtime lifecycle is missing from System Health.');

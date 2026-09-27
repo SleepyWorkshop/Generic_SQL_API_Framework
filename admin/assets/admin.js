@@ -11,6 +11,7 @@
     sidebarBackdrop = document.querySelector("#sidebar-backdrop");
   const confirmation = document.querySelector("#confirmation"),
     userDialog = document.querySelector("#user-dialog"),
+    backupDialog = document.querySelector("#backup-dialog"),
     sidebarVersion = document.querySelector("#sidebar-version");
   const applicationVersion = document.body.dataset.appVersion || "unknown",
     versionLabel = `v${applicationVersion}`;
@@ -166,6 +167,156 @@
         { once: true },
       ),
     );
+  }
+  function dialogDetails(details = []) {
+    return details.length
+      ? `<dl class="dialog-detail-list">${details
+          .map(
+            ([label, value]) =>
+              `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`,
+          )
+          .join("")}</dl>`
+      : "";
+  }
+  function backupDialogMarkup({
+    titleText,
+    description,
+    details = [],
+    confirmLabel = "Continue",
+    cancelLabel = "Cancel",
+    danger = false,
+    closeOnly = false,
+    error = false,
+  }) {
+    return `<div class="user-dialog__surface backup-dialog__surface">
+      <header class="user-dialog__header"><h2 id="backup-dialog-title">${escapeHtml(titleText)}</h2><button type="button" class="dialog-close" data-backup-dialog-close aria-label="Close">×</button></header>
+      <div class="user-dialog__body stack"><p id="backup-dialog-description" class="${error ? "dialog-error" : "help"}" ${error ? 'role="alert"' : ""}>${escapeHtml(description)}</p>${dialogDetails(details)}</div>
+      <footer class="dialog-actions user-dialog__footer">${closeOnly ? "" : `<button type="button" class="secondary" data-backup-dialog-cancel>${escapeHtml(cancelLabel)}</button>`}<button type="button" class="${danger ? "danger" : ""}" data-backup-dialog-confirm>${escapeHtml(confirmLabel)}</button></footer>
+    </div>`;
+  }
+  function prepareBackupDialog(markup, opener) {
+    const container = document.querySelector("#backup-dialog-content");
+    container.innerHTML = markup;
+    backupDialog.dataset.busy = "false";
+    backupDialog.returnValue = "";
+    document.body.classList.add("dialog-open");
+    const close = (value) => {
+      if (backupDialog.dataset.busy === "true") return;
+      backupDialog.returnValue = value;
+      backupDialog.close();
+    };
+    container
+      .querySelectorAll("[data-backup-dialog-close]")
+      .forEach((button) => button.addEventListener("click", () => close("cancel")));
+    container
+      .querySelector("[data-backup-dialog-cancel]")
+      ?.addEventListener("click", () => close("cancel"));
+    const preventBusyCancel = (event) => {
+        if (backupDialog.dataset.busy === "true") event.preventDefault();
+      },
+      trapFocus = (event) => {
+        if (event.key !== "Tab") return;
+        const focusable = [...container.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])")];
+        if (!focusable.length) return;
+        const first = focusable[0],
+          last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      };
+    backupDialog.addEventListener("cancel", preventBusyCancel);
+    backupDialog.addEventListener("keydown", trapFocus);
+    backupDialog.addEventListener(
+      "close",
+      () => {
+        backupDialog.removeEventListener("cancel", preventBusyCancel);
+        backupDialog.removeEventListener("keydown", trapFocus);
+        document.body.classList.remove("dialog-open");
+        opener?.focus();
+      },
+      { once: true },
+    );
+    backupDialog.showModal();
+    container.querySelector("[data-backup-dialog-confirm]")?.focus();
+    return { container, close };
+  }
+  function backupDialogChoice(options) {
+    const opener = document.activeElement,
+      dialog = prepareBackupDialog(backupDialogMarkup(options), opener),
+      confirm = dialog.container.querySelector("[data-backup-dialog-confirm]");
+    confirm.addEventListener("click", () => dialog.close("confirm"));
+    return new Promise((resolve) =>
+      backupDialog.addEventListener(
+        "close",
+        () => resolve(backupDialog.returnValue === "confirm"),
+        { once: true },
+      ),
+    );
+  }
+  async function backupOperationDialog(options) {
+    const opener = document.activeElement,
+      dialog = prepareBackupDialog(backupDialogMarkup(options), opener),
+      confirm = dialog.container.querySelector("[data-backup-dialog-confirm]"),
+      cancel = dialog.container.querySelector("[data-backup-dialog-cancel]"),
+      closeButton = dialog.container.querySelector("[data-backup-dialog-close]");
+    return new Promise((resolve) => {
+      confirm.addEventListener("click", async () => {
+        backupDialog.dataset.busy = "true";
+        cancel.disabled = true;
+        closeButton.disabled = true;
+        const done = setButtonBusy(confirm, options.loadingLabel);
+        try {
+          const result = await options.run();
+          backupDialog.dataset.busy = "false";
+          dialog.container.innerHTML = backupDialogMarkup({
+            titleText: options.successTitle,
+            description: options.successDescription(result),
+            details: options.successDetails(result),
+            confirmLabel: "Close",
+            closeOnly: true,
+          });
+          dialog.container
+            .querySelector("[data-backup-dialog-confirm]")
+            .addEventListener("click", () => dialog.close("success"));
+          dialog.container
+            .querySelector("[data-backup-dialog-close]")
+            .addEventListener("click", () => dialog.close("success"));
+          dialog.container.querySelector("[data-backup-dialog-confirm]").focus();
+        } catch (error) {
+          backupDialog.dataset.busy = "false";
+          dialog.container.innerHTML = backupDialogMarkup({
+            titleText: options.failureTitle,
+            description: options.failureDescription(error),
+            details: [
+              ["Error code", error.code || "REQUEST_FAILED"],
+              ["Request ID", error.requestId || "Unavailable"],
+            ],
+            confirmLabel: "Close",
+            closeOnly: true,
+            error: true,
+          });
+          dialog.container
+            .querySelector("[data-backup-dialog-confirm]")
+            .addEventListener("click", () => dialog.close("failure"));
+          dialog.container
+            .querySelector("[data-backup-dialog-close]")
+            .addEventListener("click", () => dialog.close("failure"));
+          dialog.container.querySelector("[data-backup-dialog-confirm]").focus();
+          options.onFailure?.(error);
+        } finally {
+          done();
+        }
+      });
+      backupDialog.addEventListener(
+        "close",
+        () => resolve(backupDialog.returnValue),
+        { once: true },
+      );
+    });
   }
   function preAuth(enabled) {
     document.body.classList.toggle("pre-auth", enabled);
@@ -1222,20 +1373,6 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function backupPreviewMarkup(preview) {
-    const list = (values) =>
-      values.length
-        ? `<ul>${values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>`
-        : "<p>None</p>";
-    return `<section class="section-card stack backup-preview" aria-live="polite">
-      <div><h2>Backup Verified</h2><p class="help">Integrity and authenticity checks passed. Selecting a file has not changed the application.</p></div>
-      <dl class="detail-list"><dt>Recovery point</dt><dd>${escapeHtml(preview.recoveryPointId)}</dd><dt>Created</dt><dd>${escapeHtml(preview.createdAt)}</dd><dt>Application version</dt><dd>${escapeHtml(preview.applicationVersion)}</dd><dt>Backup format</dt><dd>${escapeHtml(preview.formatVersion)}</dd><dt>Verification</dt><dd><span class="badge">Valid</span></dd><dt>Authenticity</dt><dd><span class="badge">Valid</span></dd><dt>Schema compatible</dt><dd>${preview.schemaCompatible ? "Yes" : "No"}</dd><dt>Encryption key available</dt><dd>${preview.encryptionKeyAvailable ? "Yes" : "No"}</dd></dl>
-      <div class="row"><div><h3>Files that will change</h3>${list(preview.changedFiles || [])}</div><div><h3>Files unchanged</h3>${list(preview.unchangedFiles || [])}</div></div>
-      <p class="warning">Restoring replaces the current application configuration. SQL Server data is not part of this recovery point.</p>
-      <div class="actions"><button type="button" class="danger" id="confirm-restore">Restore Configuration</button><button type="button" class="secondary" id="cancel-restore">Cancel</button></div>
-    </section>`;
-  }
-
   async function backupRecoveryView() {
     loading();
     const [historyResponse, scheduleResponse] = await Promise.all([
@@ -1253,70 +1390,95 @@
       lastAttempt = schedule.lastScheduledAttempt,
       lastBackup = schedule.lastBackup;
     title.textContent = "Backup & Recovery";
-    content.className = "panel stack";
-    content.innerHTML = `<section class="section-card stack"><div><h2>Application Configuration Backup</h2><p class="help">Create a signed ZIP recovery point. Application backups do not contain SQL Server data, encryption keys, sessions, runtime state, or plaintext secrets.</p></div><div><button id="create-backup">Create Backup</button></div></section>
-      <section class="section-card stack"><div><h2>Automatic Backups</h2><p class="help">The operating-system scheduler runs the existing backup CLI. Saving these settings does not create a Windows task, cron job, or background daemon.</p></div><form id="backup-schedule" class="form-grid"><label class="checkbox"><input name="enabled" type="checkbox" ${backupConfiguration.enabled ? "checked" : ""}> Enable scheduled backups</label><label>Frequency<select name="frequency"><option value="hourly" ${backupConfiguration.frequency === "hourly" ? "selected" : ""}>Hourly</option><option value="daily" ${backupConfiguration.frequency === "daily" ? "selected" : ""}>Daily</option><option value="weekly" ${backupConfiguration.frequency === "weekly" ? "selected" : ""}>Weekly</option></select></label><label>Time<input name="time" type="time" required value="${escapeHtml(backupConfiguration.time)}"></label><label>Retention<input name="retention" type="number" min="1" max="365" required value="${escapeHtml(backupConfiguration.retention)}"></label><div><button>Save Schedule</button></div></form><dl class="detail-list"><dt>Last backup</dt><dd>${lastBackup ? `${escapeHtml(lastBackup.createdAt)} — ${escapeHtml(lastBackup.type === "scheduled" ? "Scheduled" : lastBackup.type === "manual" ? "Manual" : "Legacy")} — ${escapeHtml(lastBackup.verification)}` : "None"}</dd><dt>Last scheduled attempt</dt><dd>${lastAttempt ? `${escapeHtml(lastAttempt.attemptedAt)} — ${escapeHtml(lastAttempt.status)}` : "None"}</dd><dt>Next configured run</dt><dd>${schedule.nextBackupAt ? escapeHtml(schedule.nextBackupAt) : "Disabled"}</dd></dl></section>
-      <section class="section-card stack"><div><h2>Verify Backup & Restore</h2><p class="help">Select an Application Backup ZIP using the native file picker. It will be uploaded, verified, and previewed before explicit confirmation is available.</p></div><div class="actions"><button type="button" class="secondary" id="select-restore-backup">Restore Backup</button><span class="help" id="selected-backup-name">No backup selected.</span></div><input id="restore-backup" type="file" accept=".zip,application/zip" hidden><div id="restore-preview"></div></section>
-      <section class="section-card stack"><div><h2>Recovery Points</h2><p class="help">Verified application configuration recovery points stored by this installation.</p></div>${
+    content.className = "panel stack backup-recovery-page";
+    const lastType = lastBackup
+        ? lastBackup.type === "scheduled"
+          ? "Scheduled"
+          : lastBackup.type === "manual"
+            ? "Manual"
+            : "Legacy"
+        : "None",
+      lastStatus = lastBackup ? lastBackup.verification : "Unavailable";
+    content.innerHTML = `<section class="backup-overview" aria-labelledby="backup-overview-title"><div class="backup-section-heading"><div><h2 id="backup-overview-title">Backup Overview</h2><p class="help">Signed application-configuration recovery points. SQL Server data and secret keys are excluded.</p></div><button id="create-backup" type="button">Create Backup</button></div><div class="backup-summary-grid"><article class="backup-summary"><span>Last backup</span><strong>${escapeHtml(lastBackup?.createdAt || "None")}</strong></article><article class="backup-summary"><span>Last scheduled attempt</span><strong>${escapeHtml(lastAttempt ? `${lastAttempt.attemptedAt} — ${lastAttempt.status}` : "None")}</strong></article><article class="backup-summary"><span>Next scheduled backup</span><strong>${escapeHtml(schedule.nextBackupAt || "Disabled")}</strong></article><article class="backup-summary"><span>Backup status</span><strong><span class="badge ${lastStatus === "valid" ? "verified" : "disabled"}">${escapeHtml(lastBackup ? `${lastType} · ${lastStatus}` : "No recovery point")}</span></strong></article></div></section>
+      <section class="section-card stack" aria-labelledby="automatic-backups-title"><div class="backup-section-heading"><div><h2 id="automatic-backups-title">Automatic Backups</h2><p class="help">The operating-system scheduler runs the backup CLI. Saving settings does not create an OS task or PHP daemon.</p></div></div><form id="backup-schedule" class="backup-schedule-grid"><label class="backup-switch-row"><span><strong>Enable scheduled backups</strong><small>Allow the scheduled CLI to create recovery points.</small></span><span class="switch"><input name="enabled" type="checkbox" ${backupConfiguration.enabled ? "checked" : ""}><span class="slider"></span></span></label><label>Frequency<select name="frequency"><option value="hourly" ${backupConfiguration.frequency === "hourly" ? "selected" : ""}>Hourly</option><option value="daily" ${backupConfiguration.frequency === "daily" ? "selected" : ""}>Daily</option><option value="weekly" ${backupConfiguration.frequency === "weekly" ? "selected" : ""}>Weekly</option></select></label><label>Time<input name="time" type="time" required value="${escapeHtml(backupConfiguration.time)}"></label><label>Retention<input name="retention" type="number" min="1" max="365" required value="${escapeHtml(backupConfiguration.retention)}"><small>Number of verified managed recovery points to retain.</small></label><div class="backup-form-action"><button>Save Schedule</button></div></form></section>
+      <section class="section-card stack" aria-labelledby="recovery-points-title"><div class="backup-section-heading"><div><h2 id="recovery-points-title">Recovery Points</h2><p class="help">Verified manual, scheduled, and legacy application backups.</p></div></div>${
         history.length
-          ? `<div class="table-wrap"><table><thead><tr><th>Created</th><th>Recovery Point</th><th>Type</th><th>Size</th><th>Version</th><th>Verification</th><th>Authenticity</th><th>Actions</th></tr></thead><tbody>${history
+          ? `<div class="table-wrap backup-table-wrap"><table class="backup-table"><thead><tr><th>Recovery Point</th><th>Date</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead><tbody>${history
               .map(
-                (point) =>
-                  `<tr><td>${escapeHtml(point.createdAt || "Unavailable")}</td><td>${escapeHtml(point.recoveryPointId || point.filename)}</td><td>${escapeHtml(point.type === "scheduled" ? "Scheduled" : point.type === "manual" ? "Manual" : "Legacy")}</td><td>${escapeHtml(point.size)} bytes</td><td>${escapeHtml(point.applicationVersion || "Unknown")}</td><td><span class="badge${point.verification === "valid" ? "" : " disabled"}">${escapeHtml(point.verification)}</span></td><td><span class="badge${point.authenticity === "valid" ? "" : " disabled"}">${escapeHtml(point.authenticity)}</span></td><td>${point.recoveryPointId ? `<button type="button" class="small secondary" data-download-backup="${escapeHtml(point.recoveryPointId)}">Download</button>` : "Unavailable"}</td></tr>`,
+                (point) => {
+                  const type = point.type === "scheduled" ? "Scheduled" : point.type === "manual" ? "Manual" : "Legacy",
+                    status = point.verification === "valid" && point.authenticity === "valid" ? "Verified" : "Failed";
+                  return `<tr><td class="recovery-point-id" title="${escapeHtml(point.recoveryPointId || point.filename)}">${escapeHtml(point.recoveryPointId || point.filename)}</td><td>${escapeHtml(point.createdAt || "Unavailable")}</td><td><span class="badge type-${type.toLowerCase()}">${type}</span></td><td><span class="badge ${status === "Verified" ? "verified" : "disabled"}">${status}</span></td><td>${point.recoveryPointId ? `<button type="button" class="small secondary" data-download-backup="${escapeHtml(point.recoveryPointId)}">Download</button>` : "Unavailable"}</td></tr>`;
+                },
               )
               .join("")}</tbody></table></div>`
           : '<div class="empty">No recovery points have been created.</div>'
-      }</section>`;
+      }</section>
+      <section class="section-card stack" aria-labelledby="restore-backup-title"><div class="backup-section-heading"><div><h2 id="restore-backup-title">Restore</h2><p class="help">Select a signed Application Backup ZIP. Preview validates it without changing configuration.</p></div></div><div class="restore-file-row"><button type="button" class="secondary" id="select-restore-backup">Select Recovery Point</button><span class="selected-file" id="selected-backup-name">No file selected.</span><button type="button" id="preview-restore" disabled>Preview Restore</button></div><input id="restore-backup" type="file" accept=".zip,application/zip" hidden></section>`;
 
     content.querySelector("#backup-schedule").addEventListener("submit", async (event) => {
       event.preventDefault();
       const values = new FormData(event.currentTarget),
         button = event.currentTarget.querySelector("button"),
-        done = setButtonBusy(button, "Saving…");
+        nextSchedule = {
+          enabled: values.get("enabled") === "on",
+          frequency: values.get("frequency"),
+          time: values.get("time"),
+          retention: Number(values.get("retention")),
+        };
+      if (backupConfiguration.enabled && !nextSchedule.enabled) {
+        const disable = await backupDialogChoice({
+          titleText: "Disable Scheduled Backups?",
+          description: "Scheduled backup execution will be disabled. Existing recovery points are not removed.",
+          confirmLabel: "Disable",
+          danger: true,
+        });
+        if (!disable) return;
+      }
+      const done = setButtonBusy(button, "Saving…");
       try {
         await call(
-          {
-            action: "admin.backup.schedule.save",
-            backup: {
-              enabled: values.get("enabled") === "on",
-              frequency: values.get("frequency"),
-              time: values.get("time"),
-              retention: Number(values.get("retention")),
-            },
-          },
+          { action: "admin.backup.schedule.save", backup: nextSchedule },
           true,
         );
-        notify("Backup schedule saved. Configure the matching operating-system scheduler.");
+        await backupDialogChoice({
+          titleText: "Backup Schedule Saved",
+          description: "Configure the matching operating-system scheduler to invoke the scheduled backup CLI.",
+          details: [["Frequency", nextSchedule.frequency], ["Time", nextSchedule.time], ["Retention", nextSchedule.retention]],
+          confirmLabel: "Close",
+          closeOnly: true,
+        });
         await backupRecoveryView();
       } catch (error) {
-        notify(error.message, true);
+        notify(visibleError(error, "Backup schedule could not be saved."), true);
       } finally {
         done();
       }
     });
 
-    content.querySelector("#create-backup").addEventListener("click", async (event) => {
-      const done = setButtonBusy(event.currentTarget, "Creating and verifying…");
-      try {
-        const created = row(await call({ action: "admin.backup.create" }, true));
-        const download = row(
-          await call(
-            { action: "admin.backup.download", recoveryPointId: created.recoveryPointId },
-            true,
-          ),
-        );
-        downloadArchive(download);
-        notify("Backup verified and prepared for download.");
-        await backupRecoveryView();
-      } catch (error) {
-        notify(error.message, true);
-      } finally {
-        done();
-      }
+    content.querySelector("#create-backup").addEventListener("click", async () => {
+      const result = await backupOperationDialog({
+        titleText: "Create Backup?",
+        description: "This will create a new recovery point using the current application configuration. It will be signed and verified before it is made available.",
+        confirmLabel: "Create Backup",
+        loadingLabel: "Creating Backup…",
+        successTitle: "Backup Created",
+        successDescription: () => "The recovery point was created, verified, and prepared for download.",
+        successDetails: (created) => [["Recovery Point", created.recoveryPointId], ["Type", "Manual"], ["Status", "Verified"]],
+        failureTitle: "Backup Failed",
+        failureDescription: (error) => visibleError(error, "The recovery point could not be created."),
+        run: async () => {
+          const created = row(await call({ action: "admin.backup.create" }, true)),
+            download = row(await call({ action: "admin.backup.download", recoveryPointId: created.recoveryPointId }, true));
+          downloadArchive(download);
+          return created;
+        },
+      });
+      if (result === "success") await backupRecoveryView();
     });
     content.querySelectorAll("[data-download-backup]").forEach((button) =>
       button.addEventListener("click", async () => {
-        const done = setButtonBusy(button, "Preparing…");
+        const done = setButtonBusy(button, "Downloading…");
         try {
           downloadArchive(
             row(
@@ -1330,22 +1492,26 @@
             ),
           );
         } catch (error) {
-          notify(error.message, true);
+          notify(visibleError(error, "The recovery point could not be downloaded."), true);
         } finally {
           done();
         }
       }),
     );
-    const restoreInput = content.querySelector("#restore-backup");
+    const restoreInput = content.querySelector("#restore-backup"),
+      previewButton = content.querySelector("#preview-restore");
     content
       .querySelector("#select-restore-backup")
       .addEventListener("click", () => restoreInput.click());
-    restoreInput.addEventListener("change", async (event) => {
-      const file = event.currentTarget.files && event.currentTarget.files[0],
-        target = content.querySelector("#restore-preview");
+    restoreInput.addEventListener("change", (event) => {
+      const file = event.currentTarget.files && event.currentTarget.files[0];
+      content.querySelector("#selected-backup-name").textContent = file ? file.name : "No file selected.";
+      previewButton.disabled = !file;
+    });
+    previewButton.addEventListener("click", async () => {
+      const file = restoreInput.files && restoreInput.files[0];
       if (!file) return;
-      content.querySelector("#selected-backup-name").textContent = file.name;
-      target.innerHTML = '<p><span class="spinner"></span> Uploading and verifying backup…</p>';
+      const done = setButtonBusy(previewButton, "Validating…");
       try {
         const preview = row(
           await call(
@@ -1357,17 +1523,46 @@
             true,
           ),
         );
-        target.innerHTML = backupPreviewMarkup(preview);
-        target.querySelector("#cancel-restore").addEventListener("click", () => {
-          target.innerHTML = "";
-          event.currentTarget.value = "";
+        const continueRestore = await backupDialogChoice({
+          titleText: "Restore Preview",
+          description: "Integrity, authenticity, schema, and encryption-key checks passed. No configuration has been changed.",
+          details: [
+            ["Recovery Point", preview.recoveryPointId],
+            ["Created", preview.createdAt],
+            ["Type", preview.trigger === "scheduled" ? "Scheduled" : preview.trigger === "manual" ? "Manual" : "Legacy"],
+            ["Configuration files", String((preview.files || []).length)],
+            ["Files changing", String((preview.changedFiles || []).length)],
+            ["Warnings", (preview.warnings || []).length ? preview.warnings.join(", ") : "None"],
+          ],
+          confirmLabel: "Continue to Restore",
         });
-        target.querySelector("#confirm-restore").addEventListener("click", async (restoreEvent) => {
-          const restoreButton = restoreEvent.currentTarget;
-          void reportFrontendEvent("frontend.restore.confirm.opened", { operation: "restore" });
-          if (!(await confirmAction("Restore this verified recovery point? The current application configuration will be replaced.", "Restore Configuration"))) return;
-          const done = setButtonBusy(restoreButton, "Restoring configuration...");
-          try {
+        if (!continueRestore) return;
+        void reportFrontendEvent("frontend.restore.confirm.opened", { operation: "restore" });
+        let sessionInvalidated = false;
+        const restoreResult = await backupOperationDialog({
+          titleText: "Restore Configuration?",
+          description: "This will replace the current application configuration. The previous configuration is preserved for rollback if activation or its health check fails. Active sessions may be affected.",
+          details: [["Recovery Point", preview.recoveryPointId]],
+          confirmLabel: "Restore Configuration",
+          loadingLabel: "Restoring Configuration…",
+          danger: true,
+          successTitle: "Restore Completed",
+          successDescription: () => sessionInvalidated
+            ? "The configuration was restored successfully. Your session was invalidated; please sign in again."
+            : "The configuration was restored successfully and passed the activation health check.",
+          successDetails: () => [["Recovery Point", preview.recoveryPointId], ["Status", "Restored Successfully"]],
+          failureTitle: "Restore Failed",
+          failureDescription: (error) => error.code === "RESTORE_ROLLBACK_FAILED"
+            ? "The restore failed and automatic rollback was incomplete. Contact an administrator and use the request ID for investigation."
+            : "The restore was not activated. The previous configuration was preserved.",
+          onFailure: (error) => {
+            void reportFrontendEvent("frontend.restore.request.failed", {
+              operation: "restore",
+              errorCode: error.code || "REQUEST_FAILED",
+              requestId: error.requestId,
+            });
+          },
+          run: async () => {
             void reportFrontendEvent("frontend.restore.confirmed", { operation: "restore" });
             void reportFrontendEvent("frontend.restore.request.started", { operation: "restore" });
             const response = await call(
@@ -1378,48 +1573,36 @@
               },
               true,
             );
-            void reportFrontendEvent("frontend.restore.request.success", {
+            void reportFrontendEvent("frontend.restore.completed", {
               operation: "restore",
               requestId: response.meta && response.meta.requestId,
             });
-            done();
-            notify("Restore completed successfully.");
             try {
               const session = row(await call({ action: "auth.session" }));
-              if (
-                session.authenticated &&
-                session.user &&
-                session.user.backendRole === "system-administrator"
-              ) {
-                currentUser = session.user;
-                await backupRecoveryView();
-              } else {
-                loginView();
-                notify("Restore completed successfully. Sign in again to continue.");
-              }
+              sessionInvalidated = !session.authenticated || !session.user
+                || session.user.backendRole !== "system-administrator";
+              if (!sessionInvalidated) currentUser = session.user;
             } catch (refreshError) {
-              if (refreshError.code === "AUTHENTICATION_REQUIRED") {
-                loginView();
-                notify("Restore completed successfully. Sign in again to continue.");
-              } else {
-                notify("Restore completed successfully. Refresh the Admin Console to reload its state.");
-              }
+              sessionInvalidated = refreshError.code === "AUTHENTICATION_REQUIRED";
             }
-            return;
-          } catch (error) {
-            void reportFrontendEvent("frontend.restore.request.failed", {
-              operation: "restore",
-              errorCode: error.code || "REQUEST_FAILED",
-              requestId: error.requestId,
-            });
-            notify(visibleError(error, "Restore failed. The configuration was not activated."), true);
-            done();
-            if (error.code === "AUTHENTICATION_REQUIRED") loginView();
-          }
+            return response;
+          },
         });
+        if (restoreResult === "success") {
+          if (sessionInvalidated) loginView();
+          else await backupRecoveryView();
+        }
       } catch (error) {
-        target.innerHTML = '<p class="dialog-error" role="alert">Invalid Application Backup</p>';
-        notify(error.message, true);
+        await backupDialogChoice({
+          titleText: "Restore Preview Failed",
+          description: visibleError(error, "The selected Application Backup is invalid or unavailable."),
+          details: [["Error code", error.code || "BACKUP_VERIFICATION_FAILED"], ["Request ID", error.requestId || "Unavailable"]],
+          confirmLabel: "Close",
+          closeOnly: true,
+          error: true,
+        });
+      } finally {
+        done();
       }
     });
   }

@@ -4,6 +4,11 @@ require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
 require_once __DIR__ . '/../Runtime/DatabaseAvailabilityManager.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
+require_once __DIR__ . '/../Repositories/AuthRepository.php';
+require_once __DIR__ . '/../Repositories/InstallationRepository.php';
+require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
+require_once __DIR__ . '/../Repositories/AuthorizationRepository.php';
+require_once __DIR__ . '/../Repositories/ApiKeyRepository.php';
 
 final class ApplicationHealthMonitor
 {
@@ -98,37 +103,69 @@ final class ApplicationHealthMonitor
         return ['status' => $status, 'checks' => $checks];
     }
 
+    public function restoreSafety(): array
+    {
+        $configuration = $this->configurationHealth();
+        if ($configuration['status'] !== 'healthy') {
+            return [
+                'healthy' => false,
+                'check' => 'configuration.' . ($configuration['component'] ?? 'unknown'),
+                'errorCode' => $configuration['category'] === 'configuration_missing'
+                    ? 'CONFIGURATION_MISSING' : 'CONFIGURATION_INVALID',
+                'reason' => $configuration['category'],
+            ];
+        }
+        $encryption = $this->encryptionHealth();
+        if ($encryption['status'] !== 'healthy') {
+            return [
+                'healthy' => false,
+                'check' => 'database.encryption',
+                'errorCode' => $encryption['category'] === 'missing'
+                    ? 'ENCRYPTION_KEY_MISSING' : 'DATABASE_CONFIG_INVALID',
+                'reason' => $encryption['category'],
+            ];
+        }
+        return [
+            'healthy' => true,
+            'check' => 'configuration_and_encryption',
+            'errorCode' => null,
+            'reason' => 'healthy',
+        ];
+    }
+
     private function configurationHealth(): array
     {
-        $versions = ['auth.json' => 4, 'installation.json' => 1, 'admin.json' => 5,
-            'authorization.json' => 3, 'api-keys.json' => 3, 'database-state.json' => 1,
-            'application-runtime-state.json' => 1];
-        foreach ($versions as $file => $version) {
+        $files = ['auth.json', 'installation.json', 'admin.json', 'authorization.json',
+            'api-keys.json', 'database-state.json', 'application-runtime-state.json'];
+        foreach ($files as $file) {
             $path = $this->configurationDirectory . DIRECTORY_SEPARATOR . $file;
-            if (!is_file($path)) return ['status' => 'unhealthy', 'category' => 'configuration_missing'];
+            if (!is_file($path)) return ['status' => 'unhealthy', 'category' => 'configuration_missing', 'component' => $file];
             try { $value = JsonFileStore::load($path); }
-            catch (Throwable $exception) { return ['status' => 'unhealthy', 'category' => 'configuration_invalid']; }
-            if (($value['version'] ?? null) !== $version || !$this->configurationShapeIsValid($file, $value)) {
-                return ['status' => 'unhealthy', 'category' => 'configuration_invalid'];
+            catch (Throwable $exception) { return ['status' => 'unhealthy', 'category' => 'configuration_invalid', 'component' => $file]; }
+            if (!$this->configurationShapeIsValid($file, $path, $value)) {
+                return ['status' => 'unhealthy', 'category' => 'configuration_invalid', 'component' => $file];
             }
         }
         return ['status' => 'healthy', 'category' => 'configuration_valid'];
     }
 
-    private function configurationShapeIsValid(string $file, array $value): bool
+    private function configurationShapeIsValid(string $file, string $path, array $value): bool
     {
-        return match ($file) {
-            'auth.json' => is_array($value['users'] ?? null),
-            'installation.json' => is_string($value['installationId'] ?? null)
-                && is_bool($value['initialized'] ?? null),
-            'admin.json' => is_array($value['server'] ?? null) && is_array($value['cors'] ?? null)
-                && is_array($value['authentication'] ?? null) && is_array($value['runtime'] ?? null),
-            'authorization.json' => is_array($value['roles'] ?? null),
-            'api-keys.json' => is_array($value['keys'] ?? null),
-            'database-state.json' => is_bool($value['available'] ?? null),
-            'application-runtime-state.json' => $this->applicationRuntimeShapeIsValid($value),
-            default => false,
-        };
+        try {
+            match ($file) {
+                'auth.json' => (new AuthRepository($path))->validate($value),
+                'installation.json' => (new InstallationRepository($path))->validate($value),
+                'admin.json' => (new AdminConfigurationRepository($path))->validate($value),
+                'authorization.json' => (new AuthorizationRepository($path))->validate($value),
+                'api-keys.json' => (new ApiKeyRepository($path))->validate($value),
+                'database-state.json' => ($value['version'] ?? null) === 1
+                    && is_bool($value['available'] ?? null) ? null : throw new RuntimeException('invalid'),
+                'application-runtime-state.json' => ($value['version'] ?? null) === 1
+                    && $this->applicationRuntimeShapeIsValid($value) ? null : throw new RuntimeException('invalid'),
+                default => throw new RuntimeException('invalid'),
+            };
+            return true;
+        } catch (Throwable $exception) { return false; }
     }
 
     private function applicationRuntimeShapeIsValid(array $value): bool

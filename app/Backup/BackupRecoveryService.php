@@ -28,11 +28,7 @@ final class BackupRecoveryService
         $this->logger = $logger ?? new Logger();
         $this->operationalLogger = $operationalLogger ?? new OperationalLogger();
         $this->scheduleProvider = $scheduleProvider ?? static fn (): array => (new AdminConfigurationRepository())->load()['backup'];
-        $this->healthCheck = $healthCheck ?? function (): bool {
-            $checks = (new ApplicationHealthMonitor())->detailed([])['checks'] ?? [];
-            return ($checks['configuration']['status'] ?? null) === 'healthy'
-                && ($checks['encryption']['status'] ?? null) === 'healthy';
-        };
+        $this->healthCheck = $healthCheck ?? static fn (): array => (new ApplicationHealthMonitor())->restoreSafety();
     }
 
     public function create(string $trigger = 'manual', string $createdBy = 'user'): array
@@ -180,18 +176,42 @@ final class BackupRecoveryService
             $healthCheck = function () use ($recoveryPointId): bool {
                 $this->operationalLogger->info('admin', 'admin.restore.health_check.start', ['recovery_point' => $recoveryPointId]);
                 try {
-                    $healthy = ($this->healthCheck)() === true;
+                    $diagnostic = $this->healthDiagnostic(($this->healthCheck)());
+                    $healthy = $diagnostic['healthy'];
                     $logMethod = $healthy ? 'info' : 'error';
                     $this->operationalLogger->{$logMethod}(
                         'admin',
                         $healthy ? 'admin.restore.health_check.success' : 'admin.restore.health_check.failed',
-                        ['recovery_point' => $recoveryPointId]
+                        [
+                            'recovery_point' => $recoveryPointId,
+                            'check' => $diagnostic['check'],
+                            'error_code' => $diagnostic['errorCode'],
+                            'reason' => $diagnostic['reason'],
+                        ]
                     );
+                    if (!$healthy) {
+                        $this->logger->audit('restore.health_check_failed', 'failure', 'ERROR', [
+                            'component' => 'backup',
+                            'recoveryPointId' => $recoveryPointId,
+                            'operation' => 'restore',
+                            'errorCode' => $diagnostic['errorCode'],
+                            'reason' => $diagnostic['reason'],
+                        ]);
+                    }
                     return $healthy;
                 } catch (Throwable $exception) {
                     $this->operationalLogger->error('admin', 'admin.restore.health_check.failed', [
                         'recovery_point' => $recoveryPointId,
-                        'error_code' => 'HEALTH_CHECK_FAILED',
+                        'check' => 'health_check.execution',
+                        'error_code' => 'HEALTH_CHECK_EXCEPTION',
+                        'reason' => 'health_check_exception',
+                    ]);
+                    $this->logger->audit('restore.health_check_failed', 'failure', 'ERROR', [
+                        'component' => 'backup',
+                        'recoveryPointId' => $recoveryPointId,
+                        'operation' => 'restore',
+                        'errorCode' => 'HEALTH_CHECK_EXCEPTION',
+                        'reason' => 'health_check_exception',
                     ]);
                     throw $exception;
                 }
@@ -202,14 +222,49 @@ final class BackupRecoveryService
             return $result;
         } catch (ApiRequestException $exception) { throw $exception;
         } catch (Throwable $exception) {
+            $rollbackFailed = str_contains($exception->getMessage(), 'automatic recovery was incomplete');
+            $errorCode = $rollbackFailed ? 'RESTORE_ROLLBACK_FAILED' : 'CONFIG_ACTIVATION_FAILED';
             $this->operationalLogger->error('admin', 'admin.restore.activation.failed', [
                 'recovery_point' => $recoveryPointId,
-                'error_code' => 'CONFIG_ACTIVATION_FAILED',
+                'error_code' => $errorCode,
+                'rollback' => $rollbackFailed ? 'incomplete' : 'preserved',
             ]);
-            $this->logger->audit('restore.activation_failed', 'failure', 'ERROR', ['component' => 'backup', 'recoveryPointId' => $recoveryPointId, 'operation' => 'restore', 'reason' => 'activation_failed']);
-            $this->logger->audit('restore.failed', 'failure', 'ERROR', ['component' => 'backup', 'recoveryPointId' => $recoveryPointId, 'operation' => 'restore', 'reason' => 'activation_failed']);
-            throw new ApiRequestException('Configuration restore failed and the previous configuration was preserved.', 'RESTORE_FAILED', [], 500);
+            $reason = $rollbackFailed ? 'rollback_failed' : 'activation_failed';
+            $this->logger->audit('restore.activation_failed', 'failure', 'ERROR', ['component' => 'backup', 'recoveryPointId' => $recoveryPointId, 'operation' => 'restore', 'reason' => $reason, 'errorCode' => $errorCode]);
+            $this->logger->audit('restore.failed', 'failure', 'ERROR', ['component' => 'backup', 'recoveryPointId' => $recoveryPointId, 'operation' => 'restore', 'reason' => $reason, 'errorCode' => $errorCode]);
+            throw new ApiRequestException(
+                $rollbackFailed
+                    ? 'Configuration restore failed and automatic rollback was incomplete.'
+                    : 'Configuration restore failed and the previous configuration was preserved.',
+                $rollbackFailed ? 'RESTORE_ROLLBACK_FAILED' : 'RESTORE_FAILED',
+                [],
+                500
+            );
         } finally { @unlink($path); }
+    }
+
+    private function healthDiagnostic(mixed $result): array
+    {
+        if (is_bool($result)) {
+            return [
+                'healthy' => $result,
+                'check' => 'configured.health_check',
+                'errorCode' => $result ? null : 'HEALTH_CHECK_FAILED',
+                'reason' => $result ? 'healthy' : 'reported_unhealthy',
+            ];
+        }
+        if (!is_array($result)
+            || !array_key_exists('healthy', $result)
+            || !array_key_exists('check', $result)
+            || !array_key_exists('errorCode', $result)
+            || !array_key_exists('reason', $result)
+            || !is_bool($result['healthy'] ?? null)
+            || !is_string($result['check'] ?? null)
+            || ($result['errorCode'] !== null && !is_string($result['errorCode']))
+            || !is_string($result['reason'] ?? null)) {
+            throw new RuntimeException('Restore health check returned an invalid result.');
+        }
+        return $result;
     }
 
     private function findRecoveryPoint(string $id): string

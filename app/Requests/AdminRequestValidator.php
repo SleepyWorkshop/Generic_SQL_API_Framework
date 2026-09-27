@@ -118,7 +118,7 @@ final class AdminRequestValidator
             $allowed = [
                 'frontend.restore.confirm.opened', 'frontend.restore.confirmed',
                 'frontend.restore.request.started', 'frontend.restore.request.failed',
-                'frontend.restore.request.success', 'frontend.api.request.failed',
+                'frontend.restore.request.success', 'frontend.restore.completed', 'frontend.api.request.failed',
                 'frontend.javascript.error',
             ];
             if (!is_string($event) || !in_array($event, $allowed, true)) {

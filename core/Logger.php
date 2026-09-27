@@ -244,6 +244,7 @@ class Logger
             'identityHash', 'pid', 'port', 'durationMs',
             'recoveryPointId', 'operation', 'verification', 'authenticity',
             'trigger', 'createdBy', 'status',
+            'errorCode', 'check',
         ];
         $safe = [];
         foreach ($allowed as $field) {
