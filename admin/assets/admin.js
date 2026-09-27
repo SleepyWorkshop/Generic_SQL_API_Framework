@@ -1238,22 +1238,62 @@
 
   async function backupRecoveryView() {
     loading();
-    const history = row(await call({ action: "admin.backup.history" }))
-        .recoveryPoints || [];
+    const [historyResponse, scheduleResponse] = await Promise.all([
+        call({ action: "admin.backup.history" }),
+        call({ action: "admin.backup.schedule" }),
+      ]),
+      history = row(historyResponse).recoveryPoints || [],
+      schedule = row(scheduleResponse),
+      backupConfiguration = schedule.configuration || {
+        enabled: false,
+        frequency: "daily",
+        time: "02:00",
+        retention: 30,
+      },
+      lastAttempt = schedule.lastScheduledAttempt,
+      lastBackup = schedule.lastBackup;
     title.textContent = "Backup & Recovery";
     content.className = "panel stack";
     content.innerHTML = `<section class="section-card stack"><div><h2>Application Configuration Backup</h2><p class="help">Create a signed ZIP recovery point. Application backups do not contain SQL Server data, encryption keys, sessions, runtime state, or plaintext secrets.</p></div><div><button id="create-backup">Create Backup</button></div></section>
+      <section class="section-card stack"><div><h2>Automatic Backups</h2><p class="help">The operating-system scheduler runs the existing backup CLI. Saving these settings does not create a Windows task, cron job, or background daemon.</p></div><form id="backup-schedule" class="form-grid"><label class="checkbox"><input name="enabled" type="checkbox" ${backupConfiguration.enabled ? "checked" : ""}> Enable scheduled backups</label><label>Frequency<select name="frequency"><option value="hourly" ${backupConfiguration.frequency === "hourly" ? "selected" : ""}>Hourly</option><option value="daily" ${backupConfiguration.frequency === "daily" ? "selected" : ""}>Daily</option><option value="weekly" ${backupConfiguration.frequency === "weekly" ? "selected" : ""}>Weekly</option></select></label><label>Time<input name="time" type="time" required value="${escapeHtml(backupConfiguration.time)}"></label><label>Retention<input name="retention" type="number" min="1" max="365" required value="${escapeHtml(backupConfiguration.retention)}"></label><div><button>Save Schedule</button></div></form><dl class="detail-list"><dt>Last backup</dt><dd>${lastBackup ? `${escapeHtml(lastBackup.createdAt)} — ${escapeHtml(lastBackup.type === "scheduled" ? "Scheduled" : lastBackup.type === "manual" ? "Manual" : "Legacy")} — ${escapeHtml(lastBackup.verification)}` : "None"}</dd><dt>Last scheduled attempt</dt><dd>${lastAttempt ? `${escapeHtml(lastAttempt.attemptedAt)} — ${escapeHtml(lastAttempt.status)}` : "None"}</dd><dt>Next configured run</dt><dd>${schedule.nextBackupAt ? escapeHtml(schedule.nextBackupAt) : "Disabled"}</dd></dl></section>
       <section class="section-card stack"><div><h2>Verify Backup & Restore</h2><p class="help">Select an Application Backup ZIP using the native file picker. It will be uploaded, verified, and previewed before explicit confirmation is available.</p></div><div class="actions"><button type="button" class="secondary" id="select-restore-backup">Restore Backup</button><span class="help" id="selected-backup-name">No backup selected.</span></div><input id="restore-backup" type="file" accept=".zip,application/zip" hidden><div id="restore-preview"></div></section>
       <section class="section-card stack"><div><h2>Recovery Points</h2><p class="help">Verified application configuration recovery points stored by this installation.</p></div>${
         history.length
-          ? `<div class="table-wrap"><table><thead><tr><th>Created</th><th>Recovery Point</th><th>Size</th><th>Version</th><th>Verification</th><th>Authenticity</th><th>Actions</th></tr></thead><tbody>${history
+          ? `<div class="table-wrap"><table><thead><tr><th>Created</th><th>Recovery Point</th><th>Type</th><th>Size</th><th>Version</th><th>Verification</th><th>Authenticity</th><th>Actions</th></tr></thead><tbody>${history
               .map(
                 (point) =>
-                  `<tr><td>${escapeHtml(point.createdAt || "Unavailable")}</td><td>${escapeHtml(point.recoveryPointId || point.filename)}</td><td>${escapeHtml(point.size)} bytes</td><td>${escapeHtml(point.applicationVersion || "Unknown")}</td><td><span class="badge${point.verification === "valid" ? "" : " disabled"}">${escapeHtml(point.verification)}</span></td><td><span class="badge${point.authenticity === "valid" ? "" : " disabled"}">${escapeHtml(point.authenticity)}</span></td><td>${point.recoveryPointId ? `<button type="button" class="small secondary" data-download-backup="${escapeHtml(point.recoveryPointId)}">Download</button>` : "Unavailable"}</td></tr>`,
+                  `<tr><td>${escapeHtml(point.createdAt || "Unavailable")}</td><td>${escapeHtml(point.recoveryPointId || point.filename)}</td><td>${escapeHtml(point.type === "scheduled" ? "Scheduled" : point.type === "manual" ? "Manual" : "Legacy")}</td><td>${escapeHtml(point.size)} bytes</td><td>${escapeHtml(point.applicationVersion || "Unknown")}</td><td><span class="badge${point.verification === "valid" ? "" : " disabled"}">${escapeHtml(point.verification)}</span></td><td><span class="badge${point.authenticity === "valid" ? "" : " disabled"}">${escapeHtml(point.authenticity)}</span></td><td>${point.recoveryPointId ? `<button type="button" class="small secondary" data-download-backup="${escapeHtml(point.recoveryPointId)}">Download</button>` : "Unavailable"}</td></tr>`,
               )
               .join("")}</tbody></table></div>`
           : '<div class="empty">No recovery points have been created.</div>'
       }</section>`;
+
+    content.querySelector("#backup-schedule").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const values = new FormData(event.currentTarget),
+        button = event.currentTarget.querySelector("button"),
+        done = setButtonBusy(button, "Saving…");
+      try {
+        await call(
+          {
+            action: "admin.backup.schedule.save",
+            backup: {
+              enabled: values.get("enabled") === "on",
+              frequency: values.get("frequency"),
+              time: values.get("time"),
+              retention: Number(values.get("retention")),
+            },
+          },
+          true,
+        );
+        notify("Backup schedule saved. Configure the matching operating-system scheduler.");
+        await backupRecoveryView();
+      } catch (error) {
+        notify(error.message, true);
+      } finally {
+        done();
+      }
+    });
 
     content.querySelector("#create-backup").addEventListener("click", async (event) => {
       const done = setButtonBusy(event.currentTarget, "Creating and verifying…");

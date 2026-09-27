@@ -56,7 +56,9 @@ locate php.exe and php.ini
 ```
 
 The script explicitly loads `runtime/windows/php/php.ini`, configures OPcache's
-file cache, and writes PHP errors to `logs/php_errors.log`. It attempts to connect
+file cache. After application bootstrap, supported PHP/runtime errors are routed
+to the context-specific operational `.txt` log. Startup failures before bootstrap
+remain visible through the console or hosting service error channel. It attempts to connect
 application database availability using the saved configuration. If configuration
 or connectivity is unavailable, it reports the failure, leaves database access
 disconnected, and still starts Admin so the settings can be repaired. The launcher generates a local key only when neither an environment
@@ -88,7 +90,7 @@ attempts to open a browser through `xdg-open` or WSL `cmd.exe`.
 
 ## Required deployment configuration
 
-Create `database/config/database.json` as described in [Database Configuration](Database-Configuration.md). SQL Server must be reachable and the PHP process identity or SQL credentials must have the needed permissions. For the recommended complete encrypted envelope (or a legacy encrypted password), expose the matching Base64-encoded 32-byte `GENERIC_SQL_API_ENCRYPTION_KEY` through the host's environment or secret manager to the PHP process; do not place the key in the JSON or launcher. The `logs/` directory must be writable; `Logger` creates it if absent and writes dated `YYYY-MM-DD.log` files containing successful and failed SQL execution details.
+Create `database/config/database.json` as described in [Database Configuration](Database-Configuration.md). SQL Server must be reachable and the PHP process identity or SQL credentials must have the needed permissions. For the recommended complete encrypted envelope (or a legacy encrypted password), expose the matching Base64-encoded 32-byte `GENERIC_SQL_API_ENCRYPTION_KEY` through the host's environment or secret manager to the PHP process; do not place the key in the JSON or launcher. The `logs/` directory must be writable; operational diagnostics use the dated `api`, `admin`, `database`, and `sqlparser` text files, while audit records use `audit/*.jsonl`.
 
 ## Production hosting
 
@@ -139,4 +141,4 @@ for password and encryption-key rotation procedures.
 - no SQL Parser port available: change the parser range, then start or restart the parser.
 - configured Admin port occupied: stop the conflicting service or update the Admin port and relaunch.
 - runtime configuration bootstrap failure: use the reported safe reason code. The launcher pins `GENERIC_RUNTIME_CONFIG_DIR` to its repository `config/` directory so stale inherited overrides cannot redirect startup.
-- query failures: inspect `logs/YYYY-MM-DD.log` by request ID, SQLSTATE, `errorCategory`, and `queryPhase`. Parameter values and credential material are intentionally omitted.
+- query failures: inspect `logs/database/YYYY-MM-DD.txt` by request ID, safe error category, and query phase. Parameter values and credential material are intentionally omitted.

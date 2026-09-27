@@ -126,7 +126,7 @@ final class ApiKeyService
                 }
             }
             unset($item);
-        }, false);
+        });
         return ['key' => $key, 'owner' => $owner];
     }
 

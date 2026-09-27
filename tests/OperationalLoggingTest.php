@@ -48,21 +48,48 @@ try {
         operationalAssert(!str_contains($adminLog, $secret), 'Operational log exposed secret material.');
     }
     operationalAssert(str_contains($adminLog, '[REDACTED]') && str_contains($adminLog, '[' . API_REQUEST_ID . ']'), 'Redaction or request correlation is missing.');
+    operationalAssert(str_contains($adminLog, 'Details:') && !str_starts_with(ltrim($adminLog), '{'), 'Operational log is not human-readable text.');
 
     putenv('GENERIC_LOG_DIR=' . $root . '/structured');
     (new Logger())->audit('operational.audit.separation', 'success', 'INFO', ['component' => 'test']);
     $auditPath = $root . '/structured/audit/' . date('Y-m-d') . '.jsonl';
     operationalAssert(is_file($auditPath), 'Structured audit log was not separated under logs/audit.');
     operationalAssert(str_contains((string)file_get_contents($auditPath), 'operational.audit.separation'), 'Separated audit record is missing.');
+    (new Logger())->write('centralized operational diagnostic');
+    (new Logger())->timing('centralized_timing', 12.5);
+    (new Logger())->error('SELECT * FROM Test WHERE Id = ?', [42], 'controlled database failure', 9.5);
+    operationalAssert(!is_file($root . '/structured/' . date('Y-m-d') . '.log')
+        && !is_file($root . '/structured/' . date('Y-m-d')), 'Default Logger created a root-level date log.');
 
     putenv('GENERIC_OPERATIONAL_LOG_DIR=' . $root);
     $_SERVER['REQUEST_METHOD'] = 'POST';
     (new LoggingMiddleware())->handle(['action' => 'admin.health']);
-    (new SqlParserRequestHandler())->handle('POST', '{"sql":"SELECT * FROM ItemMasterTable"}', 39);
+    (new SqlParserRequestHandler())->handle('POST', '{not-json', 9);
     $today = date('Y-m-d');
     operationalAssert(is_file($root . '/api/' . $today . '.txt'), 'API lifecycle log was not written.');
     operationalAssert(is_file($root . '/admin/' . $today . '.txt'), 'Admin lifecycle log was not written.');
     operationalAssert(is_file($root . '/sqlparser/' . $today . '.txt'), 'SQL Parser lifecycle log was not written.');
+    operationalAssert(str_contains((string)file_get_contents($root . '/sqlparser/' . $today . '.txt'), 'SQL parser request rejected'), 'Controlled SQL Parser failure was not logged.');
+
+    foreach ([['api', 'warning'], ['admin', 'exception'], ['sqlparser', 'fatal']] as [$subsystem, $mode]) {
+        $command = [PHP_BINARY];
+        if (php_ini_loaded_file() === false) $command[] = '-n';
+        array_push($command, __DIR__ . '/PhpErrorLoggingFixture.php', $root, $subsystem, $mode);
+        $process = proc_open($command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        operationalAssert(is_resource($process), "Unable to start controlled PHP {$mode} fixture.");
+        fclose($pipes[0]);
+        stream_get_contents($pipes[1]);
+        stream_get_contents($pipes[2]);
+        fclose($pipes[1]); fclose($pipes[2]);
+        $status = proc_close($process);
+        operationalAssert($mode === 'fatal' ? $status !== 0 : $status === 0, "Controlled PHP {$mode} fixture returned an unexpected status.");
+        $contents = (string)file_get_contents($root . '/' . $subsystem . '/' . $today . '.txt');
+        $needle = $mode === 'warning' ? 'PHP warning' : ($mode === 'exception' ? 'Uncaught exception' : 'PHP fatal error');
+        operationalAssert(substr_count($contents, $needle) === 1, "PHP {$mode} was not logged exactly once in {$subsystem}.");
+        operationalAssert(str_contains($contents, '[req_php_' . $subsystem . ']'), "PHP {$mode} lost its request ID.");
+    }
+    operationalAssert(!is_file($root . '/' . $today . '.log') && !is_file($root . '/' . $today)
+        && !is_file($root . '/php_errors.log'), 'PHP handling created a generic root log.');
 
     $workers = [];
     for ($worker = 0; $worker < 4; $worker++) {

@@ -16,7 +16,7 @@ The development launchers establish the complete runtime: API and SQL Parser are
 
 ## Configuration and runtime ownership
 
-`config/admin.json` schema version 5 contains server, CORS, authentication, and validated runtime configuration. Versions 1–4 migrate in place; obsolete feature values are dropped because Read, Write, Pagination, Sorting, and Metadata remain framework capabilities governed by authorization.
+`config/admin.json` schema version 6 contains server, CORS, authentication, validated runtime configuration, and the non-secret backup schedule. Versions 1–5 migrate in place; obsolete feature values are dropped because Read, Write, Pagination, Sorting, and Metadata remain framework capabilities governed by authorization.
 
 The Server section owns development loopback port ranges; production listener configuration remains deployment-owned. Development process state under `runtime/` is operational data, not configuration. System Health obtains each managed process's PID, selected port, and start time from that state. Production application availability uses locked, atomically replaced `config/application-runtime-state.json` and reports external infrastructure separately, with no PID/port/start-time claim. Browser requests may select only fixed lifecycle operations and cannot supply commands, paths, executables, or arguments.
 

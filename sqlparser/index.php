@@ -6,7 +6,7 @@ define('API_REQUEST_STARTED', microtime(true));
 define('API_REQUEST_ID', bin2hex(random_bytes(8)));
 ob_start();
 require_once __DIR__ . '/../core/ExceptionHandler.php';
-ExceptionHandler::register();
+ExceptionHandler::register('sqlparser');
 
 $method = (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET');
 require_once __DIR__ . '/../app/Middleware/ApplicationRuntimeMiddleware.php';

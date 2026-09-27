@@ -3,16 +3,13 @@
 require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../Authorization/RoleModel.php';
-require_once __DIR__ . '/../Backup/ConfigurationMutationBackup.php';
 
 final class ApiKeyRepository
 {
     private string $path;
-    private bool $runtimePath;
 
     public function __construct(?string $path = null)
     {
-        $this->runtimePath = $path === null;
         $this->path = $path ?? RuntimeConfiguration::path(RuntimeConfiguration::API_KEYS_FILE);
     }
 
@@ -28,7 +25,7 @@ final class ApiKeyRepository
         return $value;
     }
 
-    public function update(callable $operation, bool $critical = true)
+    public function update(callable $operation)
     {
         RuntimeConfiguration::ensure();
         $lock = @fopen($this->path . '.lock', 'c');
@@ -43,7 +40,6 @@ final class ApiKeyRepository
             $this->validate($value);
             $result = $operation($value);
             $this->validate($value);
-            if ($critical && $this->runtimePath) ConfigurationMutationBackup::before('api_keys');
             JsonFileStore::save($this->path, $value);
             return $result;
         } finally {

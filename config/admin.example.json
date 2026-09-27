@@ -1,5 +1,5 @@
 {
-    "version": 5,
+    "version": 6,
     "server": {
         "apiPortMinimum": 8000,
         "apiPortMaximum": 8100,
@@ -52,5 +52,11 @@
             "defaultPageSize": 25,
             "maxPageSize": 1000
         }
+    },
+    "backup": {
+        "enabled": false,
+        "frequency": "daily",
+        "time": "02:00",
+        "retention": 30
     }
 }

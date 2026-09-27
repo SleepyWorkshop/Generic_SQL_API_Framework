@@ -5,6 +5,8 @@ require_once __DIR__ . '/../Requests/ApiRequestException.php';
 require_once __DIR__ . '/../Health/ApplicationHealthMonitor.php';
 require_once __DIR__ . '/../../core/Logger.php';
 require_once __DIR__ . '/../../core/OperationalLogger.php';
+require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
+require_once __DIR__ . '/../../core/JsonFileStore.php';
 
 final class BackupRecoveryService
 {
@@ -15,8 +17,9 @@ final class BackupRecoveryService
     private Logger $logger;
     private $healthCheck;
     private OperationalLogger $operationalLogger;
+    private $scheduleProvider;
 
-    public function __construct(?ApplicationBackupManager $manager = null, ?string $directory = null, ?Logger $logger = null, ?callable $healthCheck = null, ?OperationalLogger $operationalLogger = null)
+    public function __construct(?ApplicationBackupManager $manager = null, ?string $directory = null, ?Logger $logger = null, ?callable $healthCheck = null, ?OperationalLogger $operationalLogger = null, ?callable $scheduleProvider = null)
     {
         $this->manager = $manager ?? new ApplicationBackupManager();
         $configured = getenv(self::DIRECTORY_ENVIRONMENT_VARIABLE);
@@ -24,6 +27,7 @@ final class BackupRecoveryService
             ? trim($configured) : dirname(dirname(__DIR__, 2)) . '/backups'), '/\\');
         $this->logger = $logger ?? new Logger();
         $this->operationalLogger = $operationalLogger ?? new OperationalLogger();
+        $this->scheduleProvider = $scheduleProvider ?? static fn (): array => (new AdminConfigurationRepository())->load()['backup'];
         $this->healthCheck = $healthCheck ?? function (): bool {
             $checks = (new ApplicationHealthMonitor())->detailed([])['checks'] ?? [];
             return ($checks['configuration']['status'] ?? null) === 'healthy'
@@ -31,38 +35,57 @@ final class BackupRecoveryService
         };
     }
 
-    public function create(bool $preChange = false, string $category = 'manual'): array
+    public function create(string $trigger = 'manual', string $createdBy = 'user'): array
     {
+        if (!in_array($trigger, ['manual', 'scheduled'], true)
+            || !in_array($createdBy, ['user', 'scheduler'], true)) {
+            throw new InvalidArgumentException('Invalid backup creation metadata.');
+        }
         $this->ensureDirectory($this->directory);
         $id = gmdate('Ymd\\THis\\Z') . '-' . bin2hex(random_bytes(6));
-        $prefix = $preChange ? 'backup-pre-change-' : 'backup-';
-        $filename = $prefix . $id . '.zip';
+        $filename = 'backup-' . $id . '.zip';
         $path = $this->directory . DIRECTORY_SEPARATOR . $filename;
         try {
-            $manifest = $this->manager->create($path, $id);
+            $manifest = $this->manager->create($path, $id, $trigger, $createdBy);
             $size = filesize($path);
-            $this->logger->audit($preChange ? 'backup.pre_change' : 'backup.created', 'success', 'NOTICE', [
-                'component' => 'backup', 'recoveryPointId' => $id, 'operation' => $category,
+            $this->logger->audit('backup.created', 'success', 'NOTICE', [
+                'component' => 'backup', 'recoveryPointId' => $id, 'operation' => $trigger,
+                'trigger' => $trigger, 'createdBy' => $createdBy,
             ]);
             $this->logger->audit('backup.verified', 'success', 'INFO', [
-                'component' => 'backup', 'recoveryPointId' => $id, 'operation' => $category,
+                'component' => 'backup', 'recoveryPointId' => $id, 'operation' => $trigger,
                 'verification' => 'valid', 'authenticity' => 'valid',
             ]);
-            return $this->summary($manifest, $filename, is_int($size) ? $size : 0, $preChange);
+            $summary = $this->summary($manifest, $filename, is_int($size) ? $size : 0);
+            if ($trigger === 'scheduled') $this->writeScheduleStatus('success', $summary, null);
+            $this->applyRetention($this->schedule()['retention'], $path);
+            return $summary;
         } catch (Throwable $exception) {
             $this->logger->audit('backup.failed', 'failure', 'ERROR', [
-                'component' => 'backup', 'operation' => $category, 'reason' => 'creation_failed',
+                'component' => 'backup', 'operation' => $trigger, 'reason' => 'creation_failed',
+                'trigger' => $trigger, 'createdBy' => $createdBy,
             ]);
+            if ($trigger === 'scheduled') {
+                $this->logger->audit('backup.scheduled.failed', 'failure', 'ERROR', [
+                    'component' => 'backup', 'operation' => 'scheduled', 'reason' => 'creation_failed',
+                ]);
+                $this->operationalLogger->error('admin', 'Scheduled backup failed', ['error_code' => 'BACKUP_CREATION_FAILED']);
+                $this->writeScheduleStatus('failed', null, 'BACKUP_CREATION_FAILED');
+            }
             throw new ApiRequestException('Application backup could not be created.', 'BACKUP_CREATION_FAILED', [], 500);
         }
     }
 
-    public function createPreChange(string $category): ?array
+    public function createScheduled(): array
     {
-        // Initial setup has no recoverable baseline yet. Once every allowlisted
-        // source exists, validation/signing failures must block the mutation.
-        if (!$this->manager->hasRecoverableBaseline()) return null;
-        return $this->create(true, $category);
+        $schedule = $this->schedule();
+        if (!$schedule['enabled']) {
+            throw new ApiRequestException('Scheduled backups are disabled.', 'SCHEDULED_BACKUP_DISABLED', [], 409);
+        }
+        $this->operationalLogger->info('admin', 'Scheduled backup started', ['frequency' => $schedule['frequency']]);
+        $result = $this->create('scheduled', 'scheduler');
+        $this->operationalLogger->info('admin', 'Scheduled backup completed', ['recovery_point' => $result['recoveryPointId']]);
+        return $result;
     }
 
     public function history(): array
@@ -74,13 +97,13 @@ final class BackupRecoveryService
             try {
                 $manifest = $this->manager->verify($path, true);
                 $size = filesize($path);
-                $points[] = $this->summary($manifest, basename($path), is_int($size) ? $size : 0, str_starts_with(basename($path), 'backup-pre-change-'));
+                $points[] = $this->summary($manifest, basename($path), is_int($size) ? $size : 0);
             } catch (Throwable $exception) {
                 $points[] = [
                     'recoveryPointId' => null, 'filename' => basename($path), 'createdAt' => null,
                     'size' => max(0, (int)@filesize($path)), 'applicationVersion' => null,
                     'formatVersion' => null, 'verification' => 'invalid', 'authenticity' => 'invalid',
-                    'preChange' => str_starts_with(basename($path), 'backup-pre-change-'),
+                    'type' => 'legacy', 'trigger' => 'legacy', 'createdBy' => null,
                 ];
             }
         }
@@ -153,7 +176,6 @@ final class BackupRecoveryService
             $recoveryPointId = $preview['recoveryPointId'];
             $this->logger->audit('restore.started', 'success', 'NOTICE', ['component' => 'backup', 'recoveryPointId' => $recoveryPointId, 'operation' => 'restore']);
             $this->operationalLogger->info('admin', 'admin.restore.start', ['recovery_point' => $recoveryPointId]);
-            $this->createPreChange('restore');
             $this->operationalLogger->info('admin', 'admin.restore.activation.start', ['recovery_point' => $recoveryPointId]);
             $healthCheck = function () use ($recoveryPointId): bool {
                 $this->operationalLogger->info('admin', 'admin.restore.health_check.start', ['recovery_point' => $recoveryPointId]);
@@ -200,14 +222,114 @@ final class BackupRecoveryService
         throw new ApiRequestException('Recovery point was not found.', 'BACKUP_NOT_FOUND', [], 404);
     }
 
-    private function summary(array $manifest, string $filename, int $size, bool $preChange): array
+    public function scheduleInformation(): array
     {
+        $schedule = $this->schedule();
+        $history = $this->history();
+        $last = $history[0] ?? null;
+        $status = $this->readScheduleStatus();
+        return [
+            'configuration' => $schedule,
+            'lastBackup' => $last,
+            'lastScheduledAttempt' => $status,
+            'nextBackupAt' => $schedule['enabled'] ? $this->nextRunAt($schedule) : null,
+        ];
+    }
+
+    private function summary(array $manifest, string $filename, int $size): array
+    {
+        $trigger = in_array($manifest['trigger'] ?? null, ['manual', 'scheduled'], true)
+            ? $manifest['trigger'] : 'legacy';
         return [
             'recoveryPointId' => $manifest['recoveryPointId'], 'filename' => $filename,
             'createdAt' => $manifest['createdAt'], 'size' => $size,
             'applicationVersion' => $manifest['application']['version'], 'formatVersion' => $manifest['formatVersion'],
-            'verification' => 'valid', 'authenticity' => 'valid', 'preChange' => $preChange,
+            'files' => count($manifest['files']),
+            'verification' => 'valid', 'authenticity' => 'valid',
+            'trigger' => $trigger, 'type' => $trigger, 'createdBy' => $manifest['createdBy'] ?? null,
         ];
+    }
+
+    private function schedule(): array
+    {
+        $schedule = ($this->scheduleProvider)();
+        if (!is_array($schedule)) throw new RuntimeException('Backup schedule is unavailable.');
+        BackupSchedule::validate($schedule);
+        return $schedule;
+    }
+
+    private function applyRetention(int $retention, string $newestPath): void
+    {
+        $valid = [];
+        foreach (glob($this->directory . DIRECTORY_SEPARATOR . 'backup-*.zip') ?: [] as $path) {
+            if (!is_file($path)) continue;
+            try {
+                $manifest = $this->manager->verify($path, true);
+                $valid[] = [
+                    'path' => $path,
+                    'createdAt' => $manifest['createdAt'],
+                    'newest' => $path === $newestPath,
+                ];
+            } catch (Throwable $exception) {
+                // Invalid/unrelated artifacts are never deleted by retention.
+            }
+        }
+        usort($valid, static function (array $left, array $right): int {
+            if ($left['newest'] !== $right['newest']) return $left['newest'] ? -1 : 1;
+            return strcmp($right['createdAt'], $left['createdAt']);
+        });
+        foreach (array_slice($valid, $retention) as $expired) {
+            $basename = basename($expired['path']);
+            if (preg_match('/^backup-(?:pre-change-)?[0-9]{8}T[0-9]{6}Z-[a-f0-9]{12}\.zip$/', $basename) === 1) {
+                @unlink($expired['path']);
+            }
+        }
+    }
+
+    private function statusPath(): string
+    {
+        return $this->directory . DIRECTORY_SEPARATOR . '.schedule-status.json';
+    }
+
+    private function writeScheduleStatus(string $status, ?array $backup, ?string $errorCode): void
+    {
+        try {
+            JsonFileStore::save($this->statusPath(), [
+                'version' => 1,
+                'attemptedAt' => gmdate(DATE_ATOM),
+                'status' => $status,
+                'recoveryPointId' => $backup['recoveryPointId'] ?? null,
+                'errorCode' => $errorCode,
+            ]);
+        } catch (Throwable $exception) {
+            // The primary backup result must not be replaced by status telemetry failure.
+        }
+    }
+
+    private function readScheduleStatus(): ?array
+    {
+        try {
+            $status = JsonFileStore::load($this->statusPath());
+            if (($status['version'] ?? null) !== 1
+                || !in_array($status['status'] ?? null, ['success', 'failed'], true)) return null;
+            return $status;
+        } catch (Throwable $exception) { return null; }
+    }
+
+    private function nextRunAt(array $schedule): string
+    {
+        $now = new DateTimeImmutable('now');
+        [$hour, $minute] = array_map('intval', explode(':', $schedule['time']));
+        if ($schedule['frequency'] === 'hourly') {
+            $next = $now->setTime((int)$now->format('H'), $minute);
+            if ($next <= $now) $next = $next->modify('+1 hour');
+        } elseif ($schedule['frequency'] === 'weekly') {
+            $next = $now->modify('next monday')->setTime($hour, $minute);
+        } else {
+            $next = $now->setTime($hour, $minute);
+            if ($next <= $now) $next = $next->modify('+1 day');
+        }
+        return $next->format(DATE_ATOM);
     }
 
     private function ensureDirectory(string $directory): void

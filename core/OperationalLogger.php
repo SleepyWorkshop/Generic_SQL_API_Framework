@@ -12,6 +12,20 @@ final class OperationalLogger
     private const LEVELS = ['INFO', 'WARNING', 'ERROR'];
     private string $baseDirectory;
     private $clock;
+    private static string $currentSubsystem = 'api';
+
+    public static function setSubsystem(string $subsystem): void
+    {
+        if (!in_array($subsystem, self::SUBSYSTEMS, true)) {
+            throw new InvalidArgumentException('Invalid operational logging subsystem.');
+        }
+        self::$currentSubsystem = $subsystem;
+    }
+
+    public static function currentSubsystem(): string
+    {
+        return self::$currentSubsystem;
+    }
 
     public function __construct(?string $baseDirectory = null, ?callable $clock = null)
     {
@@ -55,7 +69,7 @@ final class OperationalLogger
             $entry = '[' . $now->format('Y-m-d H:i:s') . '] [' . $level . '] ['
                 . self::singleLine(RequestId::get()) . '] ' . self::singleLine($event) . PHP_EOL;
             foreach ($this->redact($context) as $key => $value) {
-                $entry .= '    ' . self::singleLine((string)$key) . '=' . $this->formatValue($value) . PHP_EOL;
+                $entry .= '    ' . self::formatKey((string)$key) . ': ' . $this->formatValue($value) . PHP_EOL;
             }
             $entry .= PHP_EOL;
 
@@ -135,5 +149,11 @@ final class OperationalLogger
     private static function singleLine(string $value): string
     {
         return trim((string)preg_replace('/[\r\n\x00-\x1F\x7F]+/', ' ', $value));
+    }
+
+    private static function formatKey(string $key): string
+    {
+        $key = (string)preg_replace('/([a-z])([A-Z])/', '$1 $2', $key);
+        return ucwords(str_replace(['_', '-'], ' ', self::singleLine($key)));
     }
 }

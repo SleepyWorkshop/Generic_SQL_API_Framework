@@ -62,10 +62,6 @@ class SqlParserRequestHandler
             return [400,$payload];
         }
         catch(Throwable $exception){
-            $logger->error('sqlparser', 'SQL parser exception', [
-                'error_code' => 'PARSER_ERROR',
-                'duration_ms' => round((microtime(true) - $started) * 1000, 2),
-            ]);
             ExceptionHandler::report($exception,'sql_parser.exception');
             return [500,Response::errorPayload('SQL parser failed.','PARSER_ERROR')];
         }

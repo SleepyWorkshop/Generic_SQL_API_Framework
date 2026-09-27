@@ -118,15 +118,6 @@ class Response
     private static function logResponseTiming(float $started, bool $success, ?string $errorCode = null, int $status = 200): void
     {
         if (!defined('API_REQUEST_STARTED')) return;
-        $logger = new Logger();
-        $logger->timing('response_construction', (microtime(true) - $started) * 1000, [
-            'success' => $success,
-            'errorCode' => $errorCode,
-        ]);
-        $logger->timing('request_total', (microtime(true) - API_REQUEST_STARTED) * 1000, [
-            'success' => $success,
-            'errorCode' => $errorCode,
-        ]);
         $duration = round((microtime(true) - API_REQUEST_STARTED) * 1000, 2);
         $operational = new OperationalLogger();
         $context = [

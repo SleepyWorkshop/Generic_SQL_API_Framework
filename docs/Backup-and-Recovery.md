@@ -10,8 +10,7 @@ Server backup engine, scheduler, cloud-sync client, or arbitrary file archiver.
 
 ## Scope and ZIP format
 
-The official artifact is `backup-<recovery-point-id>.zip` (automatic safeguards
-use `backup-pre-change-<recovery-point-id>.zip`). The version-2 ZIP has exactly:
+The official artifact is `backup-<recovery-point-id>.zip`. The version-3 ZIP has exactly:
 
 ```text
 manifest.json
@@ -28,8 +27,9 @@ The database document must remain an AES-256-GCM encrypted envelope. Password
 hashes and API-key secret hashes are configuration state, but plaintext
 passwords and one-time raw API-key secrets are never stored and therefore cannot
 enter a backup. The manifest contains the recovery-point ID, UTC creation time,
-application and format versions, application-configuration scope, logical file
-paths, schema versions, byte sizes, and SHA-256 checksums. It contains no
+application and format versions, application-configuration scope, creation
+trigger (`manual` or `scheduled`), non-personal creator type (`user` or
+`scheduler`), logical file paths, schema versions, byte sizes, and SHA-256 checksums. It contains no
 configuration values or secrets.
 
 The strict allowlist excludes database/signing encryption keys, PHP sessions,
@@ -92,26 +92,35 @@ restored `auth.json` invalidates the current session through identity, role,
 enabled-state, or `authVersion` changes, the console returns to sign-in without
 bypassing session validation.
 
-Confirmed restore re-verifies the upload, creates a verified pre-change recovery
-point, validates every staged value, and activates configuration under the
+Confirmed restore re-verifies the upload, validates every staged value, and activates configuration under the
 shared lock using the existing atomic per-document writer. If any activation or
 post-restore configuration/encryption health check fails, the prior complete
 configuration set is rewritten and the operation reports failure. Sessions,
 runtime state, logs, and SQL Server data are untouched.
 
 Recovery-point history is file-backed and exposes only ID, filename, timestamp,
-size, application/format version, pre-change status, and verification and
-authenticity results. No database or scheduler is introduced. Uploaded restore
+size, application/format version, recovery-point type, and verification and
+authenticity results. Version-2 recovery points without creation metadata remain
+valid and are shown as **Legacy**. No database or in-process scheduler is introduced. Uploaded restore
 files are short-lived and cleaned after restore/failure or expiry.
 
-## Automatic pre-change recovery points
+## Manual and scheduled recovery points
 
-Critical user/authentication, authorization, API-key, database, and Admin
-runtime/security configuration writers invoke the shared pre-change service.
-Once installation is initialized and the full recoverable allowlist exists, the mutation proceeds only after a
-verified ZIP is finalized. Failure blocks the mutation. API-key `lastUsedAt`
-telemetry and password-hash rehash maintenance are not policy changes and do not
-create recovery points. A re-entrancy guard prevents recursive backup creation.
+Configuration changes do not automatically create a backup. User,
+authentication, authorization, API-key, database, runtime, security, and restore
+mutations proceed through their existing validation, atomic-write, and audit
+paths without creating or requiring a recovery point.
+
+Recovery points are created manually or by the configured scheduler. Manual
+creation records `trigger=manual` and `createdBy=user`. The operating system can
+invoke the scheduled CLI, which records `trigger=scheduled` and
+`createdBy=scheduler`. The application does not run a PHP daemon and saving a
+schedule does not install an operating-system task.
+
+The Admin **Automatic Backups** settings are stored in schema-version 6
+`config/admin.json`: `enabled` is boolean, `frequency` is `hourly`, `daily`, or
+`weekly`, `time` is `HH:MM`, and `retention` is an integer from 1 through 365.
+The page reports the latest scheduled attempt and the next configured run.
 
 The shared lock serializes backup/restore operations; existing configuration
 locks serialize their mutations. Temporary names are never reported as recovery
@@ -123,20 +132,39 @@ All paths must be absolute and outside the application root:
 
 ```text
 php scripts/application-backup.php create <absolute-new-backup.zip>
+php scripts/application-backup.php scheduled-create
 php scripts/application-backup.php verify <absolute-backup.zip>
 php scripts/application-backup.php stage-restore <absolute-backup.zip> <absolute-new-target>
 ```
 
-`create` produces and re-verifies a ZIP. `verify` modifies nothing.
+`create` produces and re-verifies a caller-selected manual ZIP.
+`scheduled-create` reads the validated schedule, refuses to run when disabled,
+and uses the managed backup directory and shared recovery service. Configure it
+in Windows Task Scheduler or Linux cron/systemd at the desired interval; the OS
+controls when it runs. `verify` modifies nothing.
 `stage-restore` consumes the ZIP directly and copies only the verified allowlist,
 manifest, and signature into a new external staging directory. Manual extraction
 is neither required nor supported.
+
+Example Linux cron entry (daily at 02:00, with absolute paths):
+
+```cron
+0 2 * * * /usr/bin/php /opt/generic-sql-api/Backend/scripts/application-backup.php scheduled-create
+```
+
+A systemd timer may invoke the same command. On Windows, create a Task Scheduler
+task whose program is the production `php.exe` and whose arguments are the
+absolute script path followed by `scheduled-create`. Run it as the restricted
+application service identity, set the Backend directory as **Start in**, and
+provide the same signing/encryption-key environment available to the hosted
+application. Align the OS trigger with the saved frequency/time; the saved
+configuration validates and reports intent but does not wake or install a task.
 
 ## Audit events
 
 Structured JSONL audit records include request ID and safe actor context where
 available. Events include `backup.created`, `backup.verified`, `backup.failed`,
-`backup.pre_change`, `restore.previewed`, `restore.started`,
+`backup.scheduled.failed`, `restore.previewed`, `restore.started`,
 `restore.completed`, and `restore.failed`. Records may contain operation,
 outcome, reason, and recovery-point ID, but never archives, full configuration,
 paths, passwords, keys, raw API keys, decrypted credentials, or sessions.
@@ -147,8 +175,13 @@ activation, and health-check lifecycle for troubleshooting.
 
 Set `GENERIC_BACKUP_DIR` to a protected path outside every document root
 and repository. The default is an adjacent `backups` directory for local use.
-The framework deliberately has no cloud synchronization, automatic retention
-scheduler, or remote deletion feature. Copy verified ZIPs to access-separated
+After each successful manual or scheduled creation, retention keeps the newest
+configured number of valid managed recovery points. The just-created recovery
+point is protected, invalid/unrelated files are ignored, and deletion is limited
+to recognized recovery-point filenames inside the managed directory. Failed
+scheduled attempts produce audit/operational records and status but no fake
+Verified recovery point. The framework has no cloud synchronization, internal
+scheduler daemon, or remote deletion feature. Copy verified ZIPs to access-separated
 off-host and, where policy requires, immutable/offline organizational storage.
 Apply NTFS ACLs on Windows or owner-only `0700` directories and `0600` files on
 Linux. Define retention from recovery objectives, regulation, and tested

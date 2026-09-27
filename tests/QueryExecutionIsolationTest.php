@@ -102,6 +102,9 @@ class FailingConnectionDatabase extends Database
 }
 
 $logDirectory = sys_get_temp_dir() . '/generic-dashboard-query-tests-' . bin2hex(random_bytes(5));
+$operationalDirectory = $logDirectory . '/operational';
+$oldOperationalDirectory = getenv('GENERIC_OPERATIONAL_LOG_DIR');
+putenv('GENERIC_OPERATIONAL_LOG_DIR=' . $operationalDirectory);
 $logger = new Logger($logDirectory);
 try {
     new QueryEngine(new FailingConnectionDatabase(), $logger);
@@ -157,16 +160,17 @@ try {
 $payload = Response::errorPayload('Query execution timed out.', 'QUERY_ERROR');
 executionAssert($payload['success'] === false && $payload['error']['code'] === 'QUERY_ERROR', 'Timeout response broke the API error contract.');
 
-$logFile = $logDirectory . '/' . date('Y-m-d') . '.log';
+$logFile = $operationalDirectory . '/database/' . date('Y-m-d') . '.txt';
 $log = (string)file_get_contents($logFile);
-executionAssert(str_contains($log, '"phase":"query_execute"'), 'Execution timing diagnostics were not written.');
-executionAssert(str_contains($log, '"queryPhase":"connect"'), 'Connection failure phase was not identified.');
+executionAssert(str_contains($log, 'Database query execution successful'), 'Successful execution diagnostics were not written.');
+executionAssert(str_contains($log, 'Database connection failed'), 'Connection failure was not identified.');
 executionAssert(!str_contains($log, 'connection-secret'), 'A database connection secret was written to diagnostics.');
-executionAssert(str_contains($log, '"phase":"rows_fetch"'), 'Fetch timing diagnostics were not written.');
-executionAssert(str_contains($log, '"queryPhase":"pagination_count"'), 'Pagination count phase was not identified.');
-executionAssert(str_contains($log, '"sqlState":"42000"'), 'SQLSTATE was not written to safe server diagnostics.');
-executionAssert(str_contains($log, '"errorCategory":"sql"'), 'Database error category was not written to diagnostics.');
+executionAssert(str_contains($log, 'Rows Returned:'), 'Fetch/result diagnostics were not written.');
+executionAssert(str_contains($log, 'Query Phase: pagination_count'), 'Pagination count phase was not identified.');
+executionAssert(str_contains($log, 'Sql State: 42000'), 'SQLSTATE was not written to safe server diagnostics.');
+executionAssert(str_contains($log, 'Error Code: sql'), 'Database error category was not written to diagnostics.');
 executionAssert(!str_contains($log, 'secret-value'), 'A sensitive parameter value was written to diagnostics.');
 executionAssert(!str_contains($log, 'private-filter') && !str_contains($log, 'hunter2'), 'A sensitive diagnostic value was written to logs.');
+$oldOperationalDirectory === false ? putenv('GENERIC_OPERATIONAL_LOG_DIR') : putenv('GENERIC_OPERATIONAL_LOG_DIR=' . $oldOperationalDirectory);
 
 echo "Query execution isolation tests passed.\n";

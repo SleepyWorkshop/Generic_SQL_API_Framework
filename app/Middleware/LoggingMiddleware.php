@@ -17,14 +17,5 @@ class LoggingMiddleware extends Middleware
         if (is_string($action) && str_starts_with($action, 'admin.')) {
             (new OperationalLogger())->info('admin', 'Admin request received', ['action' => $action]);
         }
-        (new Logger())->timing('request_received', 0, [
-            'method' => $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN',
-            'action' => $request['action'] ?? null,
-            'resource' => $request['resource'] ?? null,
-            'page' => $request['pagination']['page'] ?? null,
-            'pageSize' => $request['pagination']['pageSize'] ?? null,
-            'filterCount' => is_array($request['filters'] ?? null) ? count($request['filters']) : 0,
-            'sortCount' => is_array($request['sort'] ?? null) ? count($request['sort']) : 0,
-        ]);
     }
 }

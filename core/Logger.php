@@ -1,11 +1,12 @@
 <?php
 
 require_once __DIR__ . '/RequestId.php';
+require_once __DIR__ . '/OperationalLogger.php';
 
 class Logger
 {
     private string $logDirectory;
-    private string $logFile;
+    private ?string $logFile;
     private string $auditDirectory;
     private bool $dedicatedAuditDirectory;
 
@@ -33,15 +34,20 @@ class Logger
         }
         if (is_dir($this->auditDirectory)) $this->attempt(fn () => chmod($this->auditDirectory, 0700));
 
-        $this->logFile =
-            $this->logDirectory .
-            "/" .
-            date("Y-m-d") .
-            ".log";
+        $this->logFile = $this->dedicatedAuditDirectory ? null
+            : $this->logDirectory . "/" . date("Y-m-d") . ".log";
     }
 
     public function write(string $message): void
     {
+        if ($this->logFile === null) {
+            (new OperationalLogger())->info(
+                OperationalLogger::currentSubsystem(),
+                'Application diagnostic',
+                ['message' => $message]
+            );
+            return;
+        }
         $this->writeTo($this->logFile, $message);
     }
 
@@ -158,6 +164,14 @@ class Logger
 
     public function timing(string $phase, float $elapsedMilliseconds, array $context = []): void
     {
+        if ($this->logFile === null) {
+            (new OperationalLogger())->info(
+                OperationalLogger::currentSubsystem(),
+                ucwords(str_replace('_', ' ', $phase)),
+                ['duration_ms' => round($elapsedMilliseconds, 2), ...$context]
+            );
+            return;
+        }
         $record = [
             'timestamp' => date(DATE_ATOM),
             'requestId' => RequestId::get(),
@@ -229,6 +243,7 @@ class Logger
             'reason', 'errorCategory', 'configurationCategory', 'identityType',
             'identityHash', 'pid', 'port', 'durationMs',
             'recoveryPointId', 'operation', 'verification', 'authenticity',
+            'trigger', 'createdBy', 'status',
         ];
         $safe = [];
         foreach ($allowed as $field) {
@@ -261,12 +276,26 @@ class Logger
         ];
     }
 
-        public function error(
+    public function error(
         string $sql,
         array $params,
         string $error,
         float $executionTime = 0
     ): void {
+
+        if ($this->logFile === null) {
+            (new OperationalLogger())->error(
+                OperationalLogger::currentSubsystem(),
+                'Database operation failed',
+                [
+                    'duration_ms' => round($executionTime, 2),
+                    'sql' => $this->safeSql($sql),
+                    'parameters' => $this->parameterMetadata($params),
+                    'error' => $error,
+                ]
+            );
+            return;
+        }
 
         $message =
             "========================================\n";

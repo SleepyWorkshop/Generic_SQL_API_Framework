@@ -5,7 +5,6 @@ require_once __DIR__ . '/../app/Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../app/Security/DatabaseCredentialEncryption.php';
 require_once __DIR__ . '/../app/Authorization/RoleModel.php';
 require_once __DIR__ . '/../app/Backup/BackupRecoveryService.php';
-require_once __DIR__ . '/../app/Backup/ConfigurationMutationBackup.php';
 require_once __DIR__ . '/../app/Repositories/AuthRepository.php';
 require_once __DIR__ . '/../app/Requests/AdminRequestValidator.php';
 require_once __DIR__ . '/../app/Middleware/CsrfProtectionMiddleware.php';
@@ -35,6 +34,34 @@ function backupRewriteZip(string $path, callable $change): void
     $change($entries);
     unlink($path);
     SafeZipArchive::create($path, $entries);
+}
+function backupCanonicalJson(array $value): string
+{
+    $sort = function ($item) use (&$sort) {
+        if (!is_array($item)) return $item;
+        if (!array_is_list($item)) ksort($item, SORT_STRING);
+        foreach ($item as $key => $child) $item[$key] = $sort($child);
+        return $item;
+    };
+    return json_encode($sort($value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+}
+function backupCreateLegacyV2(string $source, string $target, string $encodedSigningKey): void
+{
+    $entries = SafeZipArchive::read($source);
+    $manifest = json_decode($entries['manifest.json'], true, 512, JSON_THROW_ON_ERROR);
+    $manifest['formatVersion'] = 2;
+    unset($manifest['trigger'], $manifest['createdBy']);
+    $manifestContents = backupCanonicalJson($manifest) . PHP_EOL;
+    $key = base64_decode(trim($encodedSigningKey), true);
+    backupAssert(is_string($key) && strlen($key) === 32, 'Legacy fixture signing key is invalid.');
+    $entries['manifest.json'] = $manifestContents;
+    $entries['signature.json'] = json_encode([
+        'version' => 1,
+        'algorithm' => 'HMAC-SHA256',
+        'manifestSha256' => hash('sha256', $manifestContents),
+        'signature' => hash_hmac('sha256', $manifestContents, $key),
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL;
+    SafeZipArchive::create($target, $entries);
 }
 
 $directory = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'generic-backup-recovery-' . bin2hex(random_bytes(8));
@@ -90,7 +117,8 @@ try {
     $manager = new ApplicationBackupManager($applicationRoot, $sources, 'test-version');
     $bundlePath = $backupParent . '/backup-one.zip';
     $manifest = $manager->create($bundlePath);
-    backupAssert($manifest['formatVersion'] === 2 && count($manifest['files']) === 6, 'ZIP backup manifest is incomplete.');
+    backupAssert($manifest['formatVersion'] === 3 && count($manifest['files']) === 6, 'ZIP backup manifest is incomplete.');
+    backupAssert($manifest['trigger'] === 'manual' && $manifest['createdBy'] === 'user', 'Manual backup metadata is incorrect.');
     backupAssert(preg_match('/^backup-|\.zip$/', basename($bundlePath)) === 1, 'ZIP filename is invalid.');
     $entries = SafeZipArchive::read($bundlePath);
     backupAssert(array_keys($entries) === ['manifest.json', 'signature.json', ...array_keys($sources)], 'ZIP contains missing or unexpected entries.');
@@ -119,7 +147,7 @@ try {
     putenv(BackupSigningKey::ENVIRONMENT_VARIABLE);
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE);
     backupFailure(fn () => $manager->verify($bundlePath, true), 'Backup verified without its encryption key.');
-    backupAssert($manager->verify($bundlePath, false)['formatVersion'] === 2, 'Integrity/authenticity verification incorrectly required the encryption key.');
+    backupAssert($manager->verify($bundlePath, false)['formatVersion'] === 3, 'Integrity/authenticity verification incorrectly required the encryption key.');
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . $wrongKey);
     backupFailure(fn () => $manager->verify($bundlePath, true), 'Backup verified with the wrong encryption key.');
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . $key);
@@ -171,11 +199,18 @@ try {
     $logDirectory = $directory . '/logs';
     $operationalDirectory = $directory . '/operational-logs';
     $operationalLogger = new OperationalLogger($operationalDirectory);
-    $service = new BackupRecoveryService($manager, $managedDirectory, new Logger($logDirectory), static fn (): bool => true, $operationalLogger);
+    $schedule = ['enabled' => true, 'frequency' => 'daily', 'time' => '02:00', 'retention' => 30];
+    $scheduleProvider = static function () use (&$schedule): array { return $schedule; };
+    $service = new BackupRecoveryService($manager, $managedDirectory, new Logger($logDirectory), static fn (): bool => true, $operationalLogger, $scheduleProvider);
     $created = $service->create();
     backupAssert(str_ends_with($created['filename'], '.zip') && $created['verification'] === 'valid' && $created['authenticity'] === 'valid', 'Admin backup orchestration did not create a verified recovery point.');
+    backupAssert($created['trigger'] === 'manual' && $created['createdBy'] === 'user' && $created['type'] === 'manual', 'Manual recovery-point metadata is incorrect.');
+    $legacyPath = $managedDirectory . '/backup-' . $manifest['recoveryPointId'] . '.zip';
+    backupCreateLegacyV2($bundlePath, $legacyPath, $signingContents);
     $history = $service->history();
-    backupAssert(count($history) === 1 && $history[0]['recoveryPointId'] === $created['recoveryPointId'], 'Recovery-point history is incomplete.');
+    backupAssert(count($history) === 2, 'Recovery-point history is incomplete.');
+    $legacy = array_values(array_filter($history, static fn (array $point): bool => $point['type'] === 'legacy'));
+    backupAssert(count($legacy) === 1 && $legacy[0]['formatVersion'] === 2, 'Valid version-2 recovery point was not represented as Legacy.');
     $download = $service->download($created['recoveryPointId']);
     backupAssert($download['mediaType'] === 'application/zip' && base64_decode($download['archive'], true) !== false, 'Backup download payload is invalid.');
     $previewUpload = $service->previewUpload('selected-backup.zip', $download['archive']);
@@ -187,7 +222,7 @@ try {
     backupAssert($restoreResult['restored'] === true && $restoreResult['health'] === 'healthy', 'Confirmed Admin restore did not activate safely.');
     $missingUploadFailure = backupFailure(fn () => $service->restore(str_repeat('f', 48), true), 'Missing staged restore upload was accepted.');
     backupAssert($missingUploadFailure instanceof ApiRequestException && $missingUploadFailure->getErrorCode() === 'RESTORE_UPLOAD_UNAVAILABLE', 'Missing staged restore returned the wrong structured error.');
-    $failedRestoreService = new BackupRecoveryService($manager, $managedDirectory, new Logger($logDirectory), static fn (): bool => false, $operationalLogger);
+    $failedRestoreService = new BackupRecoveryService($manager, $managedDirectory, new Logger($logDirectory), static fn (): bool => false, $operationalLogger, $scheduleProvider);
     $failedPreview = $failedRestoreService->previewUpload('selected-backup.zip', $download['archive']);
     $healthFailure = backupFailure(fn () => $failedRestoreService->restore($failedPreview['uploadToken'], true), 'Post-restore health failure was reported as success.');
     backupAssert($healthFailure instanceof ApiRequestException && $healthFailure->getErrorCode() === 'RESTORE_FAILED', 'Post-restore health failure was not sanitized.');
@@ -199,25 +234,81 @@ try {
         backupAssert(str_contains($operationalRestoreLog, $event), "Restore operational event {$event} is missing.");
     }
 
-    ConfigurationMutationBackup::setFactoryForTests(static fn (): BackupRecoveryService => $service);
     putenv('GENERIC_RUNTIME_CONFIG_DIR=' . $runtimePath);
-    $preChangeBefore = count(glob($managedDirectory . '/backup-pre-change-*.zip') ?: []);
-    (new AuthRepository())->update(function (array &$configuration): void {
-        $configuration['users'][0]['authVersion']++;
+    $beforeMutations = count(glob($managedDirectory . '/backup-*.zip') ?: []);
+    for ($index = 0; $index < 5; $index++) {
+        (new AuthRepository())->update(function (array &$configuration) use ($index, $passwordHash): void {
+            $configuration['users'][] = [
+                'id' => str_pad(dechex($index + 1), 32, '0', STR_PAD_LEFT),
+                'username' => 'Created.User.' . $index,
+                'passwordHash' => $passwordHash,
+                'enabled' => true,
+                'backendRole' => RoleModel::READ_ONLY,
+                'frontendAccess' => false,
+                'frontendRole' => null,
+                'createdAt' => gmdate(DATE_ATOM),
+                'authVersion' => 1,
+            ];
+        });
+    }
+    $authorizationRepository = new AuthorizationRepository();
+    $authorizationRepository->save($authorizationRepository->load());
+    (new ApiKeyRepository())->update(function (array &$configuration) use ($apiSecretHash): void {
+        $configuration['keys'][] = [
+            'id' => str_repeat('e', 16), 'name' => 'Created key', 'ownerUserId' => str_repeat('a', 32),
+            'roles' => [RoleModel::READ_ONLY], 'secretHash' => $apiSecretHash, 'fingerprint' => str_repeat('f', 12),
+            'enabled' => true, 'revokedAt' => null, 'createdAt' => gmdate(DATE_ATOM), 'lastUsedAt' => null,
+        ];
     });
-    $preChangeAfter = count(glob($managedDirectory . '/backup-pre-change-*.zip') ?: []);
-    backupAssert($preChangeAfter === $preChangeBefore + 1, 'Critical configuration mutation did not wait for a verified pre-change backup.');
-    $versionBeforeBlockedMutation = JsonFileStore::load($runtimePath . '/auth.json')['users'][0]['authVersion'];
-    ConfigurationMutationBackup::setFactoryForTests(static fn () => new stdClass());
-    backupFailure(fn () => (new AuthRepository())->update(function (array &$configuration): void {
-        $configuration['users'][0]['authVersion']++;
-    }), 'Failed pre-change backup did not block the critical mutation.');
-    backupAssert(JsonFileStore::load($runtimePath . '/auth.json')['users'][0]['authVersion'] === $versionBeforeBlockedMutation, 'Critical mutation was saved after pre-change backup failure.');
-    ConfigurationMutationBackup::setFactoryForTests(null);
+    (new ApiKeyRepository())->update(function (array &$configuration): void {
+        $configuration['keys'] = array_values(array_filter(
+            $configuration['keys'], static fn (array $key): bool => $key['id'] !== str_repeat('e', 16)
+        ));
+    });
+    (new AdminConfigurationRepository())->update(static function (array &$configuration): void {
+        $configuration['cors']['credentialsEnabled'] = !$configuration['cors']['credentialsEnabled'];
+    });
+    backupAssert(count(glob($managedDirectory . '/backup-*.zip') ?: []) === $beforeMutations, 'Configuration mutations created automatic recovery points.');
+    foreach (['AuthRepository.php', 'AuthorizationRepository.php', 'ApiKeyRepository.php', 'AdminConfigurationRepository.php'] as $sourceFile) {
+        $sourceContents = (string)file_get_contents(__DIR__ . '/../app/Repositories/' . $sourceFile);
+        backupAssert(!str_contains($sourceContents, 'ConfigurationMutationBackup')
+            && !str_contains($sourceContents, 'BackupRecoveryService'), "{$sourceFile} retains an automatic backup hook.");
+    }
+    backupAssert(!str_contains((string)file_get_contents(__DIR__ . '/../app/Services/AdminService.php'), 'ConfigurationMutationBackup'), 'Database configuration retains an automatic backup hook.');
     $oldRuntimeDirectory === false ? putenv('GENERIC_RUNTIME_CONFIG_DIR') : putenv('GENERIC_RUNTIME_CONFIG_DIR=' . $oldRuntimeDirectory);
 
+    $scheduled = $service->createScheduled();
+    backupAssert($scheduled['trigger'] === 'scheduled' && $scheduled['createdBy'] === 'scheduler'
+        && $scheduled['type'] === 'scheduled' && $scheduled['verification'] === 'valid', 'Scheduled backup metadata or verification is incorrect.');
+    $scheduleInformation = $service->scheduleInformation();
+    backupAssert($scheduleInformation['lastScheduledAttempt']['status'] === 'success'
+        && is_string($scheduleInformation['nextBackupAt']), 'Scheduled backup status is incomplete.');
+    $backupCli = (string)file_get_contents(__DIR__ . '/../scripts/application-backup.php');
+    backupAssert(str_contains($backupCli, "\$operation === 'scheduled-create'")
+        && str_contains($backupCli, '->createScheduled()'), 'Scheduled backup CLI does not reuse the recovery service.');
+
+    $schedule['retention'] = 2;
+    $retained = $service->createScheduled();
+    $validHistory = array_values(array_filter($service->history(), static fn (array $point): bool => $point['verification'] === 'valid'));
+    backupAssert(count($validHistory) === 2
+        && in_array($retained['recoveryPointId'], array_column($validHistory, 'recoveryPointId'), true), 'Retention did not preserve the newest backup or configured count.');
+    file_put_contents($managedDirectory . '/backup-unrelated.zip', 'not a managed backup');
+    $service->createScheduled();
+    backupAssert(is_file($managedDirectory . '/backup-unrelated.zip'), 'Retention deleted an unrelated file.');
+
     $validator = new AdminRequestValidator();
-    foreach (['admin.backup.history', 'admin.backup.create'] as $action) backupAssert($validator->validate(['action' => $action])['action'] === $action, "Admin backup action {$action} was rejected.");
+    foreach (['admin.backup.history', 'admin.backup.create', 'admin.backup.schedule'] as $action) backupAssert($validator->validate(['action' => $action])['action'] === $action, "Admin backup action {$action} was rejected.");
+    $validatedSchedule = $validator->validate(['action' => 'admin.backup.schedule.save', 'backup' => $schedule]);
+    backupAssert($validatedSchedule['backup'] === $schedule, 'Valid backup schedule was rejected.');
+    foreach ([
+        [...$schedule, 'frequency' => 'monthly'],
+        [...$schedule, 'time' => '25:00'],
+        [...$schedule, 'retention' => 0],
+        [...$schedule, 'enabled' => 'yes'],
+        [...$schedule, 'unexpected' => true],
+    ] as $invalidSchedule) backupFailure(fn () => $validator->validate([
+        'action' => 'admin.backup.schedule.save', 'backup' => $invalidSchedule,
+    ]), 'Invalid backup schedule was accepted.');
     backupAssert($validator->validate(['action' => 'admin.backup.restore', 'uploadToken' => str_repeat('a', 48), 'confirmed' => true])['confirmed'] === true, 'Confirmed restore request was rejected.');
     backupFailure(fn () => $validator->validate(['action' => 'admin.backup.restore', 'uploadToken' => str_repeat('a', 48), 'confirmed' => false]), 'Unconfirmed restore request was accepted.');
     backupAssert($validator->validate([
@@ -228,7 +319,7 @@ try {
         'action' => 'admin.operational.event', 'event' => 'frontend.unrestricted.payload',
     ]), 'Unrestricted frontend log event was accepted.');
     unset($_SERVER['HTTP_X_CSRF_TOKEN'], $_SERVER['GENERIC_AUTH_PROVIDER']);
-    foreach (['admin.backup.create', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore', 'admin.operational.event'] as $action) {
+    foreach (['admin.backup.create', 'admin.backup.schedule.save', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore', 'admin.operational.event'] as $action) {
         $failure = backupFailure(fn () => (new CsrfProtectionMiddleware())->handle(['action' => $action]), "{$action} bypassed CSRF protection.");
         backupAssert($failure instanceof ApiRequestException && $failure->getErrorCode() === 'CSRF_VALIDATION_FAILED', "{$action} returned the wrong CSRF error.");
     }
@@ -239,11 +330,16 @@ try {
         $managedDirectory,
         new Logger($logDirectory),
         static fn (): bool => true,
-        $operationalLogger
+        $operationalLogger,
+        $scheduleProvider
     );
-    backupFailure(fn () => $auditBrokenService->create(), 'Failed Admin backup was reported as successful.');
+    $pointsBeforeFailure = count($auditBrokenService->history());
+    backupFailure(fn () => $auditBrokenService->createScheduled(), 'Failed scheduled backup was reported as successful.');
+    backupAssert(count($auditBrokenService->history()) === $pointsBeforeFailure
+        && $auditBrokenService->scheduleInformation()['lastScheduledAttempt']['status'] === 'failed', 'Failed scheduled backup created a recovery point or omitted failure status.');
     $audit = implode("\n", array_map(static fn (string $path): string => (string)file_get_contents($path), glob($logDirectory . '/*.log') ?: []));
-    foreach (['backup.created', 'backup.verified', 'backup.failed', 'backup.pre_change', 'restore.previewed', 'restore.started', 'restore.completed'] as $event) backupAssert(str_contains($audit, '"event":"' . $event . '"'), "Audit event {$event} is missing.");
+    foreach (['backup.created', 'backup.verified', 'backup.failed', 'backup.scheduled.failed', 'restore.previewed', 'restore.started', 'restore.completed'] as $event) backupAssert(str_contains($audit, '"event":"' . $event . '"'), "Audit event {$event} is missing.");
+    backupAssert(!str_contains($audit, 'backup.pre_change'), 'Obsolete pre-change backup audit event was emitted.');
     foreach (['fake-user-password', 'fake-api-secret', 'fake-database-password', $key, $signingContents] as $secret) backupAssert(!str_contains($audit, $secret), 'Backup audit log exposed secret material.');
 
     $validAuth = JsonFileStore::load($runtimePath . '/auth.json');
@@ -265,7 +361,6 @@ try {
 
     echo "Backup and recovery tests passed.\n";
 } finally {
-    ConfigurationMutationBackup::setFactoryForTests(null);
     $oldKey === false ? putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE) : putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . $oldKey);
     $oldSigningKey === false ? putenv(BackupSigningKey::ENVIRONMENT_VARIABLE) : putenv(BackupSigningKey::ENVIRONMENT_VARIABLE . '=' . $oldSigningKey);
     $oldSigningPath === false ? putenv(BackupSigningKey::FILE_ENVIRONMENT_VARIABLE) : putenv(BackupSigningKey::FILE_ENVIRONMENT_VARIABLE . '=' . $oldSigningPath);

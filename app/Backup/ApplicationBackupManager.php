@@ -13,7 +13,7 @@ require_once __DIR__ . '/../Repositories/ApiKeyRepository.php';
 
 final class ApplicationBackupManager
 {
-    public const FORMAT_VERSION = 2;
+    public const FORMAT_VERSION = 3;
     public const MANIFEST_FILE = 'manifest.json';
     public const SIGNATURE_FILE = 'signature.json';
     private string $applicationRoot;
@@ -54,21 +54,18 @@ final class ApplicationBackupManager
         return true;
     }
 
-    public function hasRecoverableBaseline(): bool
+    public function create(string $archivePath, ?string $recoveryPointId = null, string $trigger = 'manual', string $createdBy = 'user'): array
     {
-        if (!$this->hasCompleteSourceSet()) return false;
-        try {
-            $installation = JsonFileStore::load($this->sources['config/installation.json']);
-            return ($installation['version'] ?? null) === 1 && ($installation['initialized'] ?? null) === true;
-        } catch (Throwable $exception) { return false; }
-    }
-
-    public function create(string $archivePath, ?string $recoveryPointId = null): array
-    {
+        if (!in_array($trigger, ['manual', 'scheduled'], true)
+            || !in_array($createdBy, ['user', 'scheduler'], true)
+            || ($trigger === 'manual' && $createdBy !== 'user')
+            || ($trigger === 'scheduled' && $createdBy !== 'scheduler')) {
+            throw new InvalidArgumentException('Backup creation metadata is invalid.');
+        }
         $archivePath = $this->absoluteTargetPath($archivePath);
         $this->assertOutsideApplicationRoot($archivePath);
         if (file_exists($archivePath)) throw new RuntimeException('Backup destination already exists.');
-        return $this->withLock(LOCK_EX, function () use ($archivePath, $recoveryPointId): array {
+        return $this->withLock(LOCK_EX, function () use ($archivePath, $recoveryPointId, $trigger, $createdBy): array {
             $this->ensureDirectory(dirname($archivePath));
             $temporaryPath = dirname($archivePath) . DIRECTORY_SEPARATOR . '.' . basename($archivePath) . '.tmp.' . bin2hex(random_bytes(8));
             $complete = false;
@@ -87,6 +84,8 @@ final class ApplicationBackupManager
                     'createdAt' => gmdate(DATE_ATOM),
                     'application' => ['name' => 'Generic SQL API Framework', 'version' => $this->applicationVersion],
                     'scope' => 'application-configuration',
+                    'trigger' => $trigger,
+                    'createdBy' => $createdBy,
                     'files' => $files,
                     'excluded' => ['encryption_key', 'backup_signing_key', 'sessions', 'runtime_process_state', 'database_availability_state', 'application_runtime_state', 'rate_limit_state', 'logs', 'exports', 'uploads', 'temporary_files', 'backup_files', 'sql_server_data'],
                 ];
@@ -131,6 +130,7 @@ final class ApplicationBackupManager
         return [
             'recoveryPointId' => $manifest['recoveryPointId'], 'createdAt' => $manifest['createdAt'],
             'applicationVersion' => $manifest['application']['version'], 'formatVersion' => $manifest['formatVersion'],
+            'trigger' => $manifest['trigger'] ?? 'legacy', 'createdBy' => $manifest['createdBy'] ?? null,
             'files' => array_column($manifest['files'], 'path'), 'changedFiles' => $changed, 'unchangedFiles' => $unchanged,
             'schemaCompatible' => true, 'encryptionKeyAvailable' => true,
             'verification' => 'valid', 'authenticity' => 'valid', 'warnings' => [],
@@ -253,9 +253,19 @@ final class ApplicationBackupManager
 
     private function validateManifest(array $manifest): void
     {
-        if (count($manifest) !== 7
-            || array_diff(array_keys($manifest), ['formatVersion', 'recoveryPointId', 'createdAt', 'application', 'scope', 'files', 'excluded']) !== []
-            || ($manifest['formatVersion'] ?? null) !== self::FORMAT_VERSION
+        $formatVersion = $manifest['formatVersion'] ?? null;
+        $expectedKeys = $formatVersion === 2
+            ? ['formatVersion', 'recoveryPointId', 'createdAt', 'application', 'scope', 'files', 'excluded']
+            : ['formatVersion', 'recoveryPointId', 'createdAt', 'application', 'scope', 'trigger', 'createdBy', 'files', 'excluded'];
+        if (!in_array($formatVersion, [2, self::FORMAT_VERSION], true)
+            || count($manifest) !== count($expectedKeys)
+            || array_diff(array_keys($manifest), $expectedKeys) !== []
+            || array_diff($expectedKeys, array_keys($manifest)) !== []
+            || ($formatVersion === self::FORMAT_VERSION
+                && (!in_array($manifest['trigger'] ?? null, ['manual', 'scheduled'], true)
+                    || !in_array($manifest['createdBy'] ?? null, ['user', 'scheduler'], true)
+                    || (($manifest['trigger'] ?? null) === 'manual' && ($manifest['createdBy'] ?? null) !== 'user')
+                    || (($manifest['trigger'] ?? null) === 'scheduled' && ($manifest['createdBy'] ?? null) !== 'scheduler')))
             || preg_match('/^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{12}$/', $manifest['recoveryPointId'] ?? '') !== 1
             || !is_string($manifest['createdAt'] ?? null) || strtotime($manifest['createdAt']) === false
             || !is_array($manifest['application'] ?? null) || count($manifest['application']) !== 2

@@ -6,13 +6,12 @@ ob_start();
 
 require_once __DIR__ . '/../config/constants.php';
 require_once __DIR__ . '/../core/ExceptionHandler.php';
-ExceptionHandler::register();
+ExceptionHandler::register('api');
 require_once __DIR__ . '/../app/Security/SecurityConfiguration.php';
 require_once __DIR__ . '/../app/Http/RequestBodyReader.php';
 
 if (SecurityConfiguration::isProduction()) {
     ini_set('display_errors', '0');
-    ini_set('log_errors', '1');
 }
 
 $allowed_origins = SecurityConfiguration::allowedOrigins();

@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../../config/constants.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/RuntimeControls.php';
+require_once __DIR__ . '/../Backup/BackupSchedule.php';
 
 final class RuntimeConfiguration
 {
@@ -96,7 +97,7 @@ final class RuntimeConfiguration
     public static function adminDefaults(): array
     {
         return [
-            'version' => 5,
+            'version' => 6,
             'server' => [
                 'apiPortMinimum' => 8000,
                 'apiPortMaximum' => 8100,
@@ -119,6 +120,7 @@ final class RuntimeConfiguration
             ],
             'authentication' => ['mode' => 'session'],
             'runtime' => RuntimeControls::defaults(),
+            'backup' => BackupSchedule::defaults(),
         ];
     }
 

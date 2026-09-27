@@ -117,7 +117,6 @@ echo
 
 exec "$PHP_BIN" -c "$PHP_INI_PATH" \
     -d "opcache.file_cache=$OPCACHE_PATH" \
-    -d "error_log=$LOG_PATH/php_errors.log" \
     -S "127.0.0.1:$ADMIN_PORT" \
     -t "$ADMIN_PATH" \
     "$ADMIN_PATH/router.php"

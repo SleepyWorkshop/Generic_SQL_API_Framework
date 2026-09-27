@@ -80,10 +80,11 @@ try {
     ]);
     $migrated = $repository->load();
     runtimeAssert(
-        $migrated['version'] === 5
+        $migrated['version'] === 6
             && $migrated['authentication']['mode'] === 'none'
             && isset($migrated['server'])
             && $migrated['runtime'] === RuntimeControls::defaults()
+            && $migrated['backup'] === BackupSchedule::defaults()
             && !isset($migrated['features']),
         'Version-1 Admin configuration was not safely migrated.'
     );
@@ -91,11 +92,11 @@ try {
     $versionTwo['version'] = 2;
     $versionTwo['features'] = ['readData' => true, 'writeData' => true, 'pagination' => true, 'sorting' => true, 'metadata' => true];
     unset($versionTwo['server']['parserPortMinimum'], $versionTwo['server']['parserPortMaximum']);
-    unset($versionTwo['runtime']);
+    unset($versionTwo['runtime'], $versionTwo['backup']);
     JsonFileStore::save($configurationPath, $versionTwo);
     $migratedVersionTwo = $repository->load();
     runtimeAssert(
-        $migratedVersionTwo['version'] === 5
+        $migratedVersionTwo['version'] === 6
             && $migratedVersionTwo['server']['parserPortMinimum'] === 8101
             && !isset($migratedVersionTwo['features']),
         'Version-2 Admin configuration was not safely migrated.'
@@ -107,9 +108,10 @@ try {
     JsonFileStore::save($configurationPath, $versionFour);
     $migratedVersionFour = $repository->load();
     runtimeAssert(
-        $migratedVersionFour['version'] === 5
+        $migratedVersionFour['version'] === 6
             && $migratedVersionFour['authentication']['mode'] === 'api_key'
-            && $migratedVersionFour['runtime'] === RuntimeControls::defaults(),
+            && $migratedVersionFour['runtime'] === RuntimeControls::defaults()
+            && $migratedVersionFour['backup'] === BackupSchedule::defaults(),
         'Version-4 Admin configuration was not safely migrated.'
     );
     $configuration = AdminConfigurationRepository::defaults();

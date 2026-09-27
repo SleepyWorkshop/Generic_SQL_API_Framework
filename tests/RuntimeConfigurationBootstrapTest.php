@@ -59,7 +59,7 @@ try {
         'Production application runtimes did not start enabled with a valid schema.'
     );
     bootstrapAssert(
-        $admin['version'] === 5
+        $admin['version'] === 6
             && $admin['server']['apiPortMinimum'] === 8000
             && $admin['server']['apiPortMaximum'] === 8100
             && $admin['server']['parserPortMinimum'] === 8101
@@ -67,6 +67,7 @@ try {
             && $admin['server']['adminPort'] === 8090
             && $admin['server']['bindAddress'] === '127.0.0.1'
             && $admin['runtime'] === RuntimeControls::defaults()
+            && $admin['backup'] === BackupSchedule::defaults()
             && !array_key_exists('features', $admin),
         'Admin runtime defaults are unsafe or malformed.'
     );

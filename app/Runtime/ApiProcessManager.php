@@ -224,7 +224,6 @@ class ApiProcessManager
         $documentRoot = $this->service === 'api' ? '/api' : '/sqlparser';
         array_push(
             $command,
-            '-d', 'error_log=' . $this->root . '/logs/php_errors.log',
             '-S', $address . ':' . $port,
             '-t', $this->root . $documentRoot,
             $this->root . $documentRoot . '/router.php'

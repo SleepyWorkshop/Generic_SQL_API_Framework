@@ -18,7 +18,6 @@ require_once __DIR__ . '/../Health/ApplicationHealthMonitor.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../../core/Logger.php';
-require_once __DIR__ . '/../Backup/ConfigurationMutationBackup.php';
 require_once __DIR__ . '/../Backup/BackupRecoveryService.php';
 require_once __DIR__ . '/../../core/OperationalLogger.php';
 
@@ -276,7 +275,6 @@ final class AdminService
             if (DatabaseConfigurationResolver::resolve($encrypted) !== $resolved) {
                 throw new RuntimeException('Encrypted database configuration verification failed.');
             }
-            if ($this->runtimeDatabasePath) ConfigurationMutationBackup::before('database_configuration');
             JsonFileStore::save($this->databasePath, $encrypted);
         } catch (DatabaseCredentialException $exception) {
             $this->logger->audit('configuration.database', 'failure', 'ERROR', [
@@ -319,6 +317,7 @@ final class AdminService
                 'apiKeyConfigured' => (new ApiKeyAuthenticator())->configured() || (new ApiKeyService())->configured(),
             ],
             'runtime' => $settings['runtime'],
+            'backup' => $settings['backup'],
             'security' => [
                 'csrfEnabled' => true,
                 'session' => SecurityConfiguration::sessionOptions(),
@@ -419,6 +418,23 @@ final class AdminService
         }
     }
 
+    public function saveBackupSchedule(array $backup): array
+    {
+        try {
+            $result = $this->configuration->update(function (array &$settings) use ($backup): array {
+                $settings['backup'] = $backup;
+                return $backup;
+            });
+            $this->configurationAudit('backup_schedule');
+            return $result;
+        } catch (Throwable $exception) {
+            $this->logger->audit('configuration.changed', 'failure', 'ERROR', [
+                'configurationCategory' => 'backup_schedule', 'reason' => 'save_failed', 'component' => 'admin',
+            ]);
+            throw new ApiRequestException('Unable to save backup schedule.', 'BACKUP_SCHEDULE_SAVE_FAILED', [], 500);
+        }
+    }
+
     public function controlApi(string $operation): array
     {
         if (SecurityConfiguration::isProduction()) {
@@ -472,6 +488,11 @@ final class AdminService
     public function backupHistory(): array
     {
         return $this->backupRecovery->history();
+    }
+
+    public function backupScheduleInformation(): array
+    {
+        return $this->backupRecovery->scheduleInformation();
     }
 
     public function createBackup(): array

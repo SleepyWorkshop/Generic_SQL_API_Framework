@@ -6,7 +6,7 @@ ob_start();
 
 require_once __DIR__ . '/../config/constants.php';
 require_once __DIR__ . '/../core/ExceptionHandler.php';
-ExceptionHandler::register();
+ExceptionHandler::register('admin');
 require_once __DIR__ . '/../app/Middleware/AuthenticationMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/AdminAuthorizationMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/LocalAdminMiddleware.php';
@@ -71,7 +71,8 @@ $adminActions = [
     'admin.cors.save', 'admin.authentication.save',
     'admin.runtime.save',
     'admin.backup.history', 'admin.backup.create', 'admin.backup.download',
-    'admin.backup.preview', 'admin.backup.restore',
+    'admin.backup.preview', 'admin.backup.restore', 'admin.backup.schedule',
+    'admin.backup.schedule.save',
     'admin.operational.event',
 ];
 $allActions = array_merge($setupActions, $authActions, $userActions, $apiKeyActions, $roleActions, $adminActions);

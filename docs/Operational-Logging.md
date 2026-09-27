@@ -18,17 +18,16 @@ logs/audit/YYYY-MM-DD.jsonl
 ```
 
 `GENERIC_OPERATIONAL_LOG_DIR` may point operational diagnostics at another
-protected base directory. `GENERIC_LOG_DIR` similarly relocates the legacy and
-structured audit base; production paths must remain outside every document root.
-Existing safe query timing/diagnostic compatibility records may still appear in
-`logs/YYYY-MM-DD.log`; security audit JSONL is no longer mixed into that file.
+protected base directory. `GENERIC_LOG_DIR` relocates the structured audit base;
+production paths must remain outside every document root. Normal application
+logging does not create a root-level date file or `php_errors.log`.
 
 API, Admin, database, and parser events include the existing request ID. A
 typical entry is:
 
 ```text
 [2026-09-27 01:42:18] [INFO] [req_8f92ab] admin.restore.activation.start
-    recovery_point=20260926T204317Z-b3be13e0c582
+    Recovery Point: 20260926T204317Z-b3be13e0c582
 ```
 
 Use the response `meta.requestId` (also returned in `X-Request-ID`) to search the
@@ -50,6 +49,16 @@ The Admin browser reports only a fixed allowlist of restore and JavaScript
 failure events through an authenticated, authorized, CSRF-protected endpoint.
 It is not a general-purpose browser log collector and cannot submit arbitrary
 fields or event names.
+
+Each HTTP/CLI entry point registers its current `api`, `admin`, or `sqlparser`
+context. Supported PHP warnings, notices, deprecations, and recoverable errors
+are captured by the central error handler and written as text to that context.
+Uncaught exceptions and supported fatal/shutdown errors are recorded once in the
+same operational context and once as a security audit event. Database lifecycle
+failures use the database log explicitly. Native PHP error logging is disabled
+after application bootstrap to prevent duplicate generic files; startup/engine
+failures before bootstrap remain the responsibility of IIS, Nginx/PHP-FPM, or
+the service manager. PHP cannot capture every process or engine crash.
 
 ## Security and failure behavior
 

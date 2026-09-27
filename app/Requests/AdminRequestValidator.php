@@ -5,6 +5,7 @@ require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../Runtime/DatabaseAuthenticationSupport.php';
 require_once __DIR__ . '/../Configuration/RuntimeControls.php';
+require_once __DIR__ . '/../Backup/BackupSchedule.php';
 
 final class AdminRequestValidator
 {
@@ -32,6 +33,7 @@ final class AdminRequestValidator
         'admin.settings.get',
         'admin.backup.history',
         'admin.backup.create',
+        'admin.backup.schedule',
     ];
 
     public function validate(array $request): array
@@ -76,6 +78,19 @@ final class AdminRequestValidator
                 $this->invalid([['path' => rtrim($path, '.'), 'message' => $exception->getMessage()]]);
             }
             return ['action' => $action, 'runtime' => $runtime];
+        }
+        if ($action === 'admin.backup.schedule.save') {
+            $this->rejectUnknown($request, ['action', 'backup']);
+            $backup = $request['backup'] ?? null;
+            if (!is_array($backup) || array_is_list($backup)) {
+                $this->invalid([['path' => 'backup', 'message' => 'Backup schedule must be an object.']]);
+            }
+            try {
+                BackupSchedule::validate($backup);
+            } catch (InvalidArgumentException $exception) {
+                $this->invalid([['path' => 'backup', 'message' => $exception->getMessage()]]);
+            }
+            return ['action' => $action, 'backup' => $backup];
         }
         if ($action === 'admin.backup.download') {
             $this->rejectUnknown($request, ['action', 'recoveryPointId']);

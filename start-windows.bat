@@ -281,7 +281,6 @@ REM ==================================================
 "%PHP%" ^
     -c "%PHP_INI%" ^
     -d "opcache.file_cache=%OPCACHE%" ^
-    -d "error_log=%LOGS%\php_errors.log" ^
     -S "127.0.0.1:%ADMIN_PORT%" ^
     -t "%ADMIN%" ^
     "%ADMIN%\router.php"

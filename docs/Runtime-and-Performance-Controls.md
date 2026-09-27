@@ -1,8 +1,8 @@
 # Runtime and performance controls
 
-Operational controls are stored under `runtime` in `config/admin.json` schema version 5. A System Administrator can edit them in **Configuration → Runtime & Performance**. The backend validates the complete runtime object before the existing atomic JSON writer replaces the file. A failed validation or write leaves the previous configuration intact.
+Operational controls are stored under `runtime` in `config/admin.json` schema version 6. A System Administrator can edit them in **Configuration → Runtime & Performance**. The backend validates the complete runtime object before the existing atomic JSON writer replaces the file. A failed validation or write leaves the previous configuration intact.
 
-Schema versions 1–4 migrate in place to version 5. Existing server, CORS, and authentication values are preserved and the runtime section receives the defaults below. Runtime settings are loaded for new requests, so no API, SQL Parser, or Admin restart is required.
+Schema versions 1–5 migrate in place to version 6. Existing server, CORS, and authentication values are preserved and missing runtime/backup sections receive validated defaults. Runtime settings are loaded for new requests, so no API, SQL Parser, or Admin restart is required.
 
 ## Implemented settings
 

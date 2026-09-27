@@ -362,8 +362,11 @@ try {
     }
     unifiedAdminAssert(str_contains($adminJavaScript, 'SQL query timeout (seconds)'), 'Configured query timeout is missing from the Admin Console.');
     unifiedAdminAssert(str_contains($adminJavaScript, 'admin.runtime.save'), 'Runtime configuration save is missing from the Admin Console.');
-    foreach (['admin.backup.history', 'admin.backup.create', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore'] as $backupAction) {
+    foreach (['admin.backup.history', 'admin.backup.create', 'admin.backup.schedule', 'admin.backup.schedule.save', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore'] as $backupAction) {
         unifiedAdminAssert(str_contains($adminJavaScript, $backupAction), "Admin Backup & Recovery UI is missing {$backupAction}.");
+    }
+    foreach (['Automatic Backups', 'Enable scheduled backups', '>Hourly<', '>Daily<', '>Weekly<', '"Manual"', '"Scheduled"', '"Legacy"'] as $scheduleUi) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $scheduleUi), "Admin Backup & Recovery UI is missing {$scheduleUi}.");
     }
     unifiedAdminAssert(
         str_contains($adminJavaScript, 'const restoreButton = restoreEvent.currentTarget;')

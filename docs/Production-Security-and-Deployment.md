@@ -250,7 +250,7 @@ Keep separate logs with separate rotation policy:
 - `Backend/logs/{api,admin,database,sqlparser}/YYYY-MM-DD.txt` for human-readable
   operational diagnostics and request IDs;
 - `Backend/logs/audit/YYYY-MM-DD.jsonl` for structured security audit events.
-- `Backend/logs/YYYY-MM-DD.log` for legacy safe query timing/diagnostic records.
+- `Backend/logs/{api,admin,database,sqlparser}/YYYY-MM-DD.txt` for human-readable operational diagnostics.
 
 Grant the PHP identity write access to application/PHP log targets and deny browser access. Rotate and retain logs according to volume and organizational policy. Existing application logging records parameter counts/types rather than values; operators must also avoid adding passwords, encryption keys, API keys, cookies, authorization headers, session identifiers, or raw credentials to web-server log formats.
 
