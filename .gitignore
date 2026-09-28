@@ -13,7 +13,8 @@ logs/
 exports/
 uploads/
 storage/
-backups/
+backups/*
+!backups/.gitkeep
 *.zip
 
 # PHP Runtime Generated Files

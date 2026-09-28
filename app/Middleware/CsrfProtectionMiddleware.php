@@ -33,6 +33,7 @@ final class CsrfProtectionMiddleware extends Middleware
         'admin.database.disconnect',
         'admin.database.restart',
         'admin.server.save',
+        'admin.console.restart',
         'admin.api.start',
         'admin.api.stop',
         'admin.api.restart',

@@ -128,7 +128,8 @@ points, so interrupted creation/restore cannot expose a completed artifact.
 
 ## CLI
 
-All paths must be absolute and outside the application root:
+All paths must be absolute and resolve beneath the repository's dedicated
+`backups/` directory:
 
 ```text
 php scripts/application-backup.php create <absolute-new-backup.zip>
@@ -143,7 +144,7 @@ and uses the managed backup directory and shared recovery service. Configure it
 in Windows Task Scheduler or Linux cron/systemd at the desired interval; the OS
 controls when it runs. `verify` modifies nothing.
 `stage-restore` consumes the ZIP directly and copies only the verified allowlist,
-manifest, and signature into a new external staging directory. Manual extraction
+manifest, and signature into a new staging directory under `backups/`. Manual extraction
 is neither required nor supported.
 
 Example Linux cron entry (daily at 02:00, with absolute paths):
@@ -173,8 +174,13 @@ activation, and health-check lifecycle for troubleshooting.
 
 ## Storage, retention, and operations
 
-Set `GENERIC_BACKUP_DIR` to a protected path outside every document root
-and repository. The default is an adjacent `backups` directory for local use.
+Runtime recovery points are stored in the Backend repository's dedicated
+`backups/` directory. The directory is tracked only through `.gitkeep`; all
+generated ZIPs, restore uploads, schedule status, and staging artifacts are
+ignored by Git. Path resolution rejects destinations outside this directory,
+including traversal and symlink escapes. Keep the Backend repository itself
+outside public document roots and restrict the `backups/` directory to the
+application service identity.
 After each successful manual or scheduled creation, retention keeps the newest
 configured number of valid managed recovery points. The just-created recovery
 point is protected, invalid/unrelated files are ignored, and deletion is limited

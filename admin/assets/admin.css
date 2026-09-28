@@ -223,6 +223,43 @@ h3 {
   gap: 8px;
   font-weight: 750;
 }
+.service-actions {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.service-actions__heading h2,
+.service-actions__heading p {
+  margin: 0;
+}
+.service-actions__heading {
+  display: grid;
+  gap: 5px;
+}
+.service-actions__table {
+  min-width: 620px;
+}
+.service-actions__table .status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.service-actions__table td:last-child {
+  min-width: 210px;
+}
+.restart-state {
+  display: grid;
+  min-height: 190px;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.restart-state h2,
+.restart-state p {
+  margin: 0;
+}
 .dot {
   width: 9px;
   height: 9px;
@@ -1289,6 +1326,50 @@ dialog:not(.user-dialog):not(.backup-dialog) {
 
   .shell {
     display: block;
+  }
+
+  .service-actions .table-wrap {
+    overflow: visible;
+    border: 0;
+  }
+
+  .service-actions__table,
+  .service-actions__table tbody,
+  .service-actions__table tr,
+  .service-actions__table th,
+  .service-actions__table td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .service-actions__table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .service-actions__table tr {
+    margin-bottom: 12px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+
+  .service-actions__table th,
+  .service-actions__table td {
+    padding: 4px 0;
+    border: 0;
+  }
+
+  .service-actions__table th {
+    color: var(--ink);
+    font-size: 14px;
+    letter-spacing: normal;
+    text-transform: none;
   }
 
   .sidebar {

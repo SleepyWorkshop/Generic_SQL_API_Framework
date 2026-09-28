@@ -123,7 +123,7 @@ try {
         'CSRF_VALIDATION_FAILED',
         403
     );
-    foreach (['admin.server.save', 'admin.runtime.save', 'admin.api.start', 'admin.api.stop', 'admin.api.restart', 'admin.sqlParser.start', 'admin.sqlParser.stop', 'admin.sqlParser.restart', 'admin.database.connect', 'admin.database.disconnect', 'admin.database.restart'] as $action) {
+    foreach (['admin.server.save', 'admin.runtime.save', 'admin.console.restart', 'admin.api.start', 'admin.api.stop', 'admin.api.restart', 'admin.sqlParser.start', 'admin.sqlParser.stop', 'admin.sqlParser.restart', 'admin.database.connect', 'admin.database.disconnect', 'admin.database.restart'] as $action) {
         securityFailure(fn () => $middleware->handle(['action' => $action]), 'CSRF_VALIDATION_FAILED', 403);
     }
     securityAssert($missing->getDetails() === [], 'CSRF failure exposed internal details.');

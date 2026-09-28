@@ -527,7 +527,7 @@
     else loginView();
   }
 
-  function healthCard(name, item, details = [], controls = "") {
+  function healthCard(name, item, details = []) {
     const ok = item.healthy ?? item.running ?? item.status === "healthy";
     return `<article class="card health-card"><h3>${escapeHtml(name)}</h3><div class="status-line"><span class="dot${ok ? "" : " offline"}"></span>${escapeHtml(item.status || (item.running ? "running" : "stopped"))}</div>${details
       .filter(([, v]) => v !== null && v !== undefined && v !== "")
@@ -537,7 +537,7 @@
       )
       .join(
         "",
-      )}${controls ? `<div class="actions section-actions">${controls}</div>` : ""}</article>`;
+      )}</article>`;
   }
   function serviceControls(service, item) {
     if (item.lifecycleManaged === false) return "";
@@ -553,6 +553,32 @@
     return database.available
       ? '<button data-database-runtime="disconnect" class="danger">Disconnect</button><button data-database-runtime="restart" class="secondary">Restart</button>'
       : '<button data-database-runtime="connect">Connect</button>';
+  }
+  function serviceActionRow(name, item, controls) {
+    const ok = item.healthy ?? item.running ?? item.status === "healthy";
+    return `<tr><th scope="row">${escapeHtml(name)}</th><td><span class="status-line"><span class="dot${ok ? "" : " offline"}"></span>${escapeHtml(item.status || (item.running ? "running" : "stopped"))}</span></td><td><div class="actions">${controls}</div></td></tr>`;
+  }
+  const wait = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds));
+  async function waitForAdminConsole(checkAfterMilliseconds = 750) {
+    await wait(checkAfterMilliseconds);
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      try {
+        const health = row(await call({ action: "admin.status" }));
+        if (health.adminConsole?.healthy) {
+          await healthView();
+          notify("Admin Console is available again.");
+          return;
+        }
+      } catch {
+        // A short connection failure is expected while a managed host reloads.
+      }
+      await wait(1000);
+    }
+    content.innerHTML = '<section class="restart-state" role="alert"><h2>Admin Console is still restarting</h2><p>It has not become available yet. Refresh after the hosting service finishes restarting.</p><button type="button" id="retry-admin-status">Retry</button></section>';
+    content
+      .querySelector("#retry-admin-status")
+      .addEventListener("click", () => void waitForAdminConsole());
   }
   async function infoView() {
     loading();
@@ -1093,7 +1119,7 @@
     const health = row(await call({ action: "admin.health" })),
       checks = health.monitoring?.checks || {};
     title.textContent = "System Health";
-    content.className = "panel";
+    content.className = "panel stack";
     const serviceDetails = (service) =>
       service.controlMode === "application"
         ? [
@@ -1119,12 +1145,10 @@
       "API Server",
       health.api,
       serviceDetails(health.api),
-      serviceControls("api", health.api),
     )}${healthCard(
       "SQL Parser",
       health.sqlParser,
       serviceDetails(health.sqlParser),
-      serviceControls("sqlParser", health.sqlParser),
     )}${healthCard(
       "Database",
       health.database,
@@ -1133,7 +1157,6 @@
         ["Port", health.database.port],
         ["Database", health.database.database],
       ],
-      databaseControls(health.database),
     )}${healthCard("PHP Runtime", health.phpRuntime, [
       ["PHP", health.phpRuntime.phpVersion],
       ["ODBC", health.phpRuntime.odbcAvailable ? "Available" : "Unavailable"],
@@ -1150,7 +1173,50 @@
           ["Category", checks[name].category],
         ]),
       )
-      .join("")}</div>`;
+      .join("")}</div><section class="service-actions" aria-labelledby="service-actions-title"><div class="service-actions__heading"><h2 id="service-actions-title">Service Actions</h2><p class="help">Control application services without mixing lifecycle actions into health diagnostics.</p></div><div class="table-wrap"><table class="service-actions__table"><thead><tr><th>Service</th><th>Status</th><th>Actions</th></tr></thead><tbody>${serviceActionRow(
+      "Admin Console",
+      health.adminConsole,
+      '<button type="button" class="secondary" data-admin-console-restart>Restart</button>',
+    )}${serviceActionRow(
+      "API Server",
+      health.api,
+      serviceControls("api", health.api),
+    )}${serviceActionRow(
+      "SQL Parser",
+      health.sqlParser,
+      serviceControls("sqlParser", health.sqlParser),
+    )}${serviceActionRow(
+      "Database",
+      health.database,
+      databaseControls(health.database),
+    )}</tbody></table></div></section>`;
+    content
+      .querySelector("[data-admin-console-restart]")
+      .addEventListener("click", async (event) => {
+        if (
+          !(await confirmAction(
+            "The Admin Console will be temporarily unavailable while it restarts.",
+            "Restart Admin Console?",
+          ))
+        )
+          return;
+        const button = event.currentTarget,
+          done = setButtonBusy(button, "Restarting…");
+        try {
+          const result = row(
+            await call({ action: "admin.console.restart" }, true),
+          );
+          if (!result.accepted)
+            throw new Error("Admin Console restart was not accepted.");
+          title.textContent = "System Health";
+          content.className = "panel restarting";
+          content.innerHTML = '<section class="restart-state" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><h2>Admin Console restarting...</h2><p>Waiting for the service to become available.</p></section>';
+          await waitForAdminConsole(result.checkAfterMilliseconds);
+        } catch (error) {
+          done();
+          notify(error.message, true);
+        }
+      });
     content.querySelectorAll("[data-service]").forEach((button) =>
       button.addEventListener("click", async () => {
         const operation = button.dataset.operation,

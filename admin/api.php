@@ -64,6 +64,7 @@ $apiKeyActions = ['auth.apiKeys.list','auth.apiKeys.create','auth.apiKeys.enable
 $roleActions = ['auth.roles.list'];
 $adminActions = [
     'admin.status', 'admin.health', 'admin.system.info',
+    'admin.console.restart',
     'admin.api.start', 'admin.api.stop', 'admin.api.restart',
     'admin.sqlParser.start', 'admin.sqlParser.stop', 'admin.sqlParser.restart',
     'admin.database.get', 'admin.database.connect', 'admin.database.disconnect', 'admin.database.restart', 'admin.database.test', 'admin.database.save',

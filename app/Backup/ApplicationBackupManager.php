@@ -21,6 +21,7 @@ final class ApplicationBackupManager
     private string $applicationVersion;
     private BackupSigningKey $signingKey;
     private string $lockPath;
+    private string $backupRoot;
 
     public function __construct(?string $applicationRoot = null, ?array $sources = null, ?string $applicationVersion = null, ?BackupSigningKey $signingKey = null, ?string $lockPath = null)
     {
@@ -36,6 +37,7 @@ final class ApplicationBackupManager
         $this->applicationVersion = $applicationVersion ?? $this->readApplicationVersion();
         $this->signingKey = $signingKey ?? new BackupSigningKey($this->applicationRoot);
         $this->lockPath = $lockPath ?? $this->applicationRoot . '/runtime/.backup-recovery.lock';
+        $this->backupRoot = $this->applicationRoot . '/backups';
         $this->validateSourceMap();
     }
 
@@ -63,7 +65,7 @@ final class ApplicationBackupManager
             throw new InvalidArgumentException('Backup creation metadata is invalid.');
         }
         $archivePath = $this->absoluteTargetPath($archivePath);
-        $this->assertOutsideApplicationRoot($archivePath);
+        $this->assertInsideBackupRoot($archivePath);
         if (file_exists($archivePath)) throw new RuntimeException('Backup destination already exists.');
         return $this->withLock(LOCK_EX, function () use ($archivePath, $recoveryPointId, $trigger, $createdBy): array {
             $this->ensureDirectory(dirname($archivePath));
@@ -107,17 +109,17 @@ final class ApplicationBackupManager
         });
     }
 
-    public function verify(string $archivePath, bool $requireEncryptionKey = true, bool $enforceExternalLocation = true): array
+    public function verify(string $archivePath, bool $requireEncryptionKey = true): array
     {
         $archivePath = $this->absoluteExistingFile($archivePath);
-        if ($enforceExternalLocation) $this->assertOutsideApplicationRoot($archivePath);
+        $this->assertInsideBackupRoot($archivePath);
         return $this->verifyArchive($archivePath, $requireEncryptionKey);
     }
 
     public function preview(string $archivePath): array
     {
         $archivePath = $this->absoluteExistingFile($archivePath);
-        $this->assertOutsideApplicationRoot($archivePath);
+        $this->assertInsideBackupRoot($archivePath);
         $manifest = $this->verifyArchive($archivePath, true);
         $changed = [];
         $unchanged = [];
@@ -148,9 +150,9 @@ final class ApplicationBackupManager
     public function stageRestore(string $archivePath, string $targetDirectory): array
     {
         $archivePath = $this->absoluteExistingFile($archivePath);
-        $this->assertOutsideApplicationRoot($archivePath);
+        $this->assertInsideBackupRoot($archivePath);
         $targetDirectory = $this->absoluteTargetPath($targetDirectory);
-        $this->assertOutsideApplicationRoot($targetDirectory);
+        $this->assertInsideBackupRoot($targetDirectory);
         if (file_exists($targetDirectory)) throw new RuntimeException('Restore staging destination must not already exist.');
         $manifest = $this->verifyArchive($archivePath, true);
         $entries = SafeZipArchive::read($archivePath);
@@ -173,7 +175,7 @@ final class ApplicationBackupManager
     public function activateRestore(string $archivePath, ?callable $healthCheck = null): array
     {
         $archivePath = $this->absoluteExistingFile($archivePath);
-        $this->assertOutsideApplicationRoot($archivePath);
+        $this->assertInsideBackupRoot($archivePath);
         return $this->withLock(LOCK_EX, function () use ($archivePath, $healthCheck): array {
             $manifest = $this->verifyArchive($archivePath, true);
             $entries = SafeZipArchive::read($archivePath);
@@ -393,13 +395,20 @@ final class ApplicationBackupManager
         return rtrim($parent, '/\\') . DIRECTORY_SEPARATOR . basename($path);
     }
 
-    private function assertOutsideApplicationRoot(string $path): void
+    private function assertInsideBackupRoot(string $path): void
     {
-        $root = realpath($this->applicationRoot);
-        if ($root === false) throw new RuntimeException('Application root is unavailable.');
+        $applicationRoot = realpath($this->applicationRoot);
+        $root = realpath($this->backupRoot);
+        if ($applicationRoot === false || $root === false || !is_dir($root)) throw new RuntimeException('Backup root is unavailable.');
+        $expectedRoot = rtrim(str_replace('\\', '/', $applicationRoot), '/') . '/backups/';
         $normalizedRoot = rtrim(str_replace('\\', '/', $root), '/') . '/';
         $normalizedPath = rtrim(str_replace('\\', '/', $path), '/') . '/';
-        if (str_starts_with(PHP_OS_FAMILY === 'Windows' ? strtolower($normalizedPath) : $normalizedPath, PHP_OS_FAMILY === 'Windows' ? strtolower($normalizedRoot) : $normalizedRoot)) throw new RuntimeException('Backup and restore staging paths must be outside the application root.');
+        $comparisonExpectedRoot = PHP_OS_FAMILY === 'Windows' ? strtolower($expectedRoot) : $expectedRoot;
+        $comparisonRoot = PHP_OS_FAMILY === 'Windows' ? strtolower($normalizedRoot) : $normalizedRoot;
+        $comparisonPath = PHP_OS_FAMILY === 'Windows' ? strtolower($normalizedPath) : $normalizedPath;
+        if ($comparisonRoot !== $comparisonExpectedRoot || !str_starts_with($comparisonPath, $comparisonRoot)) {
+            throw new RuntimeException('Backup and restore staging paths must remain inside the project backup directory.');
+        }
     }
 
     private function isAbsolutePath(string $path): bool

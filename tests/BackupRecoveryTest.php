@@ -66,7 +66,7 @@ function backupCreateLegacyV2(string $source, string $target, string $encodedSig
 
 $directory = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'generic-backup-recovery-' . bin2hex(random_bytes(8));
 $applicationRoot = $directory . '/application';
-$backupParent = $directory . '/protected-backups';
+$backupParent = $applicationRoot . '/backups';
 $runtimePath = $applicationRoot . '/config';
 $databasePath = $applicationRoot . '/database/config/database.json';
 $key = base64_encode(random_bytes(32));
@@ -385,7 +385,20 @@ try {
     $failedBundle = $backupParent . '/backup-failed.zip';
     backupFailure(fn () => $brokenManager->create($failedBundle), 'Backup with a missing source succeeded.');
     backupAssert(!file_exists($failedBundle) && glob($backupParent . '/.backup-failed.zip.tmp.*') === [], 'Failed backup left temporary artifacts.');
-    backupFailure(fn () => $manager->create($applicationRoot . '/unsafe-backup.zip'), 'Backup was allowed inside the application root.');
+    backupFailure(fn () => $manager->create($directory . '/outside-backup.zip'), 'Backup was allowed outside the project backup directory.');
+    backupAssert(!file_exists($directory . '/outside-backup.zip'), 'Rejected external backup path created an artifact.');
+    backupFailure(fn () => $manager->create($backupParent . '/../traversal-backup.zip'), 'Backup path traversal escaped the project backup directory.');
+    backupAssert(!file_exists($applicationRoot . '/traversal-backup.zip'), 'Rejected traversal path created an artifact.');
+    if (PHP_OS_FAMILY !== 'Windows' && function_exists('symlink')) {
+        $symlinkApplication = $directory . '/symlink-application';
+        $symlinkTarget = $directory . '/symlink-target';
+        mkdir($symlinkApplication, 0700, true);
+        mkdir($symlinkTarget, 0700, true);
+        symlink($symlinkTarget, $symlinkApplication . '/backups');
+        $symlinkManager = new ApplicationBackupManager($symlinkApplication, $sources, 'test-version');
+        backupFailure(fn () => $symlinkManager->create($symlinkApplication . '/backups/escaped.zip'), 'Symlinked backup root escaped the project directory.');
+        backupAssert(!file_exists($symlinkTarget . '/escaped.zip'), 'Rejected symlink escape created an artifact.');
+    }
 
     echo "Backup and recovery tests passed.\n";
 } finally {

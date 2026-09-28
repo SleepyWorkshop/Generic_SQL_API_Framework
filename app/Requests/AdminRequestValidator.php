@@ -20,6 +20,7 @@ final class AdminRequestValidator
         'admin.status',
         'admin.health',
         'admin.system.info',
+        'admin.console.restart',
         'admin.api.start',
         'admin.api.stop',
         'admin.api.restart',

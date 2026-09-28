@@ -10,7 +10,6 @@ require_once __DIR__ . '/../../core/JsonFileStore.php';
 
 final class BackupRecoveryService
 {
-    public const DIRECTORY_ENVIRONMENT_VARIABLE = 'GENERIC_BACKUP_DIR';
     public const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
     private ApplicationBackupManager $manager;
     private string $directory;
@@ -22,9 +21,7 @@ final class BackupRecoveryService
     public function __construct(?ApplicationBackupManager $manager = null, ?string $directory = null, ?Logger $logger = null, ?callable $healthCheck = null, ?OperationalLogger $operationalLogger = null, ?callable $scheduleProvider = null)
     {
         $this->manager = $manager ?? new ApplicationBackupManager();
-        $configured = getenv(self::DIRECTORY_ENVIRONMENT_VARIABLE);
-        $this->directory = rtrim($directory ?? (is_string($configured) && trim($configured) !== ''
-            ? trim($configured) : dirname(dirname(__DIR__, 2)) . '/backups'), '/\\');
+        $this->directory = rtrim($directory ?? dirname(dirname(__DIR__, 2)) . '/backups', '/\\');
         $this->logger = $logger ?? new Logger();
         $this->operationalLogger = $operationalLogger ?? new OperationalLogger();
         $this->scheduleProvider = $scheduleProvider ?? static fn (): array => (new AdminConfigurationRepository())->load()['backup'];

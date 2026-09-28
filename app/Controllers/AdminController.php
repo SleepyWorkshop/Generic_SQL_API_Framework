@@ -22,6 +22,7 @@ final class AdminController extends BaseController
         try {
             if ($action === 'admin.status' || $action === 'admin.health') $result = $this->service->status();
             elseif ($action === 'admin.system.info') $result = $this->service->systemInformation();
+            elseif ($action === 'admin.console.restart') $result = $this->service->restartAdminConsole();
             elseif ($action === 'admin.api.start') $result = $this->service->controlApi('start');
             elseif ($action === 'admin.api.stop') $result = $this->service->controlApi('stop');
             elseif ($action === 'admin.api.restart') $result = $this->service->controlApi('restart');

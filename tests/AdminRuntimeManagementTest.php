@@ -51,6 +51,10 @@ try {
         ],
     ])['server'];
     runtimeAssert($validServer['apiPortMinimum'] === 18120, 'Valid port range was not normalized.');
+    runtimeAssert(
+        $validator->validate(['action' => 'admin.console.restart'])['action'] === 'admin.console.restart',
+        'Admin Console restart action was not accepted by the fixed action allowlist.'
+    );
     runtimeFailure(fn () => $validator->validate([
         'action' => 'admin.server.save',
         'server' => [...$validServer, 'apiPortMinimum' => 18130],
@@ -191,6 +195,13 @@ try {
         'Missing SQL Parser PID state did not return a clean stopped status.'
     );
     $initialHealth = $adminService->status();
+    $adminRestart = $adminService->restartAdminConsole();
+    runtimeAssert(
+        $adminRestart['accepted'] === true
+            && $adminRestart['status'] === 'restarting'
+            && $adminRestart['controlMode'] === 'application',
+        'Admin Console application restart was not accepted through the existing Admin service boundary.'
+    );
     runtimeAssert(
         $initialHealth['database']['available'] === false
             && $initialHealth['database']['status'] === 'disconnected'

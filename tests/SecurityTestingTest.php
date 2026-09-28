@@ -482,6 +482,7 @@ try {
 
     $applicationRoot = $root . '/application';
     mkdir($applicationRoot . '/config', 0700, true);
+    mkdir($applicationRoot . '/backups', 0700, true);
     $backupSources = [
         'config/auth.json' => $runtime . '/auth.json',
         'config/installation.json' => $runtime . '/installation.json',
@@ -491,7 +492,7 @@ try {
         'database/config/database.json' => $root . '/encrypted-database.json',
     ];
     $backupManager = new ApplicationBackupManager($applicationRoot, $backupSources, 'security-test');
-    securityTestingFailure(fn () => $backupManager->create($applicationRoot . '/backups/unsafe'));
+    securityTestingFailure(fn () => $backupManager->create($root . '/outside-backup.zip'));
     $backupSource = (string)file_get_contents(__DIR__ . '/../app/Backup/ApplicationBackupManager.php');
     foreach (['encryption_key', 'sessions', 'runtime_process_state', 'rate_limit_state', 'logs'] as $excluded) {
         securityTestingAssert(str_contains($backupSource, "'{$excluded}'"), "Backup exclusion {$excluded} is missing.");

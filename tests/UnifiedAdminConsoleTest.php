@@ -424,6 +424,22 @@ try {
     unifiedAdminAssert(!str_contains(strtolower($adminJavaScript), 'test saved configuration'), 'Removed saved database test remains in the Admin Console.');
     unifiedAdminAssert(!str_contains($adminJavaScript, 'Runtime access'), 'Database runtime lifecycle remains under Configuration.');
     unifiedAdminAssert(str_contains($adminJavaScript, 'data-database-runtime'), 'Database runtime lifecycle is missing from System Health.');
+    unifiedAdminAssert(
+        str_contains($adminJavaScript, 'Service Actions')
+            && str_contains($adminJavaScript, 'data-admin-console-restart')
+            && str_contains($adminJavaScript, 'admin.console.restart')
+            && str_contains($adminJavaScript, 'Waiting for the service to become available.')
+            && !str_contains($adminJavaScript, 'data-admin-console-stop')
+            && !str_contains($adminJavaScript, 'data-admin-console-start'),
+        'System Health does not expose the controlled restart-only Admin Console workflow.'
+    );
+    unifiedAdminAssert(
+        substr_count($adminJavaScript, 'serviceControls("api", health.api)') === 1
+            && substr_count($adminJavaScript, 'serviceControls("sqlParser", health.sqlParser)') === 1
+            && substr_count($adminJavaScript, 'databaseControls(health.database)') === 1
+            && str_contains($adminJavaScript, '<section class="service-actions"'),
+        'Lifecycle controls were not moved into the separate Service Actions section.'
+    );
     unifiedAdminAssert(str_contains($compactAdminJavaScript, "['Port',service.port]"), 'System Health does not display actual development managed-service ports.');
     unifiedAdminAssert(str_contains($compactAdminJavaScript, "['Server',health.database.server]") && str_contains($compactAdminJavaScript, "['Database',health.database.database]"), 'System Health omits safe database connection details.');
     unifiedAdminAssert(str_contains((string)file_get_contents(__DIR__ . '/../admin/api.php'), 'AdminAuthorizationMiddleware'), 'Independent Admin authorization boundary is missing.');

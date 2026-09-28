@@ -6,6 +6,7 @@ The Admin Console uses dedicated System Administrator actions on its loopback-on
 | --- | --- | ---: |
 | `admin.health` | Safe Admin/API/parser/database/PHP status | no |
 | `admin.system.info` | Minimal operational system information | no |
+| `admin.console.restart` | Revalidate Admin configuration and reload application bytecode without stopping hosting infrastructure | yes |
 | `admin.api.start/stop/restart` | Development process lifecycle; production application Enable/Disable/Reload | yes |
 | `admin.sqlParser.start/stop/restart` | Development process lifecycle; production application Enable/Disable/Reload | yes |
 | `admin.settings.get` | Read redacted configuration | no |
@@ -17,7 +18,9 @@ The Admin Console uses dedicated System Administrator actions on its loopback-on
 
 The general API rejects `admin.*`. Runtime controls accept fixed operations only and cannot execute user-supplied commands. In development, the launchers start API and SQL Parser through the existing process managers and validate/enable application database availability; their Admin actions continue delegating to those same managers and gates. Failed startup is reported while Admin remains available for recovery. In production, infrastructure is already hosted externally and the same compatible actions change application availability: Start means Enable, Stop means Disable, and Restart means Reload. No action invokes IIS, Nginx, FastCGI, PHP-FPM, systemd, a Windows service, or SQL Server. The Admin control plane remains available when either runtime is disabled or the database is disconnected.
 
-System Health is the runtime control plane. Development API and SQL Parser cards report the actual managed PID, dynamically selected active port, start time, and process state; stopped, crashed, or stale state contains no operational metadata. Production cards separate `Infrastructure: externally managed` from application `Enabled`/`Disabled` state and expose no fabricated process metadata. The database card reports only safe configured server, explicit port, database name, and availability/health state; its Connect, Disconnect, and Restart actions exist only here, with no Test Saved Configuration operation. Configuration → Database retains only form validation, Test Connection for submitted values, and Save.
+System Health is the runtime control plane. Diagnostic cards contain status and
+runtime information only; their controls are collected in the separate Service
+Actions section below the cards. Development API and SQL Parser cards report the actual managed PID, dynamically selected active port, start time, and process state; stopped, crashed, or stale state contains no operational metadata. Production cards separate `Infrastructure: externally managed` from application `Enabled`/`Disabled` state and expose no fabricated process metadata. The database card reports only safe configured server, explicit port, database name, and availability/health state; its Connect, Disconnect, and Restart actions exist only in Service Actions, with no Test Saved Configuration operation. Configuration → Database retains only form validation, Test Connection for submitted values, and Save. Admin Console exposes Restart only: it revalidates configuration and clears supported application bytecode caches while the deployment service manager remains authoritative for IIS, Nginx, PHP-FPM, and local launcher lifecycle.
 
 Production state is stored atomically in `config/application-runtime-state.json`
 and serialized across workers. It survives normal requests and reboot, starts

@@ -151,6 +151,30 @@ final class AdminService
         ];
     }
 
+    public function restartAdminConsole(): array
+    {
+        try {
+            $this->configuration->load();
+            clearstatcache(true);
+            if (function_exists('opcache_reset')) @opcache_reset();
+            $result = [
+                'accepted' => true,
+                'status' => 'restarting',
+                'controlMode' => 'application',
+                'checkAfterMilliseconds' => 750,
+            ];
+            $this->runtimeAudit('admin_console', 'restart', 'success', $result);
+            (new OperationalLogger())->info('admin', 'Admin Console application restart accepted');
+            return $result;
+        } catch (Throwable $exception) {
+            $this->runtimeAudit('admin_console', 'restart', 'failure', [], 'operation_failed');
+            (new OperationalLogger())->error('admin', 'Admin Console application restart failed', [
+                'error_code' => 'ADMIN_CONSOLE_RESTART_FAILED',
+            ]);
+            throw new ApiRequestException('Admin Console restart could not be initiated.', 'ADMIN_CONSOLE_RESTART_FAILED', [], 503);
+        }
+    }
+
     public function databaseConfiguration(): array
     {
         if (!is_file($this->databasePath)) {
