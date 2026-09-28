@@ -346,7 +346,8 @@ try {
         'Admin dialogs do not consistently lock and restore background scrolling.');
     unifiedAdminAssert(str_contains($compactAdminCss, '.users-panel { width: 100%; max-width: 100%; overflow: hidden; }')
         && str_contains($compactAdminCss, '.table-wrap { width: 100%; min-width: 0; overflow-x: auto;')
-        && str_contains($compactAdminCss, '.users-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; }')
+        && str_contains($compactAdminCss, '.users-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }')
+        && str_contains($compactAdminCss, '.admin-users-scroll { --admin-users-visible-rows: 7;')
         && str_contains($compactAdminCss, '.users-table { width: 100%; min-width: 1040px; table-layout: fixed; }')
         && str_contains($adminCss, '.users-table th:nth-child(8)')
         && str_contains($compactAdminCss, '.users-table td { overflow-wrap: anywhere; word-break: break-word; }'), 'Backend Users table lacks controlled columns or safe long-text wrapping.');
@@ -399,8 +400,16 @@ try {
     unifiedAdminAssert(str_contains($adminJavaScript, 'No Recovery Points')
         && str_contains($adminJavaScript, 'No verified application recovery points are currently available.')
         && str_contains($adminJavaScript, 'tabindex="0" aria-label="Recovery points"')
-        && str_contains($adminCss, '--recovery-visible-rows: 10')
+        && str_contains($adminCss, '--recovery-visible-rows: 5')
         && str_contains($adminCss, 'position: sticky'), 'Recovery points do not provide a bounded, accessible scrolling table or empty state.');
+    unifiedAdminAssert(str_contains($adminCss, 'overscroll-behavior-y: auto')
+        && !str_contains($compactAdminCss, '.recovery-points-scroll { --recovery-visible-rows: 5; --recovery-row-block-size: 3.75rem; max-height: calc(var(--recovery-row-block-size) * (var(--recovery-visible-rows) + 1)); overflow: auto; overscroll-behavior: contain;'),
+        'Recovery Points prevents native page scroll handoff at its vertical boundaries.');
+    unifiedAdminAssert(str_contains($adminJavaScript, 'Forgot username or password?')
+        && str_contains($adminJavaScript, 'Forgot Username or Password?')
+        && str_contains($adminJavaScript, 'detail.message')
+        && str_contains($adminJavaScript, 'retryAfterSeconds')
+        && str_contains($adminJavaScript, 'LOGIN_RATE_LIMITED'), 'Admin login lacks safe attempt, lockout, or forgot-credentials feedback.');
     foreach (['No configuration changes detected.', '["added", "modified", "deleted"]', 'backupChangeList(changes)',
         'preview.configurationFiles', 'preview.filesChanging', 'preview.changes'] as $previewUi) {
         unifiedAdminAssert(str_contains($adminJavaScript, $previewUi), "Restore preview is missing {$previewUi} support.");

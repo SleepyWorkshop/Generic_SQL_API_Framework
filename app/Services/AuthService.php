@@ -55,7 +55,7 @@ final class AuthService
                 $user['passwordHash'] ?? self::DUMMY_PASSWORD_HASH
             );
             if ($user === null || !$verified || $user['enabled'] !== true) {
-                $blocked = $this->rateLimiter->recordFailure($sourceIp, $username);
+                $failureStatus = $this->rateLimiter->recordFailureStatus($sourceIp, $username);
                 $this->logger->audit('auth.login', 'failure', 'NOTICE', [
                     'actorType' => 'anonymous',
                     'targetUsername' => $username,
@@ -64,7 +64,7 @@ final class AuthService
                         ? 'account_disabled' : 'invalid_credentials',
                     'component' => 'authentication',
                 ]);
-                if ($blocked) {
+                if ($failureStatus['locked']) {
                     $this->logger->audit('auth.login', 'rejected', 'WARNING', [
                         'actorType' => 'anonymous',
                         'targetUsername' => $username,
@@ -72,12 +72,17 @@ final class AuthService
                         'reason' => 'rate_limit_activated',
                         'component' => 'authentication',
                     ]);
-                    $this->rateLimiter->throwRateLimited();
+                    $this->rateLimiter->throwRateLimited($failureStatus['retryAfterSeconds']);
                 }
                 throw new ApiRequestException(
                     'Invalid username or password.',
                     'INVALID_CREDENTIALS',
-                    [],
+                    is_int($failureStatus['attemptsRemaining']) ? [[
+                            'path' => 'authentication',
+                            'message' => 'Attempts remaining: ' . $failureStatus['attemptsRemaining'],
+                            'locked' => false,
+                            'attemptsRemaining' => $failureStatus['attemptsRemaining'],
+                        ]] : [],
                     401
                 );
             }

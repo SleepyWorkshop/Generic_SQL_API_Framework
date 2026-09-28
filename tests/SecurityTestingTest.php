@@ -132,16 +132,27 @@ try {
         'idleTimeout' => 600, 'absoluteTimeout' => 3600,
     ], $logger);
     $auth = new AuthService($repository, new PasswordHasher(), $session, $loginLimiter, $logger);
+    $genericCredentialDetails = [];
     foreach ([['Missing.User', 'wrong-password'], ['Disabled.User', 'fake-disabled-password-123']] as [$username, $password]) {
         $failure = securityTestingFailure(fn () => $auth->login($username, $password), 'INVALID_CREDENTIALS', 401);
-        securityTestingAssert($failure->getMessage() === 'Invalid username or password.' && $failure->getDetails() === [],
+        $genericCredentialDetails[] = $failure->getDetails();
+        securityTestingAssert($failure->getMessage() === 'Invalid username or password.'
+            && ($failure->getDetails()[0]['attemptsRemaining'] ?? null) === 1
+            && ($failure->getDetails()[0]['locked'] ?? null) === false,
             'Authentication disclosed account existence or state.');
     }
+    securityTestingAssert($genericCredentialDetails[0] === $genericCredentialDetails[1],
+        'Credential feedback differs for missing and disabled identities.');
     securityTestingFailure(fn () => $auth->login('Read.User', 'wrong-one'), 'INVALID_CREDENTIALS', 401);
-    securityTestingFailure(fn () => $auth->login('Read.User', 'wrong-two'), 'LOGIN_RATE_LIMITED', 429);
+    $locked = securityTestingFailure(fn () => $auth->login('Read.User', 'wrong-two'), 'LOGIN_RATE_LIMITED', 429);
+    securityTestingAssert(($locked->getDetails()[0]['locked'] ?? null) === true
+        && ($locked->getDetails()[0]['retryAfterSeconds'] ?? null) === 30, 'Lockout feedback omitted the safe retry duration.');
     $_SERVER['HTTP_USER_AGENT'] = 'changed-agent';
-    securityTestingFailure(fn () => $auth->login('Read.User', 'fake-reader-password-123'), 'LOGIN_RATE_LIMITED', 429);
-    $loginClock += 31;
+    $loginClock += 11;
+    $stillLocked = securityTestingFailure(fn () => $auth->login('Read.User', 'fake-reader-password-123'), 'LOGIN_RATE_LIMITED', 429);
+    securityTestingAssert(($stillLocked->getDetails()[0]['retryAfterSeconds'] ?? null) === 19,
+        'Lockout feedback did not use the server-side remaining duration.');
+    $loginClock += 20;
     $session->start();
     $anonymousId = session_id();
     $snapshot = $auth->login('Read.User', 'fake-reader-password-123');

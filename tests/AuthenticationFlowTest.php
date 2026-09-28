@@ -74,10 +74,15 @@ try {
     foreach ([$wrong, $unknown, $disabled] as $failure) {
         authFlowAssert($failure->getStatusCode() === 401, 'Invalid credentials did not return HTTP 401.');
         authFlowAssert(
-            $failure->getMessage() === 'Invalid username or password.' && $failure->getDetails() === [],
+            $failure->getMessage() === 'Invalid username or password.'
+                && ($failure->getDetails() === []
+                    || (($failure->getDetails()[0]['locked'] ?? null) === false
+                        && is_int($failure->getDetails()[0]['attemptsRemaining'] ?? null))),
             'Credential failure disclosed account state.'
         );
     }
+    authFlowAssert($wrong->getDetails() === $unknown->getDetails()
+        && $unknown->getDetails() === $disabled->getDetails(), 'Credential feedback varies by account existence or state.');
     authFlowAssert(session_status() !== PHP_SESSION_ACTIVE, 'Rejected login created a session.');
 
     $session->start();

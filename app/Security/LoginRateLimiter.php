@@ -29,14 +29,20 @@ final class LoginRateLimiter
     {
         if (!$this->enabled) return;
         $record = $this->read($this->key($sourceIp, $username));
-        if (($record['blockedUntil'] ?? 0) > ($this->clock)()) {
-            $this->rateLimited();
+        $now = ($this->clock)();
+        if (($record['blockedUntil'] ?? 0) > $now) {
+            $this->rateLimited((int)$record['blockedUntil'] - $now);
         }
     }
 
     public function recordFailure(string $sourceIp, string $username): bool
     {
-        if (!$this->enabled) return false;
+        return $this->recordFailureStatus($sourceIp, $username)['locked'];
+    }
+
+    public function recordFailureStatus(string $sourceIp, string $username): array
+    {
+        if (!$this->enabled) return ['locked' => false, 'attemptsRemaining' => null, 'retryAfterSeconds' => null];
         $key = $this->key($sourceIp, $username);
         return $this->withLock($key, function (array $record): array {
             $now = ($this->clock)();
@@ -46,10 +52,15 @@ final class LoginRateLimiter
             ));
             $attempts[] = $now;
             $blocked = count($attempts) >= $this->maximumAttempts;
+            $retryAfter = $blocked ? $this->lockoutSeconds : null;
             return [[
                 'attempts' => $attempts,
                 'blockedUntil' => $blocked ? $now + $this->lockoutSeconds : 0,
-            ], $blocked];
+            ], [
+                'locked' => $blocked,
+                'attemptsRemaining' => max(0, $this->maximumAttempts - count($attempts)),
+                'retryAfterSeconds' => $retryAfter,
+            ]];
         });
     }
 
@@ -65,9 +76,9 @@ final class LoginRateLimiter
         });
     }
 
-    public function throwRateLimited(): never
+    public function throwRateLimited(?int $retryAfterSeconds = null): never
     {
-        $this->rateLimited();
+        $this->rateLimited($retryAfterSeconds ?? $this->lockoutSeconds);
     }
 
     private function key(string $sourceIp, string $username): string
@@ -91,9 +102,9 @@ final class LoginRateLimiter
         }
     }
 
-    private function withLock(string $key, callable $operation): bool
+    private function withLock(string $key, callable $operation): mixed
     {
-        return $this->withStateLock($key, function () use ($key, $operation): bool {
+        return $this->withStateLock($key, function () use ($key, $operation): mixed {
             [$record, $result] = $operation($this->read($key));
             try {
                 JsonFileStore::save($this->path($key), $record);
@@ -122,12 +133,18 @@ final class LoginRateLimiter
         }
     }
 
-    private function rateLimited(): never
+    private function rateLimited(int $retryAfterSeconds): never
     {
+        $retryAfterSeconds = max(1, $retryAfterSeconds);
         throw new ApiRequestException(
-            'Too many login attempts. Please try again later.',
+            'Too many unsuccessful login attempts.',
             'LOGIN_RATE_LIMITED',
-            [],
+            [[
+                'path' => 'authentication',
+                'message' => 'Please try again later.',
+                'locked' => true,
+                'retryAfterSeconds' => $retryAfterSeconds,
+            ]],
             429
         );
     }

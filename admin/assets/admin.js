@@ -106,8 +106,15 @@
           body.error &&
           Array.isArray(body.error.details) &&
           body.error.details[0],
-        message =
-          detail && detail.message
+        retryAfterSeconds = detail && Number.isInteger(detail.retryAfterSeconds)
+          ? detail.retryAfterSeconds
+          : null,
+        retryMinutes = retryAfterSeconds === null
+          ? null
+          : Math.max(1, Math.ceil(retryAfterSeconds / 60)),
+        message = retryMinutes !== null && body.error?.code === "LOGIN_RATE_LIMITED"
+          ? `${body.message || "Too many unsuccessful login attempts."} Please try again in ${retryMinutes} ${retryMinutes === 1 ? "minute" : "minutes"}.`
+          : detail && detail.message
             ? `${body.message || "The operation failed."} ${detail.message}`
             : body.message || "The operation failed.",
         error = new Error(message);
@@ -470,9 +477,17 @@
     preAuth(true);
     title.textContent = "Welcome back";
     content.className = "panel login-panel";
-    content.innerHTML = `<div class="login-brand"><span>Generic SQL API</span></div><form id="login-form" class="stack"><div><h2>Welcome back</h2><p class="login-subtitle">Sign in to continue to your workspace.</p></div><label>Username or email<input name="username" autocomplete="username" required autofocus></label><label>Password<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button class="password-toggle" type="button" data-password-toggle aria-label="Show password" aria-pressed="false">Show</button></div></label><button class="login-submit">Sign In</button><span class="login-version">${escapeHtml(versionLabel)}</span></form>`;
+    content.innerHTML = `<div class="login-brand"><span>Generic SQL API</span></div><form id="login-form" class="stack"><div><h2>Welcome back</h2><p class="login-subtitle">Sign in to continue to your workspace.</p></div><label>Username or email<input name="username" autocomplete="username" required autofocus></label><label>Password<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button class="password-toggle" type="button" data-password-toggle aria-label="Show password" aria-pressed="false">Show</button></div></label><button class="login-submit">Sign In</button><button class="login-help" type="button">Forgot username or password?</button><span class="login-version">${escapeHtml(versionLabel)}</span></form>`;
     const form = document.querySelector("#login-form");
     passwordToggle(form);
+    form.querySelector(".login-help").addEventListener("click", () => {
+      void backupDialogChoice({
+        titleText: "Forgot Username or Password?",
+        description: "If you have forgotten your username or password, please contact your system administrator or product administrator for assistance.",
+        confirmLabel: "Close",
+        closeOnly: true,
+      });
+    });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const button = event.currentTarget.querySelector(".login-submit"),
@@ -871,7 +886,7 @@
     content.className = "panel users-panel";
     content.innerHTML = `<div class="users-heading"><p class="help">Manage user profiles and authorization without exposing secrets or session details.</p><button id="add-user">+ Create User</button></div>${
       users.length
-        ? `<div class="table-wrap users-table-wrap"><table class="users-table"><thead><tr><th>Name</th><th>Username</th><th>Mobile Number</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>${users
+        ? `<div class="table-wrap users-table-wrap admin-users-scroll" tabindex="0" aria-label="Backend users"><table class="users-table"><thead><tr><th>Name</th><th>Username</th><th>Mobile Number</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>${users
             .map((user) => {
               const current =
                 currentUser &&
@@ -1330,7 +1345,7 @@
       );
     title.textContent = "API Keys";
     content.className = "panel";
-    content.innerHTML = `<div class="users-heading"><p class="help">Secrets are hashed at rest and shown only once. Each key receives one API role.</p><button id="add-api-key">+ Create API Key</button></div>${keys.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Owner</th><th>Role</th><th>Status</th><th>Fingerprint</th><th>Last used</th><th>Actions</th></tr></thead><tbody>${keys.map((key) => `<tr><td>${escapeHtml(key.name)}</td><td>${escapeHtml(key.ownerUsername)}</td><td>${escapeHtml(key.roles.map(roleLabel).join(", "))}</td><td><span class="badge${key.enabled && !key.revoked ? "" : " disabled"}">${key.revoked ? "Revoked" : key.enabled ? "Enabled" : "Disabled"}</span></td><td>${escapeHtml(key.fingerprint)}</td><td>${escapeHtml(key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : "Never")}</td><td><div class="actions">${key.revoked ? "" : `<button class="small secondary" data-key-action="${key.enabled ? "disable" : "enable"}" data-id="${key.id}">${key.enabled ? "Disable" : "Enable"}</button><button class="small danger" data-key-action="revoke" data-id="${key.id}">Revoke</button>`}</div></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">No managed API keys.</div>'}`;
+    content.innerHTML = `<div class="users-heading"><p class="help">Secrets are hashed at rest and shown only once. Each key receives one API role.</p><button id="add-api-key">+ Create API Key</button></div>${keys.length ? `<div class="table-wrap api-keys-table-wrap" tabindex="0" aria-label="API keys"><table><thead><tr><th>Name</th><th>Owner</th><th>Role</th><th>Status</th><th>Fingerprint</th><th>Last used</th><th>Actions</th></tr></thead><tbody>${keys.map((key) => `<tr><td>${escapeHtml(key.name)}</td><td>${escapeHtml(key.ownerUsername)}</td><td>${escapeHtml(key.roles.map(roleLabel).join(", "))}</td><td><span class="badge${key.enabled && !key.revoked ? "" : " disabled"}">${key.revoked ? "Revoked" : key.enabled ? "Enabled" : "Disabled"}</span></td><td>${escapeHtml(key.fingerprint)}</td><td>${escapeHtml(key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : "Never")}</td><td><div class="actions">${key.revoked ? "" : `<button class="small secondary" data-key-action="${key.enabled ? "disable" : "enable"}" data-id="${key.id}">${key.enabled ? "Disable" : "Enable"}</button><button class="small danger" data-key-action="revoke" data-id="${key.id}">Revoke</button>`}</div></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">No managed API keys.</div>'}`;
     content
       .querySelector("#add-api-key")
       .addEventListener("click", (event) =>
