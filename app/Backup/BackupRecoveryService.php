@@ -21,53 +21,115 @@ final class BackupRecoveryService
     public function __construct(?ApplicationBackupManager $manager = null, ?string $directory = null, ?Logger $logger = null, ?callable $healthCheck = null, ?OperationalLogger $operationalLogger = null, ?callable $scheduleProvider = null)
     {
         $this->manager = $manager ?? new ApplicationBackupManager();
-        $this->directory = rtrim($directory ?? dirname(dirname(__DIR__, 2)) . '/backups', '/\\');
+        $this->directory = rtrim($directory ?? dirname(__DIR__, 2) . '/backups', '/\\');
         $this->logger = $logger ?? new Logger();
         $this->operationalLogger = $operationalLogger ?? new OperationalLogger();
         $this->scheduleProvider = $scheduleProvider ?? static fn (): array => (new AdminConfigurationRepository())->load()['backup'];
         $this->healthCheck = $healthCheck ?? static fn (): array => (new ApplicationHealthMonitor())->restoreSafety();
     }
 
-    public function create(string $trigger = 'manual', string $createdBy = 'user'): array
-    {
-        if (!in_array($trigger, ['manual', 'scheduled'], true)
-            || !in_array($createdBy, ['user', 'scheduler'], true)) {
-            throw new InvalidArgumentException('Invalid backup creation metadata.');
-        }
-        $this->ensureDirectory($this->directory);
-        $id = gmdate('Ymd\\THis\\Z') . '-' . bin2hex(random_bytes(6));
-        $filename = 'backup-' . $id . '.zip';
-        $path = $this->directory . DIRECTORY_SEPARATOR . $filename;
-        try {
-            $manifest = $this->manager->create($path, $id, $trigger, $createdBy);
-            $size = filesize($path);
-            $this->logger->audit('backup.created', 'success', 'NOTICE', [
-                'component' => 'backup', 'recoveryPointId' => $id, 'operation' => $trigger,
-                'trigger' => $trigger, 'createdBy' => $createdBy,
-            ]);
-            $this->logger->audit('backup.verified', 'success', 'INFO', [
-                'component' => 'backup', 'recoveryPointId' => $id, 'operation' => $trigger,
-                'verification' => 'valid', 'authenticity' => 'valid',
-            ]);
-            $summary = $this->summary($manifest, $filename, is_int($size) ? $size : 0);
-            if ($trigger === 'scheduled') $this->writeScheduleStatus('success', $summary, null);
-            $this->applyRetention($this->schedule()['retention'], $path);
-            return $summary;
-        } catch (Throwable $exception) {
-            $this->logger->audit('backup.failed', 'failure', 'ERROR', [
-                'component' => 'backup', 'operation' => $trigger, 'reason' => 'creation_failed',
-                'trigger' => $trigger, 'createdBy' => $createdBy,
-            ]);
-            if ($trigger === 'scheduled') {
-                $this->logger->audit('backup.scheduled.failed', 'failure', 'ERROR', [
-                    'component' => 'backup', 'operation' => 'scheduled', 'reason' => 'creation_failed',
-                ]);
-                $this->operationalLogger->error('admin', 'Scheduled backup failed', ['error_code' => 'BACKUP_CREATION_FAILED']);
-                $this->writeScheduleStatus('failed', null, 'BACKUP_CREATION_FAILED');
-            }
-            throw new ApiRequestException('Application backup could not be created.', 'BACKUP_CREATION_FAILED', [], 500);
-        }
+public function create(string $trigger = 'manual', string $createdBy = 'user'): array
+{
+    if (!in_array($trigger, ['manual', 'scheduled'], true)
+        || !in_array($createdBy, ['user', 'scheduler'], true)) {
+        throw new InvalidArgumentException('Invalid backup creation metadata.');
     }
+
+    $this->ensureDirectory($this->directory);
+    $id = gmdate('Ymd\THis\Z') . '-' . bin2hex(random_bytes(6));
+    $filename = 'backup-' . $id . '.zip';
+    $path = $this->directory . DIRECTORY_SEPARATOR . $filename;
+
+    try {
+        $manifest = $this->manager->create($path, $id, $trigger, $createdBy);
+        $size = filesize($path);
+
+        $this->logger->audit('backup.created', 'success', 'NOTICE', [
+            'component' => 'backup',
+            'recoveryPointId' => $id,
+            'operation' => $trigger,
+            'trigger' => $trigger,
+            'createdBy' => $createdBy,
+        ]);
+
+        $this->logger->audit('backup.verified', 'success', 'INFO', [
+            'component' => 'backup',
+            'recoveryPointId' => $id,
+            'operation' => $trigger,
+            'verification' => 'valid',
+            'authenticity' => 'valid',
+        ]);
+
+        $summary = $this->summary(
+            $manifest,
+            $filename,
+            is_int($size) ? $size : 0
+        );
+
+        if ($trigger === 'scheduled') {
+            $this->writeScheduleStatus('success', $summary, null);
+        }
+
+        $this->applyRetention(
+            $this->schedule()['retention'],
+            $path
+        );
+
+        return $summary;
+
+    } catch (Throwable $exception) {
+
+        $this->logger->audit('backup.failed', 'failure', 'ERROR', [
+            'component' => 'backup',
+            'operation' => $trigger,
+            'reason' => 'creation_failed',
+            'trigger' => $trigger,
+            'createdBy' => $createdBy,
+        ]);
+
+        /*
+         * Keep the client-facing error generic, but record
+         * the underlying exception in the operational log.
+         *
+         * Do not log exception trace, request data, credentials,
+         * encryption keys, or decrypted configuration.
+         */
+        $this->operationalLogger->error('admin', 'Backup creation exception', [
+            'error_code' => 'BACKUP_CREATION_FAILED',
+            'exception_class' => get_class($exception),
+            'exception_message' => $exception->getMessage(),
+        ]);
+
+        if ($trigger === 'scheduled') {
+            $this->logger->audit('backup.scheduled.failed', 'failure', 'ERROR', [
+                'component' => 'backup',
+                'operation' => 'scheduled',
+                'reason' => 'creation_failed',
+            ]);
+
+            $this->operationalLogger->error(
+                'admin',
+                'Scheduled backup failed',
+                [
+                    'error_code' => 'BACKUP_CREATION_FAILED',
+                ]
+            );
+
+            $this->writeScheduleStatus(
+                'failed',
+                null,
+                'BACKUP_CREATION_FAILED'
+            );
+        }
+
+        throw new ApiRequestException(
+            'Application backup could not be created.',
+            'BACKUP_CREATION_FAILED',
+            [],
+            500
+        );
+    }
+}
 
     public function createScheduled(): array
     {
