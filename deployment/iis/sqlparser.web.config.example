@@ -54,11 +54,24 @@
           <add segment="src" />
         </hiddenSegments>
         <fileExtensions allowUnlisted="true">
+          <remove fileExtension=".config" />
+          <remove fileExtension=".env" />
+          <remove fileExtension=".ini" />
+          <remove fileExtension=".json" />
+          <remove fileExtension=".log" />
+          <remove fileExtension=".sql" />
+          <remove fileExtension=".bak" />
+          <remove fileExtension=".backup" />
+          <remove fileExtension=".old" />
+          <remove fileExtension=".tmp" />
+          <remove fileExtension=".lock" />
+          
           <add fileExtension=".config" allowed="false" />
           <add fileExtension=".env" allowed="false" />
           <add fileExtension=".ini" allowed="false" />
           <add fileExtension=".json" allowed="false" />
           <add fileExtension=".log" allowed="false" />
+          <add fileExtension=".sql" allowed="false" />
           <add fileExtension=".bak" allowed="false" />
           <add fileExtension=".backup" allowed="false" />
           <add fileExtension=".old" allowed="false" />

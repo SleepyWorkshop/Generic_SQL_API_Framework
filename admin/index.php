@@ -25,8 +25,8 @@ $applicationVersion = is_array($application) && is_string($application['version'
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Generic SQL API · Administration</title>
-    <link rel="stylesheet" href="/assets/admin.css">
-    <link rel="stylesheet" href="/assets/service-controls.css">
+    <link rel="stylesheet" href="/admin/assets/admin.css">
+    <link rel="stylesheet" href="/admin/assets/service-controls.css">
 </head>
 <body class="pre-auth" data-app-version="<?= htmlspecialchars($applicationVersion, ENT_QUOTES, 'UTF-8') ?>">
 <div class="shell">
@@ -58,6 +58,6 @@ $applicationVersion = is_array($application) && is_string($application['version'
 <dialog id="confirmation"><form method="dialog"><h2 id="confirm-title">Confirm action</h2><p id="confirm-message"></p><div class="actions"><button value="cancel" class="secondary">Cancel</button><button value="confirm" class="danger">Confirm</button></div></form></dialog>
 <dialog id="user-dialog" class="user-dialog" aria-labelledby="user-dialog-title"><div id="user-dialog-content"></div></dialog>
 <dialog id="backup-dialog" class="backup-dialog" aria-labelledby="backup-dialog-title" aria-describedby="backup-dialog-description"><div id="backup-dialog-content"></div></dialog>
-<script src="/assets/admin.js" defer></script>
+<script src="/admin/assets/admin.js" defer></script>
 </body>
 </html>

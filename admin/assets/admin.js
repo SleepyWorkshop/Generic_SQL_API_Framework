@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const apiUrl = "/api.php",
+  const apiUrl = "/admin/api.php",
     content = document.querySelector("#content"),
     title = document.querySelector("#page-title");
   const navigation = document.querySelector("#navigation"),

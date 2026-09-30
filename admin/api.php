@@ -1,5 +1,7 @@
 <?php
 
+putenv('GENERIC_ADMIN_ENABLED=1');
+
 define('API_REQUEST_STARTED', microtime(true));
 define('API_REQUEST_ID', bin2hex(random_bytes(8)));
 ob_start();

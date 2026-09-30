@@ -55,6 +55,18 @@
       <requestFiltering>
         <requestLimits maxAllowedContentLength="10485760" />
         <fileExtensions allowUnlisted="true">
+          <remove fileExtension=".config" />
+          <remove fileExtension=".env" />
+          <remove fileExtension=".ini" />
+          <remove fileExtension=".json" />
+          <remove fileExtension=".log" />
+          <remove fileExtension=".sql" />
+          <remove fileExtension=".bak" />
+          <remove fileExtension=".backup" />
+          <remove fileExtension=".old" />
+          <remove fileExtension=".tmp" />
+          <remove fileExtension=".lock" />
+
           <add fileExtension=".config" allowed="false" />
           <add fileExtension=".env" allowed="false" />
           <add fileExtension=".ini" allowed="false" />
@@ -66,7 +78,7 @@
           <add fileExtension=".old" allowed="false" />
           <add fileExtension=".tmp" allowed="false" />
           <add fileExtension=".lock" allowed="false" />
-        </fileExtensions>
+       </fileExtensions>
       </requestFiltering>
     </security>
     <httpErrors errorMode="DetailedLocalOnly" existingResponse="PassThrough" />
