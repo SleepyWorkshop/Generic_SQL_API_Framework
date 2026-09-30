@@ -560,26 +560,45 @@
   }
   const wait = (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds));
-  async function waitForAdminConsole(checkAfterMilliseconds = 750) {
-    await wait(checkAfterMilliseconds);
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      try {
-        const health = row(await call({ action: "admin.status" }));
-        if (health.adminConsole?.healthy) {
-          await healthView();
-          notify("Admin Console is available again.");
-          return;
+    async function waitForAdminConsole(checkAfterMilliseconds = 750) {
+      await wait(checkAfterMilliseconds);
+
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        try {
+          const health = row(await call({ action: "admin.status" }));
+
+          if (health.adminConsole?.healthy) {
+            await healthView();
+            notify("Admin Console is available again.");
+            return;
+          }
+        } catch {
+          // A short connection failure is expected while a managed host reloads.
         }
-      } catch {
-        // A short connection failure is expected while a managed host reloads.
+
+        await wait(1000);
       }
-      await wait(1000);
+
+      content.innerHTML =
+        '<section class="restart-state" role="alert">' +
+        "<h2>Admin Console is still restarting</h2>" +
+        "<p>It has not become available yet. Refresh after the hosting service finishes restarting.</p>" +
+        '<button type="button" id="retry-admin-status">Retry</button>' +
+        "</section>";
+
+      const retryButton = content.querySelector("#retry-admin-status");
+
+      retryButton?.addEventListener("click", async () => {
+        try {
+          await waitForAdminConsole();
+        } catch (error) {
+          notify(
+            error instanceof Error ? error.message : String(error),
+            true,
+          );
+        }
+      });
     }
-    content.innerHTML = '<section class="restart-state" role="alert"><h2>Admin Console is still restarting</h2><p>It has not become available yet. Refresh after the hosting service finishes restarting.</p><button type="button" id="retry-admin-status">Retry</button></section>';
-    content
-      .querySelector("#retry-admin-status")
-      .addEventListener("click", () => void waitForAdminConsole());
-  }
   async function infoView() {
     loading();
     const info = row(await call({ action: "admin.system.info" }));
@@ -1193,15 +1212,17 @@
     content
       .querySelector("[data-admin-console-restart]")
       .addEventListener("click", async (event) => {
-        if (
-          !(await confirmAction(
-            "The Admin Console will be temporarily unavailable while it restarts.",
-            "Restart Admin Console?",
-          ))
-        )
-          return;
-        const button = event.currentTarget,
-          done = setButtonBusy(button, "Restarting…");
+    const button = event.currentTarget;
+
+    if (
+      !(await confirmAction(
+        "The Admin Console will be temporarily unavailable while it restarts.",
+        "Restart Admin Console?",
+      ))
+    )
+      return;
+
+    const done = setButtonBusy(button, "Restarting…");
         try {
           const result = row(
             await call({ action: "admin.console.restart" }, true),
