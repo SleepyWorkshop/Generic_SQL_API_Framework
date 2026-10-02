@@ -1,71 +1,532 @@
-# Backend roadmap
+# Generic SQL API Framework Roadmap
 
-The last released version is v1.0.0. The current v2.0.0 development line is
-unreleased; implemented post-v1 work is summarized in the
-[changelog](../CHANGELOG.md), not repeated here.
+The Generic SQL API Framework is a backend platform for exposing SQL-based
+data and operations through a secure, configurable API.
 
-Final production documentation, versioning cleanup, test naming cleanup,
-cross-platform launcher review, and repository cleanup are complete for the
-current release-preparation milestone (Phase 4.13).
+This roadmap reflects the actual implementation and the remaining planned
+backend work. Historical roadmap items that were implemented later are shown
+under the version where they were actually delivered.
 
-Planned items are not part of the public contract until their implementation,
-validation, tests, and documentation are merged.
+Frontend dashboards, reporting interfaces, charts, and other presentation
+features are outside the scope of this backend project.
 
-## Phase 5 — Multi-Database Support
+Detailed implementation history is maintained in `CHANGELOG.md`.
 
-- **Database Registry** — define and validate named database targets.
-- **Shared SQL Server Configuration** — avoid duplicated connection settings
-  while preserving independently controlled credentials and availability.
-- **Database Context** — select a permitted database through server-owned
-  configuration rather than arbitrary client identifiers.
-- **Same-Server Cross-Database Queries** — define safe, explicit boundaries for
-  supported SQL Server cross-database reads.
-- **Database Authorization** — scope principals and API keys to permitted
-  database contexts.
-- **Resource Mapping** — bind SQL and write resources to database contexts.
-- **Database-Aware Metadata** — return metadata only from authorized contexts.
-- **Admin Console** — manage registry entries and safe status information.
-- **Testing** — cover isolation, authorization, migration, error handling, and
-  deployment-specific SQL Server behavior.
+---
 
-## Phase 6 — Security Verification & Final Security Review
+# v1.0.0 — Core Generic SQL API Framework
 
-- **Dependency Security** — inventory and scan maintained runtime dependencies.
-- **Static Security Analysis** — run appropriate PHP, JavaScript, configuration,
-  and secret scanners and triage their output.
-- **Authorization Security Testing** — expand role, resource, and identity
-  escalation testing.
-- **API Security Testing** — verify transport, parsing, validation, throttling,
-  and error boundaries against a deployed target.
-- **DAST/Security Scanning** — scan representative production-like IIS and Nginx
-  deployments.
-- **Penetration-Test Preparation** — prepare scope, accounts, data, monitoring,
-  recovery, and rules of engagement.
-- **Security Architecture Review** — reassess trust boundaries, residual risks,
-  and operational controls.
-- **Optional Admin MFA** — evaluate without weakening the existing session and
-  administrator authorization boundary.
-- **Final Security Report** — record tools, versions, target environments,
-  findings, remediation, and accepted risks.
+Status: Completed
 
-## Phase 7 — External Client API Integration & Developer Experience
+The first stable release established the core Generic SQL API platform.
 
-- **Client Integration Manual** — document authentication, retries, pagination,
-  errors, and operational expectations for external clients.
-- **Resource Documentation** — publish deployment-specific SQL/write resource
-  catalogs without exposing SQL or secrets.
-- **Client Integration Examples** — provide maintained examples for supported
-  authentication and action families.
-- **Postman Collection** — cover representative public requests and environments.
-- **OpenAPI Specification** — describe supported HTTP actions and schemas without
-  flattening the recursive query model incorrectly.
-- **Interactive API Documentation** — derive from the reviewed specification and
-  preserve authentication/security warnings.
-- **SDKs** — evaluate only after the public contract and versioning policy are
-  stable.
-- **Webhooks/Callbacks** — document and expose only if implemented in a later
-  release; none exist today.
+## API Foundation
 
-Additional database providers, distributed rate limiting, richer metadata,
-transaction APIs, caching, and large-result strategies remain possible future
-work but have no release commitment in this roadmap.
+- Dynamic JSON-driven API processing
+- Generic request validation and normalization
+- Standardized JSON responses
+- CORS support
+- Global error handling
+- Request and error logging
+- Query execution statistics
+- Repository-based query execution
+
+## SQL Query Engine
+
+- Dynamic SQL Server SELECT generation
+- Fields and aliases
+- DISTINCT
+- TOP
+- CASE expressions
+- Arithmetic expressions
+- Prepared filters
+- JOIN support
+- GROUP BY
+- HAVING
+- ORDER BY
+- Compatibility-aware pagination
+- Allow-listed SQL functions
+
+## Advanced SQL
+
+- CTE support
+- UNION / UNION ALL
+- Window functions
+- Subqueries
+- Stored procedures
+- Scalar functions
+- Table-valued functions
+- Metadata actions
+- SQL Server-specific query handling
+
+## v1.0 Fixes
+
+- Metadata-aware conversion of date strings to `YYYYMMDD` integer values for
+  integer-family date columns
+- Query construction and execution compatibility improvements
+
+---
+
+# v2.0.0 — Platform Expansion & Security
+
+Status: Implemented / Current Development Line
+
+v2 expanded the original SQL API into a complete backend platform with
+administration, authentication, authorization, write operations, resource
+discovery, security controls, operations, deployment support, and extensive
+testing.
+
+## Admin Console
+
+- Unified loopback Admin Console
+- First-run setup
+- Encrypted database configuration
+- User management
+- Fixed roles
+- Managed API keys
+- CORS configuration
+- Runtime configuration
+- System health
+- Local service and database lifecycle controls
+- Deployment-path-independent Admin Console
+
+## Authentication
+
+- Session authentication
+- Managed API-key authentication
+- `none` authentication mode
+- `session` authentication mode
+- `api_key` authentication mode
+- `session+api_key` authentication mode
+- Session regeneration
+- Session expiration
+- Secure logout
+- Session destruction
+
+## Authorization
+
+- Separate backend and frontend authorization domains
+- Deny-by-default resource scopes
+- Role-based authorization
+- User role assignment
+- SQL resource authorization
+- Write-resource authorization
+- Last-administrator protection
+- Authorization-change session invalidation
+
+## Managed API Keys
+
+- `gsk_` API keys
+- One-time key reveal
+- Hash-only key storage
+- Owner assignment
+- Role assignment
+- Enable/disable lifecycle
+- Permanent revoke
+- Key fingerprints
+- Last-used metadata
+
+## Generic SQL Resources
+
+- Recursive SQL Resource discovery
+- Safe path-derived resource IDs
+- Traversal protection
+- Collision protection
+- Runtime filters
+- Execution metadata
+- Deterministic sorting
+- Pagination
+- Output/source/HAVING filter mappings
+- SQL Resource capability validation
+- SQL Resource security validation
+
+## Write Operations
+
+- INSERT
+- UPDATE
+- DELETE
+- SQL Server UPSERT
+- Deny-by-default write-resource registry
+- Resource-level action permissions
+- Writable-column controls
+- Filterable-column controls
+- UPSERT key configuration
+- Live SQL Server metadata validation
+- Prepared DML values
+- Affected-row responses
+- Identity responses
+- Safe constraint-error classification
+
+## SQL Engine Expansion
+
+- Recursive query expressions
+- Expanded SQL function coverage
+- CTE support
+- Window functions
+- Set operations
+- SQL Server structural numeric expressions
+- Prepared runtime values
+- Modular query builders
+- `QueryRepository` retained as the execution facade
+
+## SQL-to-Universal-JSON Parser
+
+- Standalone non-executing SQL parser
+- Lexical parsing
+- Capability analysis
+- Validation
+- Structured errors
+- Browser-based parser interface
+- Database-independent parsing operation
+
+## Runtime & Performance Controls
+
+- Configurable SQL query timeout
+- Pagination limits
+- Request body limits
+- API rate limits
+- Login rate limits
+- Idle session expiration
+- Absolute session expiration
+- Runtime configuration through the Admin Console
+
+## Logging & Auditing
+
+- Request-correlated JSON Lines logging
+- Security and audit events
+- Sensitive-data redaction
+- Concurrency-safe log writes
+- Production-safe error envelopes
+- Correlation IDs for production errors
+
+## Backup & Recovery
+
+- Application configuration backups
+- Checksum verification
+- Encryption verification
+- Safe external restore staging
+- Configuration migration
+- File-locking protections
+- Secure temporary-file handling
+
+## Health & Operations
+
+- Public liveness checks
+- Public readiness checks
+- Authenticated detailed health checks
+- Configuration health
+- Database health
+- Process health
+- Filesystem health
+- Logging health
+- Session health
+- Encryption health
+- Backup health
+- Cross-platform lifecycle management
+- Stale-process recovery
+- Duplicate-process recovery
+- Restart cleanup
+- Dynamic port handling
+
+## Security Hardening
+
+- Hardened session cookies
+- Cookie-only session transport
+- Login session regeneration
+- CSRF rotation
+- Session expiration
+- Concurrent-session protections
+- Database/configuration file locking
+- Temporary-file permission hardening
+- Secure key handling
+- Secret rotation guidance
+- Log redaction
+- Exact-origin CORS validation
+- Authentication throttling
+- Fixed-host HTTPS redirects
+- HSTS
+- CSP and security headers
+- Sensitive-file web denials
+- Trusted-proxy boundaries
+
+## Production Deployment
+
+- IIS/FastCGI deployment templates
+- Nginx/PHP-FPM deployment templates
+- TLS/security-header examples
+- Production PHP configuration
+- Deployment validation tooling
+- Windows operator guidance
+- Linux operator guidance
+- Production process ownership through IIS/FastCGI or Nginx/PHP-FPM
+- Development-only local process management
+- Deployment-independent Admin Console base paths
+
+## Testing
+
+- API contract testing
+- Query testing
+- Write-operation testing
+- Authentication testing
+- Authorization testing
+- Session testing
+- API-key testing
+- Security-boundary testing
+- Concurrency testing
+- Backup/recovery testing
+- Health testing
+- Error-handling testing
+- Production-template testing
+- Attack-oriented security testing
+- Cross-platform regression coverage
+
+---
+
+# Historical Roadmap Reconciliation
+
+The original roadmap proposed several separate versions for CRUD, advanced
+SQL, security, performance, dashboard, reporting, multi-database support,
+developer experience, and enterprise capabilities.
+
+The implementation evolved differently.
+
+Features that were originally planned for separate versions but were later
+implemented are recorded under the actual version where they were delivered.
+
+## Originally Planned Features
+
+| Original Roadmap Item | Current Status |
+|---|---|
+| v1.1 CRUD Operations | Implemented in v2.0 |
+| INSERT | Implemented |
+| UPDATE | Implemented |
+| DELETE | Implemented |
+| UPSERT | Implemented |
+| v1.2 Advanced Database Features | Implemented across v1.0 and v2.0 |
+| Stored Procedures | Implemented |
+| UNION / UNION ALL | Implemented |
+| CASE | Implemented |
+| CTE | Implemented |
+| Window Functions | Implemented |
+| Advanced SQL Functions | Implemented / Expanded |
+| v2.0 Security | Implemented in v2.0 |
+| Login / Sessions | Implemented |
+| API Keys | Implemented |
+| RBAC / Authorization | Implemented |
+| Audit Logging | Implemented |
+| Query Timeout | Implemented |
+| Rate Limiting | Implemented |
+| Health Monitoring | Implemented |
+| Backup / Recovery | Implemented |
+| Production Deployment | Implemented |
+| v2.2 Performance Controls | Partially implemented; remaining items planned |
+| Multi-Database Support | Planned |
+| OpenAPI | Planned |
+| Postman Collection | Planned |
+| SDKs | Planned |
+| CLI Tooling | Planned |
+| Project Generator | Planned |
+| Webhooks / Callbacks | Planned |
+| Multi-Tenancy | Planned / Uncommitted |
+
+---
+
+# v2.1 — Security Verification & Operational Hardening
+
+Status: Planned
+
+The core security architecture is already implemented in v2.0.
+This phase focuses on deeper verification and remaining operational security
+work.
+
+## Security Verification
+
+- Dependency security review
+- Static security analysis
+- Authorization security testing
+- API security testing
+- DAST / security scanning
+- Penetration-test preparation
+- Security architecture review
+- Final security verification report
+
+## Optional Security Enhancements
+
+- Optional Admin MFA
+- Additional authentication hardening where required
+- Expanded security regression coverage
+
+## Operational Improvements
+
+- Log rotation and cleanup improvements
+- Additional production diagnostics
+- Additional operational validation
+
+---
+
+# v3.0 — Multi-Database Support
+
+Status: Planned
+
+The framework will evolve from its current SQL Server-oriented implementation
+toward a database-provider architecture.
+
+## Database Platform
+
+- Database Registry
+- Database Context
+- Database provider abstraction
+- Shared database configuration model
+- Database-specific connection handling
+- Database-aware metadata
+- Database-aware SQL generation
+
+## Planned Database Providers
+
+- Microsoft SQL Server
+- MySQL
+- PostgreSQL
+- MariaDB
+
+## Resource Integration
+
+- Database-aware Resource Mapping
+- Database-specific Resource discovery
+- Database-aware authorization
+- Database-aware metadata validation
+- Database-aware query capabilities
+
+## Admin Console
+
+- Database registry management
+- Database configuration
+- Database health status
+- Database lifecycle controls where supported
+
+## Testing
+
+- Provider-specific regression tests
+- Cross-database API contract tests
+- Metadata compatibility tests
+- Query capability tests
+- Authorization tests across database contexts
+
+---
+
+# v3.1 — Developer Experience & API Integration
+
+Status: Planned
+
+This phase focuses on making the backend easier for external developers and
+applications to integrate.
+
+## API Documentation
+
+- OpenAPI specification
+- API reference documentation
+- Resource documentation
+- Authentication documentation
+- Error-response documentation
+
+## Developer Tools
+
+- Postman collection
+- API examples
+- Client integration examples
+- CLI tooling
+- Configuration/project initialization tooling
+
+## SDKs
+
+- SDK support for commonly used languages
+
+SDK scope will be defined when implementation begins.
+
+---
+
+# v4.0 — Backend Platform & Enterprise Capabilities
+
+Status: Planned / Uncommitted
+
+Future backend capabilities may include the following.
+
+## Transactions
+
+- Explicit transaction APIs
+- Transaction lifecycle management
+- Transaction-safe write workflows
+
+## Performance
+
+- Query caching
+- Metadata caching
+- Query profiling
+- Performance diagnostics
+- Large-result handling strategies
+
+## Distributed Operations
+
+- Distributed rate limiting
+- Distributed session/runtime coordination
+- Scalable logging and operational controls
+
+## Integration
+
+- Webhooks
+- Callback mechanisms
+- Backend event system
+
+## Enterprise
+
+- Organization management
+- Multi-tenant architecture
+- Tenant-aware authorization
+- Enterprise administration
+- Advanced system monitoring
+
+These items are future direction and are not part of the current product
+contract until implemented, tested, and documented.
+
+---
+
+# Out of Scope for This Backend
+
+The following are intentionally outside the scope of the Generic SQL API
+Framework:
+
+- Dashboard UI
+- Charts
+- KPI widgets
+- Frontend reporting screens
+- Report visualization
+- Frontend layout management
+- Frontend-specific analytics presentation
+
+These capabilities can be implemented in separate frontend projects that
+consume this API.
+
+---
+
+# Roadmap Status
+
+| Version | Scope | Status |
+|---|---|---|
+| v1.0.0 | Core Generic SQL API Framework | Completed |
+| v2.0.0 | Platform Expansion & Security | Implemented / Current |
+| v2.1 | Security Verification & Operational Hardening | Planned |
+| v3.0 | Multi-Database Support | Planned |
+| v3.1 | Developer Experience & API Integration | Planned |
+| v4.0 | Backend Platform & Enterprise Capabilities | Planned / Uncommitted |
+
+---
+
+# Roadmap Principles
+
+- The roadmap describes backend capabilities only.
+- Completed implementation is recorded according to the version in which it
+  was actually implemented.
+- Historical proposals are not treated as released versions.
+- Features that are not implemented remain explicitly marked as planned.
+- New features become part of the public contract only after implementation,
+  testing, and documentation are completed.
+- Frontend applications remain separate consumers of the Generic SQL API.
