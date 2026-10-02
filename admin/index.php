@@ -19,17 +19,16 @@ if (strtolower((string)(getenv('GENERIC_APP_ENV') ?: 'development')) !== 'produc
 }
 
 $application = require __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../app/Http/AdminBasePath.php';
 
 $applicationVersion = is_array($application) && is_string($application['version'] ?? null)
     ? $application['version']
     : 'unknown';
 
-$adminScriptPath = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
-$adminBasePath = rtrim(dirname($adminScriptPath), '/');
-
-if ($adminBasePath === '.' || $adminBasePath === '/') {
-    $adminBasePath = '';
-}
+// Public mount path ('' at the origin root, otherwise e.g. '/admin'); assets,
+// navigation, and the Admin API are all addressed below it.
+$adminBasePath = AdminBasePath::resolve($_SERVER, getenv(AdminBasePath::ENVIRONMENT_VARIABLE));
+$adminUrl = static fn (string $path): string => htmlspecialchars($adminBasePath . '/' . $path, ENT_QUOTES, 'UTF-8');
 
 ?><!doctype html>
 <html lang="en">
@@ -37,8 +36,8 @@ if ($adminBasePath === '.' || $adminBasePath === '/') {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Generic SQL API · Administration</title>
-    <link rel="stylesheet" href="assets/admin.css">
-    <link rel="stylesheet" href="assets/service-controls.css">
+    <link rel="stylesheet" href="<?= $adminUrl('assets/admin.css') ?>">
+    <link rel="stylesheet" href="<?= $adminUrl('assets/service-controls.css') ?>">
 </head>
 <body class="pre-auth" data-app-version="<?= htmlspecialchars($applicationVersion, ENT_QUOTES, 'UTF-8') ?>" data-admin-base="<?= htmlspecialchars($adminBasePath, ENT_QUOTES, 'UTF-8') ?>">
 <div class="shell">
@@ -48,12 +47,12 @@ if ($adminBasePath === '.' || $adminBasePath === '/') {
             <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Collapse navigation" aria-expanded="true" aria-controls="navigation"><span aria-hidden="true">☰</span></button>
         </div>
         <nav id="navigation" hidden>
-            <a href="health" data-route="health" title="System Health"><span class="nav-icon" aria-hidden="true">H</span><span class="nav-label">System Health</span></a>
-            <a href="info" data-route="info" title="System Info"><span class="nav-icon" aria-hidden="true">I</span><span class="nav-label">System Info</span></a>
-            <a href="configuration" data-route="configuration" title="Configuration"><span class="nav-icon" aria-hidden="true">C</span><span class="nav-label">Configuration</span></a>
-            <a href="users" data-route="users" title="Users"><span class="nav-icon" aria-hidden="true">U</span><span class="nav-label">Users</span></a>
-            <a href="api-keys" data-route="api-keys" title="API Keys"><span class="nav-icon" aria-hidden="true">K</span><span class="nav-label">API Keys</span></a>
-            <a href="backup-recovery" data-route="backup-recovery" title="Backup &amp; Recovery"><span class="nav-icon" aria-hidden="true">B</span><span class="nav-label">Backup &amp; Recovery</span></a>
+            <a href="<?= $adminUrl('health') ?>" data-route="health" title="System Health"><span class="nav-icon" aria-hidden="true">H</span><span class="nav-label">System Health</span></a>
+            <a href="<?= $adminUrl('info') ?>" data-route="info" title="System Info"><span class="nav-icon" aria-hidden="true">I</span><span class="nav-label">System Info</span></a>
+            <a href="<?= $adminUrl('configuration') ?>" data-route="configuration" title="Configuration"><span class="nav-icon" aria-hidden="true">C</span><span class="nav-label">Configuration</span></a>
+            <a href="<?= $adminUrl('users') ?>" data-route="users" title="Users"><span class="nav-icon" aria-hidden="true">U</span><span class="nav-label">Users</span></a>
+            <a href="<?= $adminUrl('api-keys') ?>" data-route="api-keys" title="API Keys"><span class="nav-icon" aria-hidden="true">K</span><span class="nav-label">API Keys</span></a>
+            <a href="<?= $adminUrl('backup-recovery') ?>" data-route="backup-recovery" title="Backup &amp; Recovery"><span class="nav-icon" aria-hidden="true">B</span><span class="nav-label">Backup &amp; Recovery</span></a>
         </nav>
         <div class="sidebar-footer">
             <button id="logout" class="quiet" type="button" hidden title="Logout"><span class="nav-icon" aria-hidden="true">↪</span><span class="nav-label">Logout</span></button>
@@ -70,6 +69,6 @@ if ($adminBasePath === '.' || $adminBasePath === '/') {
 <dialog id="confirmation"><form method="dialog"><h2 id="confirm-title">Confirm action</h2><p id="confirm-message"></p><div class="actions"><button value="cancel" class="secondary">Cancel</button><button value="confirm" class="danger">Confirm</button></div></form></dialog>
 <dialog id="user-dialog" class="user-dialog" aria-labelledby="user-dialog-title"><div id="user-dialog-content"></div></dialog>
 <dialog id="backup-dialog" class="backup-dialog" aria-labelledby="backup-dialog-title" aria-describedby="backup-dialog-description"><div id="backup-dialog-content"></div></dialog>
-<script src="assets/admin.js" defer></script>
+<script src="<?= $adminUrl('assets/admin.js') ?>" defer></script>
 </body>
 </html>

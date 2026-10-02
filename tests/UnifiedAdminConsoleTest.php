@@ -233,7 +233,11 @@ try {
         unifiedAdminAssert(str_contains($launcher, 'sqlparser-runtime-control.php') && str_contains($launcher, 'start'), 'Launcher does not automatically start the SQL Parser.');
         unifiedAdminAssert(str_contains($launcher, 'database-runtime-control.php') && str_contains($launcher, 'connect'), 'Launcher does not automatically connect application database runtime access.');
         unifiedAdminAssert(str_contains($launcher, 'verify-development-runtime.php'), 'Launcher does not verify development runtime startup.');
-        unifiedAdminAssert(str_contains($launcher, '/admin'), 'Launcher does not display the admin URL.');
+        unifiedAdminAssert(
+            preg_match('#ADMIN_URL=?"?http://127\.0\.0\.1:(?:\$ADMIN_PORT|%ADMIN_PORT%)/"#', $launcher) === 1
+                && preg_match('/echo\s+"?Admin:\s+(?:\$ADMIN_URL|%ADMIN_URL%)/', $launcher) === 1,
+            'Launcher does not display the document-root admin URL.'
+        );
     }
     $adminJavaScript = (string)file_get_contents(__DIR__ . '/../admin/assets/admin.js');
     $adminHtml = (string)file_get_contents(__DIR__ . '/../admin/index.php');

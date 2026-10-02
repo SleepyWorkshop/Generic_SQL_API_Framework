@@ -33,6 +33,7 @@ $tests = [
     __DIR__ . '/SecurityHardeningTest.php',
     __DIR__ . '/SecurityTestingTest.php',
     __DIR__ . '/UnifiedAdminConsoleTest.php',
+    __DIR__ . '/AdminBasePathTest.php',
     __DIR__ . '/AdminRuntimeManagementTest.php',
     __DIR__ . '/RuntimePerformanceControlsTest.php',
     __DIR__ . '/RuntimeConcurrencyTest.php',

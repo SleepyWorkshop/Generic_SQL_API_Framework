@@ -1,7 +1,10 @@
 (() => {
   "use strict";
-  const adminBase = (document.body.dataset.adminBase || "").replace(/\/+$/, ""),
-    apiUrl = `${window.location.origin}${adminBase}/api.php`,
+  const adminRoutes = ["health", "info", "configuration", "users", "api-keys", "backup-recovery"];
+  // Admin may be mounted at the origin root or under any sub-path; the server
+  // reports the mount path and every URL below is resolved against it.
+  const adminBase = adminBaseUrl(document.body.dataset.adminBase, location.origin),
+    apiUrl = new URL("api.php", adminBase).href,
     content = document.querySelector("#content"),
     title = document.querySelector("#page-title");
   const navigation = document.querySelector("#navigation"),
@@ -1748,17 +1751,36 @@
     });
   }
 
+  function adminBaseUrl(configuredBase, origin) {
+    const base = String(configuredBase || "").replace(/\/+$/, ""),
+      root = new URL("/", origin);
+    // Only a same-origin path is accepted; "//host" or "\host" would otherwise
+    // be resolved as a network-path reference to another host.
+    if (base !== "" && !/^\/(?![/\\])[^\\?#]*$/.test(base)) return root;
+    const url = new URL(`${base}/`, root);
+    return url.origin === root.origin ? url : root;
+  }
+  function adminRouteFromPath(pathname, baseUrl) {
+    const segments = (path) =>
+        path.split("/").filter(Boolean).map((segment) => {
+          try {
+            return decodeURIComponent(segment);
+          } catch {
+            return segment;
+          }
+        }),
+      base = segments(baseUrl.pathname),
+      path = segments(pathname);
+    if (path.length > base.length + 1 || base.some((segment, index) => path[index] !== segment))
+      return "health";
+    const route = path[base.length] || "health";
+    return adminRoutes.includes(route) ? route : "health";
+  }
+  function adminRouteUrl(route, baseUrl) {
+    return new URL(route, baseUrl).href;
+  }
   function currentRoute() {
-    const path = location.pathname.replace(/\/+$/, "");
-    const base = adminBase || "";
-    let relativePath = path;
-
-    if (base && path.startsWith(base)) {
-      relativePath = path.slice(base.length);
-    }
-
-    const route = relativePath.replace(/^\/+/, "").split("/")[0];
-    return route || "health";
+    return adminRouteFromPath(location.pathname, adminBase);
   }
   async function render() {
     const route = currentRoute();
@@ -1782,14 +1804,8 @@
   }
   async function enterConsole() {
     preAuth(false);
-
-    const currentPath = location.pathname.replace(/\/+$/, "");
-    const basePath = adminBase || "";
-    const adminHome = adminBase ? `${adminBase}/health` : "/health";
-
-    if (currentPath === basePath)
-      history.replaceState({}, "", adminHome);
-
+    if (location.pathname.replace(/\/+$/, "") === adminBase.pathname.replace(/\/+$/, ""))
+      history.replaceState({}, "", adminRouteUrl("health", adminBase));
     await render();
   }
   navigation.addEventListener("click", (event) => {
@@ -1813,6 +1829,9 @@
     }
   });
   sidebarVersion.textContent = versionLabel;
+  navigation
+    .querySelectorAll("a[data-route]")
+    .forEach((link) => (link.href = adminRouteUrl(link.dataset.route, adminBase)));
   (async () => {
     try {
       await loadCsrf();

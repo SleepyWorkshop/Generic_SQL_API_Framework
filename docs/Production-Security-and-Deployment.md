@@ -26,10 +26,12 @@ Keep the applications as separate web-server sites, applications, or listeners:
 | Boundary | Production route | PHP entry point | Static files |
 | --- | --- | --- | --- |
 | Reporting/API | `/api` and `/api/index.php` | `Backend/api/index.php` | built frontend `dist/` only |
-| Admin Console | loopback site: `/admin/*`, `/api.php` | `Backend/admin/index.php`, `Backend/admin/api.php` | `Backend/admin/assets/` |
+| Admin Console | loopback site at its mount path, e.g. `/admin/`, `/admin/<page>`, `/admin/api.php` | `Backend/admin/index.php`, `Backend/admin/api.php` | `Backend/admin/assets/` |
 | SQL Parser | separate internal site: `/` and `/index.php` | `Backend/sqlparser/index.php` | `Backend/sqlparser/assets/` |
 
 The development-only `router.php` files express the same route boundaries for `php -S`, but IIS and Nginx use their own fixed routing rules. They must not send arbitrary `.php` paths to FastCGI. SQL Parser remains database-free and does not inherit Admin or API authentication.
+
+The Admin Console does not assume a public path. `admin/index.php` derives its mount path from the web server's `SCRIPT_NAME` (for example `/admin/index.php` gives `/admin`) and addresses its assets, pages, and `api.php` below that path on the same origin. It works at a site root, as an IIS application at `/admin` or any other path, and under the Nginx example's `/admin/` prefix. A reverse proxy that strips its public prefix before forwarding cannot be detected from the request, so set `GENERIC_ADMIN_BASE_PATH` (for example `/internal-admin`) in the Admin worker environment; invalid values are ignored. Host and forwarded headers are never used to build Admin URLs.
 
 The Admin Console remains loopback-only. Both its application middleware and the provided web-server examples enforce that boundary. Remote production administration needs a separately designed, authenticated access path and is not introduced here.
 
@@ -115,7 +117,7 @@ The template uses `opcache.validate_timestamps=0`. After an atomic code deployme
 1. Install IIS with CGI/FastCGI, URL Rewrite, and IP and Domain Restrictions.
 2. Install a supported 64-bit Non-Thread-Safe PHP runtime and the matching Visual C++ runtime.
 3. Install the SQL Server ODBC driver and enable `odbc`, `openssl`, `session`, and OPcache in the selected `php.ini`.
-4. Register `C:\PHP\php-cgi.exe` as an IIS FastCGI application. Set `PHPRC` to the production PHP directory and set `GENERIC_APP_ENV=production` plus server-side application variables on the FastCGI/application-pool environment.
+4. Register `C:\PHP\php-cgi.exe` as an IIS FastCGI application. Set `PHPRC` to the production PHP directory and set `GENERIC_APP_ENV=production` plus server-side application variables on the FastCGI/application-pool environment. Register a second FastCGI application for the Admin boundary with the arguments used by `deployment/iis/admin.web.config.example` and add `GENERIC_ADMIN_ENABLED=1` only to that registration; the template comments contain the `appcmd.exe` commands.
 5. Use a dedicated, non-administrator application-pool identity and grant only the filesystem permissions listed above.
 
 Do not use the bundled development `php.ini` without reviewing it. The IIS handler examples use `C:\PHP\php-cgi.exe`; replace that path consistently if PHP is installed elsewhere.
@@ -286,7 +288,7 @@ display disabled and configure IIS/Nginx to pass through application JSON errors
 3. Validate IIS bindings/Schannel policy on Windows or run `nginx -t` and `php-fpm -t` on Linux.
 4. Start/recycle the web-server and worker services through the operating system.
 5. Verify every HTTP binding permanently redirects once to its fixed HTTPS hostname without a loop.
-6. Verify frontend history fallback, `POST /api`, Admin loopback `/admin` plus `/api.php`, and the independent SQL Parser listener over HTTPS.
+6. Verify frontend history fallback, `POST /api`, Admin loopback pages, assets, and `api.php` under the Admin mount path (`/admin/` in the examples), and the independent SQL Parser listener over HTTPS.
 7. Verify non-entry-point PHP files, `config/`, `database/config/`, `logs/`, `runtime/`, `storage/`, `.git/`, `.env`, backups, and temporary files are unreachable.
 8. Inspect frontend, API, Admin, Parser, static-asset, error, and redirect responses for the intended headers; HSTS must occur only over HTTPS.
 9. Exercise authentication, session-ID regeneration, logout/replay rejection, idle/absolute expiration, Secure/HttpOnly/SameSite host-only cookies, CSRF rotation, exact-origin CORS, authorization, API-key separation, database availability, SQL resource reads, and an allowed CRUD operation in staging.
@@ -298,7 +300,7 @@ display disabled and configure IIS/Nginx to pass through application JSON errors
 
 - **502/500 from IIS or Nginx:** verify the FastCGI executable/socket, service identity, PHP error log, and entry-point filesystem access.
 - **404 for a valid route:** confirm the expected application/site boundary and install IIS URL Rewrite where applicable.
-- **Admin returns 404:** access it from loopback, set `GENERIC_ADMIN_ENABLED=1` only for that Admin FastCGI boundary, and verify the web-server loopback restriction.
+- **Admin returns 404:** access it from loopback, set `GENERIC_ADMIN_ENABLED=1` only for that Admin FastCGI boundary (the application no longer sets it itself), and verify the web-server loopback restriction.
 - **ODBC unavailable:** enable PHP ODBC and install a driver supported by `SqlServerDriver` for the worker architecture.
 - **Encrypted configuration unavailable:** restore the external encryption key for the worker identity; never generate a replacement for existing ciphertext.
 - **Stale code after deployment:** recycle the IIS application pool or reload/restart PHP-FPM because production OPcache timestamp checks are disabled.

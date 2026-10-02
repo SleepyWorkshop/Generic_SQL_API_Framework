@@ -52,7 +52,7 @@ locate php.exe and php.ini
   -> validate configuration and enable application database availability
   -> verify the complete development runtime
   -> php -S 127.0.0.1:<admin-port> -t admin admin/router.php
-  -> open http://127.0.0.1:<admin-port>/admin
+  -> open http://127.0.0.1:<admin-port>/
 ```
 
 The script explicitly loads `runtime/windows/php/php.ini`, configures OPcache's
@@ -75,7 +75,9 @@ including `config/application-runtime-state.json`; it never overwrites existing
 values. The same idempotent bootstrap runs in the Linux launcher and repository
 load path, so manual file creation is unnecessary.
 
-The Admin Console is `/admin` on its configured port. System Health reports and
+In development the `admin/` directory is the document root, so the Admin Console
+is served at `/` on its configured port (an older `/admin` bookmark redirects
+there). System Health reports and
 controls the independent API and SQL Parser processes and the database
 availability gate. Stopping or restarting either process does not stop Admin
 Console or the other managed service.

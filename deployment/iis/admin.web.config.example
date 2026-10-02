@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Copy to Backend\admin\web.config. Bind this IIS site to loopback only. -->
+<!-- Copy to Backend\admin\web.config. Bind this IIS site to loopback only.
+     Backend\admin may be the root of a dedicated site or an IIS application at
+     any path (for example /admin or /internal-admin). Every rule below is
+     relative to this directory and index.php derives its URLs from SCRIPT_NAME,
+     so the public path is chosen in IIS rather than in this file. -->
 <configuration>
   <system.webServer>
     <defaultDocument enabled="false" />
@@ -20,10 +24,16 @@
         <add name="Content-Security-Policy" value="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" />
       </customHeaders>
     </httpProtocol>
+    <!-- GENERIC_ADMIN_ENABLED=1 belongs only to the Admin FastCGI boundary.
+         Register a dedicated FastCGI application whose arguments match the
+         scriptProcessor below, so API and SQL Parser workers never inherit it:
+         appcmd.exe set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=admin']" /commit:apphost
+         appcmd.exe set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=admin'].environmentVariables.[name='GENERIC_ADMIN_ENABLED',value='1']" /commit:apphost
+         Add PHPRC and GENERIC_APP_ENV=production to the same registration. -->
     <handlers>
       <remove name="GenericSqlAdminPhpFastCgi" />
       <add name="GenericSqlAdminPhpFastCgi" path="*.php" verb="*" modules="FastCgiModule"
-           scriptProcessor="C:\PHP\php-cgi.exe" resourceType="File"
+           scriptProcessor="C:\PHP\php-cgi.exe|-d generic_sql_api.boundary=admin" resourceType="File"
            requireAccess="Script" />
     </handlers>
     <rewrite>
@@ -37,6 +47,8 @@
           <match url="^assets/(?:admin\.css|admin\.js|service-controls\.css)$" />
           <action type="None" />
         </rule>
+        <!-- Relative rewrite target: resolves to this application's index.php
+             whatever public path the Admin application is mounted at. -->
         <rule name="Route Admin pages" stopProcessing="true">
           <match url=".*" />
           <action type="Rewrite" url="index.php" />
@@ -62,7 +74,7 @@
           <remove fileExtension=".old" />
           <remove fileExtension=".tmp" />
           <remove fileExtension=".lock" />
-          
+
           <add fileExtension=".config" allowed="false" />
           <add fileExtension=".env" allowed="false" />
           <add fileExtension=".ini" allowed="false" />
