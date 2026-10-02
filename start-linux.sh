@@ -57,7 +57,7 @@ export GENERIC_SQL_API_ENCRYPTION_KEY
 ADMIN_PORT="$($PHP_BIN -c "$PHP_INI_PATH" "$BACKEND_ROOT/scripts/find-available-port.php" admin)"
 export GENERIC_ADMIN_ENABLED=1
 export GENERIC_ADMIN_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-ADMIN_URL="http://127.0.0.1:$ADMIN_PORT/admin"
+ADMIN_URL="http://127.0.0.1:$ADMIN_PORT/"
 
 API_STATE="unavailable"
 PARSER_STATE="unavailable"

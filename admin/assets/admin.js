@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  const apiUrl = "/admin/api.php",
+  const adminBase = (document.body.dataset.adminBase || "").replace(/\/+$/, ""),
+    apiUrl = `${adminBase}/api.php`,
     content = document.querySelector("#content"),
     title = document.querySelector("#page-title");
   const navigation = document.querySelector("#navigation"),
@@ -1748,10 +1749,16 @@
   }
 
   function currentRoute() {
-    const path = location.pathname.replace(/\/$/, "");
-    if (path === "" || path === "/admin" || path === "/admin/health")
-      return "health";
-    return path.split("/").pop();
+    const path = location.pathname.replace(/\/+$/, "");
+    const base = adminBase || "";
+    let relativePath = path;
+
+    if (base && path.startsWith(base)) {
+      relativePath = path.slice(base.length);
+    }
+
+    const route = relativePath.replace(/^\/+/, "").split("/")[0];
+    return route || "health";
   }
   async function render() {
     const route = currentRoute();
@@ -1775,8 +1782,14 @@
   }
   async function enterConsole() {
     preAuth(false);
-    if (location.pathname === "/" || location.pathname === "/admin")
-      history.replaceState({}, "", "/admin/health");
+
+    const currentPath = location.pathname.replace(/\/+$/, "");
+    const basePath = adminBase || "";
+    const adminHome = adminBase ? `${adminBase}/health` : "/health";
+
+    if (currentPath === basePath)
+      history.replaceState({}, "", adminHome);
+
     await render();
   }
   navigation.addEventListener("click", (event) => {

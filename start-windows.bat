@@ -212,7 +212,7 @@ if not defined GENERIC_ADMIN_STARTED_AT (
     exit /b 1
 )
 
-set "ADMIN_URL=http://127.0.0.1:%ADMIN_PORT%/admin"
+set "ADMIN_URL=http://127.0.0.1:%ADMIN_PORT%/"
 
 REM ==================================================
 REM Establish complete development runtime
