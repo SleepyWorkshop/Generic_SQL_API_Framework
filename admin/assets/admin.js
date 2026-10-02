@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const adminBase = (document.body.dataset.adminBase || "").replace(/\/+$/, ""),
-    apiUrl = `${adminBase}/api.php`,
+    apiUrl = `${window.location.origin}${adminBase}/api.php`,
     content = document.querySelector("#content"),
     title = document.querySelector("#page-title");
   const navigation = document.querySelector("#navigation"),
