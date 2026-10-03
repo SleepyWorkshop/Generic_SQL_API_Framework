@@ -112,7 +112,7 @@ try {
     $users->createUser('Read.User', 'fake-reader-password-123', RoleModel::READ_ONLY, false, null);
     $users->createUser('Data.Operator', 'fake-operator-password-123', RoleModel::DATA_OPERATOR, false, null);
     $users->createUser('Disabled.User', 'fake-disabled-password-123', RoleModel::READ_ONLY, false, null, false);
-    $users->createFrontendUser('Application.Admin', 'fake-application-password-123', RoleModel::APPLICATION_ADMINISTRATOR);
+    $users->createUser('Application.Admin', 'fake-application-password-123', null, true, RoleModel::APPLICATION_ADMINISTRATOR);
 
     // Authentication failures are generic, validation rejects malformed credentials, and login regenerates the ID.
     $authValidator = new AuthRequestValidator();
@@ -132,16 +132,27 @@ try {
         'idleTimeout' => 600, 'absoluteTimeout' => 3600,
     ], $logger);
     $auth = new AuthService($repository, new PasswordHasher(), $session, $loginLimiter, $logger);
+    $genericCredentialDetails = [];
     foreach ([['Missing.User', 'wrong-password'], ['Disabled.User', 'fake-disabled-password-123']] as [$username, $password]) {
         $failure = securityTestingFailure(fn () => $auth->login($username, $password), 'INVALID_CREDENTIALS', 401);
-        securityTestingAssert($failure->getMessage() === 'Invalid username or password.' && $failure->getDetails() === [],
+        $genericCredentialDetails[] = $failure->getDetails();
+        securityTestingAssert($failure->getMessage() === 'Invalid username or password.'
+            && ($failure->getDetails()[0]['attemptsRemaining'] ?? null) === 1
+            && ($failure->getDetails()[0]['locked'] ?? null) === false,
             'Authentication disclosed account existence or state.');
     }
+    securityTestingAssert($genericCredentialDetails[0] === $genericCredentialDetails[1],
+        'Credential feedback differs for missing and disabled identities.');
     securityTestingFailure(fn () => $auth->login('Read.User', 'wrong-one'), 'INVALID_CREDENTIALS', 401);
-    securityTestingFailure(fn () => $auth->login('Read.User', 'wrong-two'), 'LOGIN_RATE_LIMITED', 429);
+    $locked = securityTestingFailure(fn () => $auth->login('Read.User', 'wrong-two'), 'LOGIN_RATE_LIMITED', 429);
+    securityTestingAssert(($locked->getDetails()[0]['locked'] ?? null) === true
+        && ($locked->getDetails()[0]['retryAfterSeconds'] ?? null) === 30, 'Lockout feedback omitted the safe retry duration.');
     $_SERVER['HTTP_USER_AGENT'] = 'changed-agent';
-    securityTestingFailure(fn () => $auth->login('Read.User', 'fake-reader-password-123'), 'LOGIN_RATE_LIMITED', 429);
-    $loginClock += 31;
+    $loginClock += 11;
+    $stillLocked = securityTestingFailure(fn () => $auth->login('Read.User', 'fake-reader-password-123'), 'LOGIN_RATE_LIMITED', 429);
+    securityTestingAssert(($stillLocked->getDetails()[0]['retryAfterSeconds'] ?? null) === 19,
+        'Lockout feedback did not use the server-side remaining duration.');
+    $loginClock += 20;
     $session->start();
     $anonymousId = session_id();
     $snapshot = $auth->login('Read.User', 'fake-reader-password-123');
@@ -270,7 +281,16 @@ try {
     $authorization->authorize($applicationAdministrator, 'frontend.users.manage');
     securityTestingFailure(fn () => $authorization->authorize($applicationAdministrator, 'admin.manage'), 'AUTHORIZATION_DENIED', 403);
     securityTestingFailure(fn () => $authorization->authorize($applicationAdministrator, 'data.write', 'customers', 'write'), 'RESOURCE_ACCESS_DENIED', 403);
-    securityTestingFailure(fn () => $users->changePassword('System.Admin', 'unsafe-change', true), 'BACKEND_IDENTITY_PROTECTED', 403);
+    $persistedApplicationAdmin = $repository->findUser('Application.Admin');
+    $persistedApplicationPrincipal = new Principal(
+        $persistedApplicationAdmin['id'], $persistedApplicationAdmin['username'], 'session', null,
+        true, RoleModel::APPLICATION_ADMINISTRATOR, true
+    );
+    securityTestingFailure(
+        fn () => $users->changeFrontendUserPassword($persistedApplicationPrincipal, 'System.Admin', 'unsafe-change'),
+        'AUTHORIZATION_DENIED',
+        403
+    );
 
     // API key secret handling, owner state, role confinement, object IDs, and invalid-auth throttling.
     $keys = new ApiKeyService(null, $repository, $authorization, $logger);
@@ -462,6 +482,7 @@ try {
 
     $applicationRoot = $root . '/application';
     mkdir($applicationRoot . '/config', 0700, true);
+    mkdir($applicationRoot . '/backups', 0700, true);
     $backupSources = [
         'config/auth.json' => $runtime . '/auth.json',
         'config/installation.json' => $runtime . '/installation.json',
@@ -471,7 +492,7 @@ try {
         'database/config/database.json' => $root . '/encrypted-database.json',
     ];
     $backupManager = new ApplicationBackupManager($applicationRoot, $backupSources, 'security-test');
-    securityTestingFailure(fn () => $backupManager->create($applicationRoot . '/backups/unsafe'));
+    securityTestingFailure(fn () => $backupManager->create($root . '/outside-backup.zip'));
     $backupSource = (string)file_get_contents(__DIR__ . '/../app/Backup/ApplicationBackupManager.php');
     foreach (['encryption_key', 'sessions', 'runtime_process_state', 'rate_limit_state', 'logs'] as $excluded) {
         securityTestingAssert(str_contains($backupSource, "'{$excluded}'"), "Backup exclusion {$excluded} is missing.");

@@ -55,10 +55,10 @@ final class SetupService
         }
     }
 
-    public function createInitialAdmin(string $username, string $password): array
+    public function createInitialAdmin(string $name, string $username, string $mobile, ?string $email, string $password): array
     {
         try {
-            return $this->withLock(LOCK_EX, function () use ($username, $password): array {
+            return $this->withLock(LOCK_EX, function () use ($name, $username, $mobile, $email, $password): array {
                 $installation = $this->installationRepository->load();
                 if ($installation['initialized']) {
                     $this->alreadyInitialized();
@@ -87,7 +87,10 @@ final class SetupService
                     'version' => 4,
                     'users' => [[
                         'id' => bin2hex(random_bytes(16)),
+                        'name' => $name,
                         'username' => $username,
+                        'mobile' => $mobile,
+                        'email' => $email,
                         'passwordHash' => $this->passwordHasher->hash($password),
                         'enabled' => true,
                         'backendRole' => RoleModel::SYSTEM_ADMINISTRATOR,

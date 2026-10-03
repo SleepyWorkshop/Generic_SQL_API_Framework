@@ -46,9 +46,12 @@ permissions. Do not copy them blindly to a target host.
 `start-windows.bat` and `start-linux.sh` remain unchanged development tools
 using `php -S`. In production, IIS/FastCGI or Nginx/PHP-FPM owns API and SQL
 Parser workers. When `GENERIC_APP_ENV=production`, System Health labels those
-services **externally managed**, hides local lifecycle buttons, and rejects
-Admin start/stop/restart requests with `409 PROCESS_EXTERNALLY_MANAGED`. It does
-not issue IIS, Nginx, PHP-FPM, systemd, or Windows service commands.
+services' infrastructure **externally managed** and exposes application-level
+Enable, Disable, and Reload controls. These retain the existing Admin action
+names for compatibility but change only the atomic application availability
+state. Disabled execution requests receive a sanitized 503 while Admin and
+liveness stay reachable. No action issues IIS, Nginx, FastCGI, PHP-FPM, systemd,
+Windows service, or SQL Server commands.
 
 ## Windows/IIS operator checklist
 
@@ -170,7 +173,8 @@ command line or transcript.
 6. Use a staging System Administrator to validate Admin authentication,
    authorization, CSRF token rejection/acceptance, secure host-only cookies,
    session-ID regeneration and logout invalidation. Do not log token or cookie
-   values. Confirm API/Parser show externally managed with no lifecycle buttons.
+   values. Confirm API/Parser show externally managed infrastructure and working
+   application Enable/Disable/Reload controls without changing worker processes.
 
 ## SQL Server and operational validation
 

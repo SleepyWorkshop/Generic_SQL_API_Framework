@@ -31,7 +31,10 @@ final class UserManagementController extends BaseController
                 $request['backendRole'],
                 $request['frontendAccess'],
                 $request['frontendRole'],
-                $request['enabled']
+                $request['enabled'],
+                $request['name'],
+                $request['mobile'],
+                $request['email']
             )],
             'User created.',
             201
@@ -41,8 +44,10 @@ final class UserManagementController extends BaseController
     public function updateUser(array $request): void
     {
         $this->success(
-            [$this->userService->updateUsername($request['username'], $request['newUsername'])],
-            'Username updated.'
+            [$this->userService->updateUserProfile(
+                $request['username'], $request['name'], $request['newUsername'], $request['mobile'], $request['email']
+            )],
+            'User profile updated.'
         );
     }
 
@@ -75,7 +80,11 @@ final class UserManagementController extends BaseController
     public function assignAuthorization(array $request): void
     {
         $this->success([$this->userService->assignAuthorization(
-            $request['username'], $request['backendRole'], $request['frontendAccess'], $request['frontendRole']
+            $request['username'],
+            $request['backendRole'],
+            $request['frontendAccess'],
+            $request['frontendRole'],
+            (string)$this->sessionService->authenticatedUserId()
         )], 'User authorization updated.');
     }
 }

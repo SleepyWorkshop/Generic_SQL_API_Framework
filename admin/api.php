@@ -6,7 +6,7 @@ ob_start();
 
 require_once __DIR__ . '/../config/constants.php';
 require_once __DIR__ . '/../core/ExceptionHandler.php';
-ExceptionHandler::register();
+ExceptionHandler::register('admin');
 require_once __DIR__ . '/../app/Middleware/AuthenticationMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/AdminAuthorizationMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/LocalAdminMiddleware.php';
@@ -43,11 +43,15 @@ $contentType = strtolower(trim(explode(';', (string)($_SERVER['CONTENT_TYPE'] ??
 if ($contentType !== 'application/json') {
     Response::error('Content-Type must be application/json.', 415, 'UNSUPPORTED_MEDIA_TYPE');
 }
-$request = json_decode(RequestBodyReader::read(), true);
+// Backup ZIP uploads are base64 encoded in the authenticated Admin request.
+// The validator and recovery service apply the lower decoded-archive limits.
+$request = json_decode(RequestBodyReader::read(null, null, 30 * 1024 * 1024), true);
 if (json_last_error() !== JSON_ERROR_NONE) Response::error('Invalid JSON request.', 400, 'INVALID_JSON');
 if (!is_array($request) || array_is_list($request)) {
     Response::error('Invalid request.', 400, 'INVALID_REQUEST', [['path' => '', 'message' => 'Request body must be a JSON object.']]);
 }
+Response::setRequestContext(['action' => is_string($request['action'] ?? null) ? $request['action'] : null]);
+(new LoggingMiddleware())->handle($request);
 
 $setupActions = ['setup.status', 'setup.createAdmin'];
 $authActions = ['auth.csrf', 'auth.login', 'auth.session', 'auth.logout'];
@@ -60,12 +64,17 @@ $apiKeyActions = ['auth.apiKeys.list','auth.apiKeys.create','auth.apiKeys.enable
 $roleActions = ['auth.roles.list'];
 $adminActions = [
     'admin.status', 'admin.health', 'admin.system.info',
+    'admin.console.restart',
     'admin.api.start', 'admin.api.stop', 'admin.api.restart',
     'admin.sqlParser.start', 'admin.sqlParser.stop', 'admin.sqlParser.restart',
     'admin.database.get', 'admin.database.connect', 'admin.database.disconnect', 'admin.database.restart', 'admin.database.test', 'admin.database.save',
     'admin.settings.get', 'admin.server.save',
     'admin.cors.save', 'admin.authentication.save',
     'admin.runtime.save',
+    'admin.backup.history', 'admin.backup.create', 'admin.backup.download',
+    'admin.backup.preview', 'admin.backup.restore', 'admin.backup.schedule',
+    'admin.backup.schedule.save',
+    'admin.operational.event',
 ];
 $allActions = array_merge($setupActions, $authActions, $userActions, $apiKeyActions, $roleActions, $adminActions);
 if (!in_array($request['action'] ?? null, $allActions, true)) {
@@ -77,8 +86,6 @@ if (!in_array($request['action'] ?? null, $allActions, true)) {
 (new ApiRateLimitMiddleware())->handle($request);
 (new AdminAuthorizationMiddleware(array_merge($userActions, $apiKeyActions, $roleActions, $adminActions)))->handle($request);
 (new CsrfProtectionMiddleware())->handle($request);
-(new LoggingMiddleware())->handle($request);
-
 if (in_array($request['action'], $setupActions, true)) {
     $validated = (new SetupRequestValidator())->validate($request);
     Response::setRequestContext(['action' => $validated['action']]);

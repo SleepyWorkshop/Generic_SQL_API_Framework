@@ -23,7 +23,9 @@ final class SetupController extends BaseController
     public function createAdmin(array $request): void
     {
         $this->success(
-            [$this->setupService->createInitialAdmin($request['username'], $request['password'])],
+            [$this->setupService->createInitialAdmin(
+                $request['name'], $request['username'], $request['mobile'], $request['email'], $request['password']
+            )],
             'Initial administrator created.',
             201
         );

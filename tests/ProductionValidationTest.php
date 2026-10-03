@@ -72,28 +72,48 @@ productionValidationAssert(str_contains($csrf, 'CSRF_VALIDATION_FAILED') || str_
     'CSRF protection is not connected to the API pipeline.');
 productionValidationAssert(str_contains($errors, 'INTERNAL_ERROR') && str_contains($errors, 'DATABASE_UNAVAILABLE'),
     'Production error categorization is incomplete.');
-productionValidationAssert(str_contains($adminJavaScript, "item.lifecycleManaged===false"),
-    'Admin Console does not hide production-owned lifecycle controls.');
+productionValidationAssert(
+    str_contains($adminJavaScript, 'item.controlMode === "application"')
+        && str_contains($adminJavaScript, 'data-control-mode="application"')
+        && str_contains($adminJavaScript, '>Enable</button>')
+        && str_contains($adminJavaScript, '>Disable</button>')
+        && str_contains($adminJavaScript, '>Reload</button>'),
+    'Admin Console does not present environment-aware application runtime controls.'
+);
 
 $oldEnvironment = getenv('GENERIC_APP_ENV');
+$runtimeDirectory = sys_get_temp_dir() . '/generic-production-validation-' . bin2hex(random_bytes(6));
 try {
+    mkdir($runtimeDirectory, 0700, true);
     putenv('GENERIC_APP_ENV=production');
     $apiManager = new ProductionValidationProcessManager();
     $parserManager = new SqlParserProcessManager();
+    $applicationStatePath = $runtimeDirectory . '/application-runtime-state.json';
+    JsonFileStore::save($applicationStatePath, [
+        'version' => 1,
+        'generation' => 0,
+        'services' => [
+            'api' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+            'sqlParser' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+        ],
+    ]);
     $service = new AdminService(null, $root . '/database/config/database.json', null,
-        $apiManager, null, $parserManager);
-    foreach ([fn () => $service->controlApi('start'), fn () => $service->controlSqlParser('restart')] as $operation) {
-        try { $operation(); productionValidationAssert(false, 'Production Admin attempted local process management.'); }
-        catch (ApiRequestException $exception) {
-            productionValidationAssert($exception->getStatusCode() === 409
-                && $exception->getErrorCode() === 'PROCESS_EXTERNALLY_MANAGED',
-                'Production process ownership returned the wrong safe error.');
-        }
-    }
+        $apiManager, null, $parserManager, null, null, null, null,
+        new ApplicationRuntimeManager($applicationStatePath));
+    $apiResult = $service->controlApi('start');
+    $parserResult = $service->controlSqlParser('restart');
+    productionValidationAssert(
+        $apiResult['applicationRuntime']['enabled'] === true
+            && $parserResult['controlMode'] === 'application'
+            && $parserResult['applicationRuntime']['reloadedAt'] !== null,
+        'Production Admin did not apply application-level runtime controls.'
+    );
     productionValidationAssert($apiManager->operations === 0,
         'Production Admin invoked the development API process manager.');
 } finally {
     $oldEnvironment === false ? putenv('GENERIC_APP_ENV') : putenv('GENERIC_APP_ENV=' . $oldEnvironment);
+    foreach (glob($runtimeDirectory . '/*') ?: [] as $file) @unlink($file);
+    @rmdir($runtimeDirectory);
 }
 
 $scriptOutput = [];

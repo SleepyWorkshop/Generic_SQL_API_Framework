@@ -13,6 +13,9 @@ logs/
 exports/
 uploads/
 storage/
+backups/*
+!backups/.gitkeep
+*.zip
 
 # PHP Runtime Generated Files
 runtime/windows/php/opcache/
@@ -21,6 +24,7 @@ runtime/secrets/
 runtime/api/
 runtime/sqlparser/
 runtime/health/
+runtime/.backup-recovery.lock
 
 # Environment
 .env
@@ -48,6 +52,7 @@ config/admin.json
 config/authorization.json
 config/api-keys.json
 config/database-state.json
+config/application-runtime-state.json
 !config/auth.example.json
 !config/installation.example.json
 !config/admin.example.json

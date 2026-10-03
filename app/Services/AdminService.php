@@ -13,23 +13,29 @@ require_once __DIR__ . '/../Runtime/SqlParserProcessManager.php';
 require_once __DIR__ . '/../Runtime/DatabaseAuthenticationSupport.php';
 require_once __DIR__ . '/../Runtime/RuntimeDetector.php';
 require_once __DIR__ . '/../Runtime/DatabaseAvailabilityManager.php';
+require_once __DIR__ . '/../Runtime/ApplicationRuntimeManager.php';
 require_once __DIR__ . '/../Health/ApplicationHealthMonitor.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../../core/Logger.php';
+require_once __DIR__ . '/../Backup/BackupRecoveryService.php';
+require_once __DIR__ . '/../../core/OperationalLogger.php';
 
 final class AdminService
 {
     private AdminConfigurationRepository $configuration;
     private string $databasePath;
+    private bool $runtimeDatabasePath;
     private $connectionTester;
     private ApiProcessManager $processManager;
     private SqlParserProcessManager $parserProcessManager;
     private RuntimeDetector $runtimeDetector;
     private DatabaseAuthenticationSupport $databaseAuthentication;
     private DatabaseAvailabilityManager $databaseAvailability;
+    private ApplicationRuntimeManager $applicationRuntime;
     private Logger $logger;
     private ApplicationHealthMonitor $healthMonitor;
+    private BackupRecoveryService $backupRecovery;
 
     public function __construct(
         ?AdminConfigurationRepository $configuration = null,
@@ -41,9 +47,12 @@ final class AdminService
         ?DatabaseAuthenticationSupport $databaseAuthentication = null,
         ?DatabaseAvailabilityManager $databaseAvailability = null,
         ?Logger $logger = null,
-        ?ApplicationHealthMonitor $healthMonitor = null
+        ?ApplicationHealthMonitor $healthMonitor = null,
+        ?ApplicationRuntimeManager $applicationRuntime = null,
+        ?BackupRecoveryService $backupRecovery = null
     ) {
         $this->configuration = $configuration ?? new AdminConfigurationRepository();
+        $this->runtimeDatabasePath = $databasePath === null;
         $this->databasePath = $databasePath
             ?? dirname(__DIR__, 2) . '/database/config/database.json';
         $this->connectionTester = $connectionTester ?? function (array $database): void {
@@ -59,21 +68,23 @@ final class AdminService
         $this->parserProcessManager = $parserProcessManager ?? new SqlParserProcessManager($this->configuration);
         $this->databaseAuthentication = $databaseAuthentication ?? new DatabaseAuthenticationSupport();
         $this->databaseAvailability = $databaseAvailability ?? new DatabaseAvailabilityManager();
+        $this->applicationRuntime = $applicationRuntime ?? new ApplicationRuntimeManager();
         $this->logger = $logger ?? new Logger();
         $this->healthMonitor = $healthMonitor ?? new ApplicationHealthMonitor([
             'databasePath' => $this->databasePath,
             'databaseAvailable' => fn (): bool => $this->databaseAvailability->available(),
             'databaseTester' => $this->connectionTester,
         ]);
+        $this->backupRecovery = $backupRecovery ?? new BackupRecoveryService();
     }
 
     public function status(): array
     {
         $databaseAvailable = $this->databaseAvailability->available();
         $api = SecurityConfiguration::isProduction()
-            ? $this->externallyManagedProcess('api') : $this->processManager->status();
+            ? $this->applicationRuntime->status('api') : $this->processManager->status();
         $parser = SecurityConfiguration::isProduction()
-            ? $this->externallyManagedProcess('sqlparser') : $this->parserProcessManager->status();
+            ? $this->applicationRuntime->status('sqlParser') : $this->parserProcessManager->status();
         $admin = [
                 'running' => true,
                 'healthy' => true,
@@ -120,9 +131,9 @@ final class AdminService
         $runtime = $this->runtimeDetector->information();
         $installation = (new InstallationRepository())->load();
         $api = SecurityConfiguration::isProduction()
-            ? $this->externallyManagedProcess('api') : $this->processManager->status();
+            ? $this->applicationRuntime->status('api') : $this->processManager->status();
         $parser = SecurityConfiguration::isProduction()
-            ? $this->externallyManagedProcess('sqlparser') : $this->parserProcessManager->status();
+            ? $this->applicationRuntime->status('sqlParser') : $this->parserProcessManager->status();
         $databaseAvailable = $this->databaseAvailability->available();
         $database = $databaseAvailable ? $this->databaseHealth() : ['status' => 'disconnected'];
         return [
@@ -138,6 +149,30 @@ final class AdminService
                 'sqlParser' => $parser['status'],
             ],
         ];
+    }
+
+    public function restartAdminConsole(): array
+    {
+        try {
+            $this->configuration->load();
+            clearstatcache(true);
+            if (function_exists('opcache_reset')) @opcache_reset();
+            $result = [
+                'accepted' => true,
+                'status' => 'restarting',
+                'controlMode' => 'application',
+                'checkAfterMilliseconds' => 750,
+            ];
+            $this->runtimeAudit('admin_console', 'restart', 'success', $result);
+            (new OperationalLogger())->info('admin', 'Admin Console application restart accepted');
+            return $result;
+        } catch (Throwable $exception) {
+            $this->runtimeAudit('admin_console', 'restart', 'failure', [], 'operation_failed');
+            (new OperationalLogger())->error('admin', 'Admin Console application restart failed', [
+                'error_code' => 'ADMIN_CONSOLE_RESTART_FAILED',
+            ]);
+            throw new ApiRequestException('Admin Console restart could not be initiated.', 'ADMIN_CONSOLE_RESTART_FAILED', [], 503);
+        }
     }
 
     public function databaseConfiguration(): array
@@ -194,11 +229,15 @@ final class AdminService
 
     public function testDatabase(array $database): array
     {
+        (new OperationalLogger())->info('database', 'Database connection test started');
         $resolved = $this->withExistingPassword($database);
         $this->validateDatabaseAuthentication($resolved);
         try {
             ($this->connectionTester)($resolved);
         } catch (Throwable $exception) {
+            (new OperationalLogger())->error('database', 'Database connection test failed', [
+                'error_code' => 'DATABASE_CONNECTION_FAILED',
+            ]);
             throw new ApiRequestException(
                 'Database connection failed.',
                 'DATABASE_CONNECTION_FAILED',
@@ -207,14 +246,19 @@ final class AdminService
             );
         }
         $this->logger->audit('database.connection_test', 'success', 'INFO', ['component' => 'database']);
+        (new OperationalLogger())->info('database', 'Database connection test successful');
         return ['connected' => true];
     }
 
     public function testCurrentDatabase(): array
     {
+        (new OperationalLogger())->info('database', 'Database connection test started');
         try {
             $database = DatabaseConfigurationResolver::load($this->databasePath);
         } catch (Throwable $exception) {
+            (new OperationalLogger())->error('database', 'Database configuration load failed', [
+                'error_code' => 'DATABASE_CONFIGURATION_UNAVAILABLE',
+            ]);
             throw new ApiRequestException(
                 'Database configuration is unavailable.',
                 'DATABASE_CONFIGURATION_UNAVAILABLE',
@@ -226,12 +270,16 @@ final class AdminService
         try {
             ($this->connectionTester)($database);
         } catch (Throwable $exception) {
+            (new OperationalLogger())->error('database', 'Database connection test failed', [
+                'error_code' => 'DATABASE_CONNECTION_FAILED',
+            ]);
             $this->logger->audit('database.connection_test', 'failure', 'WARNING', [
                 'reason' => 'connection_failed', 'component' => 'database',
             ]);
             throw new ApiRequestException('Database connection failed.', 'DATABASE_CONNECTION_FAILED', [], 422);
         }
         $this->logger->audit('database.connection_test', 'success', 'INFO', ['component' => 'database']);
+        (new OperationalLogger())->info('database', 'Database connection test successful');
         return ['connected' => true];
     }
 
@@ -285,6 +333,7 @@ final class AdminService
     {
         $settings = $this->configuration->load();
         return [
+            'hostingMode' => SecurityConfiguration::isProduction() ? 'production' : 'development',
             'server' => $settings['server'],
             'cors' => $settings['cors'],
             'authentication' => [
@@ -292,6 +341,7 @@ final class AdminService
                 'apiKeyConfigured' => (new ApiKeyAuthenticator())->configured() || (new ApiKeyService())->configured(),
             ],
             'runtime' => $settings['runtime'],
+            'backup' => $settings['backup'],
             'security' => [
                 'csrfEnabled' => true,
                 'session' => SecurityConfiguration::sessionOptions(),
@@ -306,21 +356,23 @@ final class AdminService
     public function saveServer(array $server): array
     {
         $currentServer = $this->configuration->load()['server'];
-        $runtime = $this->processManager->status();
-        $parserRuntime = $this->parserProcessManager->status();
-        if (($runtime['running'] ?? false) === true && ($runtime['port'] ?? null) === $server['adminPort']) {
-            throw new ApiRequestException(
-                'Invalid admin request.',
-                'INVALID_ADMIN_REQUEST',
-                [['path' => 'server.adminPort', 'message' => 'Admin port conflicts with the running API port.']]
-            );
-        }
-        if (($parserRuntime['running'] ?? false) === true && ($parserRuntime['port'] ?? null) === $server['adminPort']) {
-            throw new ApiRequestException(
-                'Invalid admin request.',
-                'INVALID_ADMIN_REQUEST',
-                [['path' => 'server.adminPort', 'message' => 'Admin port conflicts with the running SQL Parser port.']]
-            );
+        if (!SecurityConfiguration::isProduction()) {
+            $runtime = $this->processManager->status();
+            $parserRuntime = $this->parserProcessManager->status();
+            if (($runtime['running'] ?? false) === true && ($runtime['port'] ?? null) === $server['adminPort']) {
+                throw new ApiRequestException(
+                    'Invalid admin request.',
+                    'INVALID_ADMIN_REQUEST',
+                    [['path' => 'server.adminPort', 'message' => 'Admin port conflicts with the running API port.']]
+                );
+            }
+            if (($parserRuntime['running'] ?? false) === true && ($parserRuntime['port'] ?? null) === $server['adminPort']) {
+                throw new ApiRequestException(
+                    'Invalid admin request.',
+                    'INVALID_ADMIN_REQUEST',
+                    [['path' => 'server.adminPort', 'message' => 'Admin port conflicts with the running SQL Parser port.']]
+                );
+            }
         }
         $apiRestartRequired = $server['apiPortMinimum'] !== $currentServer['apiPortMinimum']
             || $server['apiPortMaximum'] !== $currentServer['apiPortMaximum'];
@@ -390,15 +442,27 @@ final class AdminService
         }
     }
 
+    public function saveBackupSchedule(array $backup): array
+    {
+        try {
+            $result = $this->configuration->update(function (array &$settings) use ($backup): array {
+                $settings['backup'] = $backup;
+                return $backup;
+            });
+            $this->configurationAudit('backup_schedule');
+            return $result;
+        } catch (Throwable $exception) {
+            $this->logger->audit('configuration.changed', 'failure', 'ERROR', [
+                'configurationCategory' => 'backup_schedule', 'reason' => 'save_failed', 'component' => 'admin',
+            ]);
+            throw new ApiRequestException('Unable to save backup schedule.', 'BACKUP_SCHEDULE_SAVE_FAILED', [], 500);
+        }
+    }
+
     public function controlApi(string $operation): array
     {
         if (SecurityConfiguration::isProduction()) {
-            throw new ApiRequestException(
-                'API workers are managed by the production web server.',
-                'PROCESS_EXTERNALLY_MANAGED',
-                [],
-                409
-            );
+            return $this->controlApplicationRuntime('api', $operation, 'API_RUNTIME_OPERATION_FAILED');
         }
         try {
             $result = $operation === 'start' ? $this->processManager->start()
@@ -414,11 +478,10 @@ final class AdminService
     public function controlSqlParser(string $operation): array
     {
         if (SecurityConfiguration::isProduction()) {
-            throw new ApiRequestException(
-                'SQL Parser workers are managed by the production web server.',
-                'PROCESS_EXTERNALLY_MANAGED',
-                [],
-                409
+            return $this->controlApplicationRuntime(
+                'sqlParser',
+                $operation,
+                'SQL_PARSER_RUNTIME_OPERATION_FAILED'
             );
         }
         try {
@@ -434,14 +497,57 @@ final class AdminService
 
     public function controlDatabase(string $operation): array
     {
+        (new OperationalLogger())->info('database', 'Database runtime operation started', ['operation' => $operation]);
         if ($operation === 'disconnect') {
             $result = $this->databaseAvailability->setAvailable(false);
             $this->runtimeAudit('database', $operation, 'success', $result);
+            (new OperationalLogger())->info('database', 'Database disconnect successful');
             return $result;
         }
         if ($operation === 'restart') $this->databaseAvailability->setAvailable(false);
-        try { $this->testCurrentDatabase(); $result = $this->databaseAvailability->setAvailable(true); $this->runtimeAudit('database', $operation, 'success', $result); return $result; }
-        catch (Throwable $exception) { $this->databaseAvailability->setAvailable(false); $this->runtimeAudit('database', $operation, 'failure', [], 'connection_failed'); throw $exception; }
+        try { $this->testCurrentDatabase(); $result = $this->databaseAvailability->setAvailable(true); $this->runtimeAudit('database', $operation, 'success', $result); (new OperationalLogger())->info('database', 'Database runtime operation successful', ['operation' => $operation]); return $result; }
+        catch (Throwable $exception) { $this->databaseAvailability->setAvailable(false); $this->runtimeAudit('database', $operation, 'failure', [], 'connection_failed'); (new OperationalLogger())->error('database', 'Database runtime operation failed', ['operation' => $operation, 'error_code' => 'DATABASE_UNAVAILABLE']); throw $exception; }
+    }
+
+    public function backupHistory(): array
+    {
+        return $this->backupRecovery->history();
+    }
+
+    public function backupScheduleInformation(): array
+    {
+        return $this->backupRecovery->scheduleInformation();
+    }
+
+    public function createBackup(): array
+    {
+        return $this->backupRecovery->create();
+    }
+
+    public function downloadBackup(string $recoveryPointId): array
+    {
+        return $this->backupRecovery->download($recoveryPointId);
+    }
+
+    public function previewBackupRestore(string $filename, string $archive): array
+    {
+        return $this->backupRecovery->previewUpload($filename, $archive);
+    }
+
+    public function restoreBackup(string $uploadToken, bool $confirmed): array
+    {
+        return $this->backupRecovery->restore($uploadToken, $confirmed);
+    }
+
+    public function recordFrontendOperationalEvent(array $event): array
+    {
+        (new OperationalLogger())->info('admin', $event['event'], array_filter([
+            'page' => $event['page'] ?? null,
+            'operation' => $event['operation'] ?? null,
+            'error_code' => $event['errorCode'] ?? null,
+            'browser_request_id' => $event['requestId'] ?? null,
+        ], static fn ($value): bool => $value !== null));
+        return ['recorded' => true];
     }
 
     private function configurationAudit(string $category): void
@@ -461,6 +567,24 @@ final class AdminService
             'port' => is_int($result['port'] ?? null) ? $result['port'] : null,
             'reason' => $reason,
         ]);
+    }
+
+    private function controlApplicationRuntime(string $service, string $operation, string $errorCode): array
+    {
+        $auditComponent = $service === 'api' ? 'api' : 'sql_parser';
+        try {
+            $result = $this->applicationRuntime->control($service, $operation);
+            $this->runtimeAudit($auditComponent, $operation, 'success', $result);
+            return $result;
+        } catch (Throwable $exception) {
+            $this->runtimeAudit($auditComponent, $operation, 'failure', [], 'operation_failed');
+            throw new ApiRequestException(
+                'Application runtime operation failed.',
+                $errorCode,
+                [],
+                409
+            );
+        }
     }
 
     private function databaseStatus(): array
@@ -487,22 +611,6 @@ final class AdminService
                 'readable' => false,
             ];
         }
-    }
-
-    private function externallyManagedProcess(string $service): array
-    {
-        return [
-            'running' => false,
-            'service' => $service,
-            'healthy' => false,
-            'status' => 'externally managed',
-            'lifecycleManaged' => false,
-            'port' => null,
-            'pid' => null,
-            'startedAt' => null,
-            'uptimeSeconds' => null,
-            'version' => null,
-        ];
     }
 
     private function databaseHealth(): array

@@ -111,8 +111,8 @@ $api = (string)file_get_contents(__DIR__ . '/../api/index.php');
 $admin = (string)file_get_contents(__DIR__ . '/../admin/api.php');
 $parser = (string)file_get_contents(__DIR__ . '/../sqlparser/src/SqlParserRequestHandler.php');
 $health = (string)file_get_contents(__DIR__ . '/../api/health.php');
-errorHandlingAssert(str_contains($api, 'CORS_ORIGIN_DENIED') && str_contains($api, 'ExceptionHandler::register()'), 'API boundary error protections are incomplete.');
-errorHandlingAssert(str_contains($admin, 'ExceptionHandler::register()'), 'Admin boundary is not centrally protected.');
+errorHandlingAssert(str_contains($api, 'CORS_ORIGIN_DENIED') && str_contains($api, "ExceptionHandler::register('api')"), 'API boundary error protections are incomplete.');
+errorHandlingAssert(str_contains($admin, "ExceptionHandler::register('admin')"), 'Admin boundary is not centrally protected.');
 errorHandlingAssert(!str_contains($parser, "'fragment'=>") && str_contains($parser, 'Response::errorPayload'), 'Parser error response leaks SQL or bypasses the canonical envelope.');
 errorHandlingAssert(str_contains($health, "503") && str_contains($health, "'/health/ready'"), 'Health readiness compatibility changed.');
 errorHandlingAssert(str_contains((string)file_get_contents(__DIR__ . '/../core/ExceptionHandler.php'), 'if (self::$handling)'),

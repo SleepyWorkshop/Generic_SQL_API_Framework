@@ -25,7 +25,7 @@ stubs, not evidence of multi-database support.
 | `admin/api.php` | Loopback administrator dispatch; never make normal API auth authoritative here |
 | `sqlparser/` | Non-executing SQL-to-JSON parser, isolated from database/runtime auth |
 | `app/Requests/` | Public validation and normalization |
-| `app/Middleware/` | Authentication, authorization, CSRF, throttling, logging, database availability |
+| `app/Middleware/` | Authentication, authorization, CSRF, throttling, logging, database/application availability |
 | `app/Controllers/`, `app/Services/` | Thin request/application orchestration |
 | `app/Repositories/Query/` | Structured SELECT and expression builders |
 | `app/Repositories/Write/` | Registered write builders |
@@ -93,7 +93,7 @@ validation and explicit migrations when changing a stored shape.
 Do not casually edit or commit:
 
 - `config/admin.json`, `auth.json`, `authorization.json`, `api-keys.json`,
-  `installation.json`, or `database-state.json`;
+  `installation.json`, `database-state.json`, or `application-runtime-state.json`;
 - `database/config/database.json`;
 - `runtime/secrets/`, `runtime/api/`, `runtime/sqlparser/`, or `runtime/health/`;
 - `logs/`, `storage/`, lock files, backups, temporary files, sessions, or keys.

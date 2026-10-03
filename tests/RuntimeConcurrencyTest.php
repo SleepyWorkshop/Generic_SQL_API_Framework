@@ -6,6 +6,7 @@ require_once __DIR__ . '/../app/Security/LoginRateLimiter.php';
 require_once __DIR__ . '/../app/Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../app/Runtime/ApiProcessManager.php';
 require_once __DIR__ . '/../app/Runtime/PortSelector.php';
+require_once __DIR__ . '/../app/Runtime/ApplicationRuntimeManager.php';
 
 function concurrencyAssert(bool $condition, string $message): void
 {
@@ -123,6 +124,38 @@ try {
     concurrencyAssert(
         count($loginRecord['attempts'] ?? []) === $workerCount * $operationsPerWorker,
         'Concurrent login rate-limit updates were lost.'
+    );
+
+    $applicationStatePath = $directory . '/application-runtime-state.json';
+    JsonFileStore::save($applicationStatePath, [
+        'version' => 1,
+        'generation' => 0,
+        'services' => [
+            'api' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+            'sqlParser' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+        ],
+    ]);
+    $applicationWorkers = [];
+    $applicationWorkerCount = 6;
+    $applicationOperations = 30;
+    for ($worker = 0; $worker < $applicationWorkerCount; $worker++) {
+        $applicationWorkers[] = concurrencyStartWorker([
+            'application-runtime',
+            $applicationStatePath,
+            $worker % 2 === 0 ? 'api' : 'sqlParser',
+            (string)$applicationOperations,
+        ]);
+    }
+    concurrencyWaitWorkers($applicationWorkers);
+    $applicationState = JsonFileStore::load($applicationStatePath);
+    concurrencyAssert(
+        $applicationState['generation'] === $applicationWorkerCount * $applicationOperations,
+        'Concurrent production runtime controls lost a serialized state mutation.'
+    );
+    concurrencyAssert(
+        (new ApplicationRuntimeManager($applicationStatePath))->status('api')['controlMode'] === 'application'
+            && glob($applicationStatePath . '.tmp.*') === [],
+        'Concurrent production runtime controls left invalid or partial state.'
     );
     $loginLimiter = new LoginRateLimiter(
         $loginDirectory,

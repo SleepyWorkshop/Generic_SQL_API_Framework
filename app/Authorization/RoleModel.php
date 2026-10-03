@@ -4,6 +4,7 @@ final class RoleModel
 {
     public const READ_ONLY = 'read-only';
     public const DATA_OPERATOR = 'data-operator';
+    public const API_ADMINISTRATOR = 'api-administrator';
     public const SYSTEM_ADMINISTRATOR = 'system-administrator';
     public const APPLICATION_ADMINISTRATOR = 'application-administrator';
 
@@ -15,6 +16,11 @@ final class RoleModel
     public static function frontendRoles(): array
     {
         return [self::APPLICATION_ADMINISTRATOR];
+    }
+
+    public static function apiKeyRoles(): array
+    {
+        return [self::READ_ONLY, self::DATA_OPERATOR, self::API_ADMINISTRATOR];
     }
 
     public static function migrateLegacyBackendRoles(array $roles): ?string

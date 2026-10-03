@@ -229,12 +229,22 @@ try {
         unifiedAdminAssert(str_contains($launcher, '127.0.0.1'), 'Launcher does not bind to loopback.');
         unifiedAdminAssert(!str_contains($launcher, '0.0.0.0'), 'Launcher exposes the admin console to the network.');
         unifiedAdminAssert(str_contains($launcher, 'find-available-port.php'), 'Launcher does not use safe port selection.');
-        unifiedAdminAssert(str_contains($launcher, 'database-runtime-control.php') && str_contains($launcher, 'disconnect'), 'Launcher does not start with database runtime access disconnected.');
-        unifiedAdminAssert(!str_contains($launcher, 'database-runtime-control.php connect'), 'Launcher automatically connects database runtime access.');
-        unifiedAdminAssert(str_contains($launcher, '/admin'), 'Launcher does not display the admin URL.');
+        unifiedAdminAssert(str_contains($launcher, 'api-runtime-control.php') && str_contains($launcher, 'start'), 'Launcher does not automatically start the API.');
+        unifiedAdminAssert(str_contains($launcher, 'sqlparser-runtime-control.php') && str_contains($launcher, 'start'), 'Launcher does not automatically start the SQL Parser.');
+        unifiedAdminAssert(str_contains($launcher, 'database-runtime-control.php') && str_contains($launcher, 'connect'), 'Launcher does not automatically connect application database runtime access.');
+        unifiedAdminAssert(str_contains($launcher, 'verify-development-runtime.php'), 'Launcher does not verify development runtime startup.');
+        unifiedAdminAssert(
+            preg_match('#ADMIN_URL=?"?http://127\.0\.0\.1:(?:\$ADMIN_PORT|%ADMIN_PORT%)/"#', $launcher) === 1
+                && preg_match('/echo\s+"?Admin:\s+(?:\$ADMIN_URL|%ADMIN_URL%)/', $launcher) === 1,
+            'Launcher does not display the document-root admin URL.'
+        );
     }
     $adminJavaScript = (string)file_get_contents(__DIR__ . '/../admin/assets/admin.js');
-    unifiedAdminAssert(str_contains($adminJavaScript, 'availableAuthenticationModes.map'), 'Database authentication UI does not use backend-supported modes.');
+    $adminHtml = (string)file_get_contents(__DIR__ . '/../admin/index.php');
+    $adminCss = (string)file_get_contents(__DIR__ . '/../admin/assets/admin.css');
+    $compactAdminJavaScript = str_replace('"', "'", preg_replace('/\s+/', '', $adminJavaScript));
+    $compactAdminCss = preg_replace('/\s+/', ' ', $adminCss);
+    unifiedAdminAssert(str_contains($compactAdminJavaScript, 'availableAuthenticationModes.map'), 'Database authentication UI does not use backend-supported modes.');
     foreach ([
         'session' => 'Session',
         'api_key' => 'API Key',
@@ -248,24 +258,194 @@ try {
     }
     unifiedAdminAssert(!str_contains($adminJavaScript, '(existing configuration)'), 'Supported authentication modes are still rendered as existing-only configuration.');
     unifiedAdminAssert(
+        str_contains($adminJavaScript, 'item.controlMode === "application"')
+            && str_contains($adminJavaScript, 'data-control-mode="application"')
+            && str_contains($adminJavaScript, '>Enable</button>')
+            && str_contains($adminJavaScript, '>Disable</button>')
+            && str_contains($adminJavaScript, '>Reload</button>')
+            && str_contains($adminJavaScript, '["Infrastructure", service.infrastructure?.status]')
+            && str_contains($adminJavaScript, '["Application Runtime", service.applicationRuntime?.status]'),
+        'Admin Console does not expose production application runtime controls and layered health.'
+    );
+    unifiedAdminAssert(str_contains($adminJavaScript, 'Welcome back')
+        && str_contains($adminJavaScript, 'Sign in to continue to your workspace.'), 'Generic Admin login copy is missing.');
+    preg_match('/function loginView\(\).*?content\.innerHTML = (`.*?`);/s', $adminJavaScript, $loginViewMatch);
+    unifiedAdminAssert(isset($loginViewMatch[1])
+        && str_contains($loginViewMatch[1], 'Generic SQL API')
+        && !str_contains($loginViewMatch[1], 'brand-mark'), 'Admin login branding still renders the G logo or omits the application name.');
+    unifiedAdminAssert(str_contains($adminJavaScript, 'data-password-toggle'), 'Admin login password visibility control is missing.');
+    unifiedAdminAssert(!str_contains($adminJavaScript, '2.0.0-dev')
+        && str_contains($adminHtml, "require __DIR__ . '/../config/app.php'")
+        && str_contains($adminHtml, 'data-app-version'), 'Admin UI does not use the centralized application version.');
+    unifiedAdminAssert(!str_contains($adminHtml, '127.0.0.1 only')
+        && !str_contains($adminHtml, 'local-pill'), 'Loopback-only UI warning remains visible.');
+    unifiedAdminAssert(str_contains($adminHtml, 'id="sidebar-toggle"')
+        && strpos($adminHtml, 'id="sidebar-toggle"') < strpos($adminHtml, '</aside>')
+        && str_contains($adminHtml, 'id="sidebar-backdrop"')
+        && str_contains($adminHtml, 'nav-icon')
+        && str_contains($adminJavaScript, 'sidebarCollapsed')
+        && str_contains($adminJavaScript, 'sidebarStorageKey'), 'Responsive sidebar controls or state are missing.');
+    unifiedAdminAssert(str_contains($adminCss, 'position: sticky')
+        && str_contains($adminCss, 'prefers-reduced-motion: reduce')
+        && str_contains($adminCss, 'body.sidebar-collapsed')
+        && str_contains($adminCss, 'body.sidebar-open .sidebar')
+        && str_contains($adminCss, '@media (max-width: 640px)')
+        && str_contains($adminCss, 'overflow-x: hidden'), 'Responsive sidebar layout or motion accessibility styles are incomplete.');
+    unifiedAdminAssert(str_contains($adminHtml, '<span class="nav-label">Logout</span>')
+        && strpos($adminHtml, 'id="logout"') < strpos($adminHtml, 'id="sidebar-version"'), 'Logout icon or version placement is incorrect.');
+    unifiedAdminAssert(str_contains($compactAdminJavaScript, "'system-administrator':'SuperAdmin'")
+        && str_contains($compactAdminJavaScript, "'application-administrator':'Admin'"), 'Admin role display labels are missing.');
+    foreach (['Name *', 'Username *', 'Mobile Number *', 'Email (optional)', 'Password *', 'Confirm Password *'] as $setupField) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $setupField), "Admin setup/user forms are missing {$setupField}.");
+    }
+    unifiedAdminAssert(str_contains($compactAdminJavaScript, "action:'setup.createAdmin',name:")
+        && str_contains($compactAdminJavaScript, "mobile:values.get('mobile')")
+        && str_contains($compactAdminJavaScript, "email:values.get('email')||null"), 'Initial Super Admin profile is not submitted by the Admin Console.');
+    unifiedAdminAssert(str_contains($adminJavaScript, 'protectSoleSuperAdminAuthorization')
+        && str_contains($compactAdminJavaScript, "preserved.value='system-administrator'")
+        && str_contains($adminJavaScript, 'At least one enabled Super Admin must remain'), 'Sole Super Admin authorization controls are not protected.');
+    unifiedAdminAssert(str_contains($adminJavaScript, '<span class="current-user">(you)</span>')
+        && str_contains($adminJavaScript, 'You cannot change your own authorization'), 'Current-user identification or self-authorization UI protection is missing.');
+    unifiedAdminAssert(
         preg_match('/async function healthView\s*\(/', $adminJavaScript) === 1
             && preg_match('/(^|[;{}]\s*)healthView\s*=/', $adminJavaScript) !== 1,
         'System Health view is not safely declared before Admin Console initialization.'
     );
-    foreach (['setupView', 'loginView', 'entryView', 'infoView', 'configurationView', 'healthView', 'rolesView', 'apiKeysView'] as $view) {
+    foreach (['setupView', 'loginView', 'entryView', 'infoView', 'configurationView', 'healthView', 'apiKeysView'] as $view) {
         unifiedAdminAssert(
             preg_match('/(?:async\s+)?function\s+' . preg_quote($view, '/') . '\s*\(/', $adminJavaScript) === 1,
             "Admin Console view {$view} is referenced without a function declaration."
         );
     }
-    unifiedAdminAssert(str_contains($adminJavaScript, 'let usersView;') && str_contains($adminJavaScript, 'usersView=async function()'), 'Users view binding is not declared.');
+    unifiedAdminAssert(!str_contains($adminHtml, '/admin/roles')
+        && !str_contains($adminJavaScript, 'function rolesView'), 'Roles & Permissions UI was not removed.');
+    unifiedAdminAssert(str_contains($compactAdminJavaScript, 'letusersView;') && str_contains($compactAdminJavaScript, 'usersView=asyncfunction()'), 'Users view binding is not declared.');
+    unifiedAdminAssert(str_contains($adminHtml, 'id="user-dialog"')
+        && str_contains($compactAdminJavaScript, "open('create'")
+        && str_contains($compactAdminJavaScript, "mode==='edit'")
+        && str_contains($compactAdminJavaScript, "mode==='password'"), 'User actions are not presented in modal dialogs.');
+    unifiedAdminAssert(str_contains($adminJavaScript, 'function userRolePreset')
+        && str_contains($compactAdminJavaScript, "action:'auth.users.assignAuthorization',username:user.username,role:v.get('role')")
+        && !str_contains($compactAdminJavaScript, "action:'auth.users.assignAuthorization',username:user.username,backendRole"), 'Backend Authorization modal does not use the unified role preset contract.');
+    foreach (['>Super Admin</option>', '>Admin</option>', '>Data Operator</option>', '>Read Only</option>'] as $roleOption) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $roleOption), "Backend Authorization UI is missing {$roleOption}.");
+    }
+    unifiedAdminAssert(str_contains($compactAdminCss, '.user-dialog__surface { display: flex; flex-direction: column;')
+        && str_contains($compactAdminCss, '.user-dialog__body { flex: 1 1 auto; min-height: 0; padding: 21px; overflow-y: auto;')
+        && str_contains($compactAdminCss, '.user-dialog__form { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; }')
+        && str_contains($compactAdminCss, '.user-dialog__footer { flex: 0 0 auto;')
+        && str_contains($adminJavaScript, 'class="dialog-actions user-dialog__footer"'), 'Backend dialogs do not keep their header/footer visible while the modal body scrolls.');
+    unifiedAdminAssert(str_contains($adminJavaScript, 'function openApiKeyDialog')
+        && str_contains($adminJavaScript, 'data-api-key-form')
+        && str_contains($adminJavaScript, 'openApiKeyDialog(users, roles, event.currentTarget)')
+        && str_contains($adminJavaScript, 'classList.add("dialog-open")')
+        && str_contains($adminCss, 'body.dialog-open')
+        && !str_contains($adminJavaScript, 'id="key-editor"'), 'API key creation is not using the shared Admin dialog.');
+    unifiedAdminAssert(str_contains($adminJavaScript, 'Name is required.')
+        && str_contains($adminJavaScript, 'data-dialog-error')
+        && str_contains($adminJavaScript, 'Copy this API key now')
+        && str_contains($adminJavaScript, 'It cannot be displayed again.'), 'API key modal validation or one-time reveal is missing.');
+    unifiedAdminAssert(substr_count($adminJavaScript, 'document.body.classList.add("dialog-open")') >= 3
+        && substr_count($adminJavaScript, 'document.body.classList.remove("dialog-open")') >= 3,
+        'Admin dialogs do not consistently lock and restore background scrolling.');
+    unifiedAdminAssert(str_contains($compactAdminCss, '.users-panel { width: 100%; max-width: 100%; overflow: hidden; }')
+        && str_contains($compactAdminCss, '.table-wrap { width: 100%; min-width: 0; overflow-x: auto;')
+        && str_contains($compactAdminCss, '.users-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }')
+        && str_contains($compactAdminCss, '.admin-users-scroll { --admin-users-visible-rows: 7;')
+        && str_contains($compactAdminCss, '.users-table { width: 100%; min-width: 1040px; table-layout: fixed; }')
+        && str_contains($adminCss, '.users-table th:nth-child(8)')
+        && str_contains($compactAdminCss, '.users-table td { overflow-wrap: anywhere; word-break: break-word; }'), 'Backend Users table lacks controlled columns or safe long-text wrapping.');
+    unifiedAdminAssert(str_contains($compactAdminCss, '.users-heading { display: flex; min-width: 0;')
+        && str_contains($compactAdminCss, 'flex-wrap: wrap; gap: 15px; margin-bottom: 18px; } .users-heading .help { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }')
+        && !str_contains($compactAdminCss, '.users-heading .help { min-width: 0; flex: 1 1 320px;')
+        && str_contains($compactAdminCss, '.users-table .actions button { max-width: 100%; padding: 6px 8px; overflow-wrap: anywhere; white-space: normal; }'), 'Backend Users header or action controls do not wrap within the available content width.');
+    unifiedAdminAssert(!str_contains($adminCss, '.users-table td::before')
+        && !str_contains($compactAdminCss, '.users-table, .users-table tbody, .users-table tr, .users-table td { display: block;')
+        && !str_contains($compactAdminCss, '.users-table .actions button { width: 100%; }'), 'Backend Users table still changes into the broken mobile label/value card layout.');
+    foreach (['<th>Name</th>', '<th>Mobile Number</th>', '<th>Email</th>', '<th>Role</th>'] as $column) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $column), "Backend Users table is missing {$column}.");
+    }
     unifiedAdminAssert(str_contains($adminJavaScript, 'SQL query timeout (seconds)'), 'Configured query timeout is missing from the Admin Console.');
     unifiedAdminAssert(str_contains($adminJavaScript, 'admin.runtime.save'), 'Runtime configuration save is missing from the Admin Console.');
+    foreach (['admin.backup.history', 'admin.backup.create', 'admin.backup.schedule', 'admin.backup.schedule.save', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore'] as $backupAction) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $backupAction), "Admin Backup & Recovery UI is missing {$backupAction}.");
+    }
+    foreach (['Automatic Backups', 'Enable scheduled backups', '>Hourly<', '>Daily<', '>Weekly<', '"Manual"', '"Scheduled"', '"Legacy"'] as $scheduleUi) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $scheduleUi), "Admin Backup & Recovery UI is missing {$scheduleUi}.");
+    }
+    foreach (['Create Backup?', 'Backup Created', 'Disable Scheduled Backups?', 'Restore Preview',
+        'Continue to Restore', 'Restore Configuration?', 'Restoring Configuration…', 'Restore Completed',
+        'Restore Failed', 'Your session was invalidated'] as $dialogText) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $dialogText), "Backup workflow dialog is missing {$dialogText}.");
+    }
+    unifiedAdminAssert(str_contains($adminHtml, 'id="backup-dialog"')
+        && str_contains($adminJavaScript, 'function backupDialogChoice(')
+        && str_contains($adminJavaScript, 'function backupOperationDialog(')
+        && str_contains($adminJavaScript, 'backupDialog.dataset.busy = "true"')
+        && str_contains($adminJavaScript, 'event.key !== "Tab"')
+        && str_contains($adminJavaScript, 'event.preventDefault()'),
+        'Backup workflow dialog lacks reusable modal, duplicate-submit, focus-trap, or safe Escape handling.');
+    foreach (['frontend.restore.confirm.opened', 'frontend.restore.confirmed', 'frontend.restore.request.started',
+        'frontend.restore.request.failed', 'frontend.restore.completed'] as $event) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $event), "Admin restore flow is missing frontend operational event {$event}.");
+    }
+    unifiedAdminAssert(str_contains($adminHtml, 'data-route="backup-recovery"')
+        && str_contains($adminHtml, 'Backup &amp; Recovery')
+        && str_contains($adminJavaScript, 'type="file" accept=".zip,application/zip"')
+        && str_contains($adminJavaScript, 'Restore Configuration')
+        && str_contains($adminJavaScript, 'confirmed: true')
+        && str_contains($adminJavaScript, 'URL.createObjectURL')
+        && !str_contains($adminJavaScript, 'webkitdirectory'),
+        'Admin Backup & Recovery does not use native ZIP selection/download with explicit confirmation.');
+    foreach (['.backup-summary-grid', '.backup-schedule-grid', '.backup-table-wrap', '.recovery-point-id',
+        '.recovery-points-scroll', '.backup-change-list', '.restore-file-row', 'dialog.backup-dialog'] as $backupStyle) {
+        unifiedAdminAssert(str_contains($adminCss, $backupStyle), "Backup & Recovery CSS is missing {$backupStyle}.");
+    }
+    unifiedAdminAssert(str_contains($adminJavaScript, 'No Recovery Points')
+        && str_contains($adminJavaScript, 'No verified application recovery points are currently available.')
+        && str_contains($adminJavaScript, 'tabindex="0" aria-label="Recovery points"')
+        && str_contains($adminCss, '--recovery-visible-rows: 5')
+        && str_contains($adminCss, 'position: sticky'), 'Recovery points do not provide a bounded, accessible scrolling table or empty state.');
+    unifiedAdminAssert(str_contains($adminCss, 'overscroll-behavior-y: auto')
+        && !str_contains($compactAdminCss, '.recovery-points-scroll { --recovery-visible-rows: 5; --recovery-row-block-size: 3.75rem; max-height: calc(var(--recovery-row-block-size) * (var(--recovery-visible-rows) + 1)); overflow: auto; overscroll-behavior: contain;'),
+        'Recovery Points prevents native page scroll handoff at its vertical boundaries.');
+    unifiedAdminAssert(str_contains($adminJavaScript, 'Forgot username or password?')
+        && str_contains($adminJavaScript, 'Forgot Username or Password?')
+        && str_contains($adminJavaScript, 'detail.message')
+        && str_contains($adminJavaScript, 'retryAfterSeconds')
+        && str_contains($adminJavaScript, 'LOGIN_RATE_LIMITED'), 'Admin login lacks safe attempt, lockout, or forgot-credentials feedback.');
+    foreach (['No configuration changes detected.', '["added", "modified", "deleted"]', 'backupChangeList(changes)',
+        'preview.configurationFiles', 'preview.filesChanging', 'preview.changes'] as $previewUi) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $previewUi), "Restore preview is missing {$previewUi} support.");
+    }
+    unifiedAdminAssert(strpos($adminJavaScript, 'doneValidating();') < strpos($adminJavaScript, 'if (!preview) return;'),
+        'Restore preview validation state is not cleared before the preview dialog opens.');
+    unifiedAdminAssert(!str_contains($adminJavaScript, '"encryption",\n      "backup",')
+        && !str_contains((string)file_get_contents(__DIR__ . '/../app/Health/ApplicationHealthMonitor.php'), "'backup' => \$this->backupHealth()"),
+        'Backup remains in the System Health response or UI aggregation.');
+    unifiedAdminAssert(str_contains((string)file_get_contents(__DIR__ . '/../app/Health/ApplicationHealthMonitor.php'), 'public function restoreSafety(): array'),
+        'Restore safety health validation was removed while separating Backup from System Health.');
     unifiedAdminAssert(!str_contains(strtolower($adminJavaScript), 'test saved configuration'), 'Removed saved database test remains in the Admin Console.');
     unifiedAdminAssert(!str_contains($adminJavaScript, 'Runtime access'), 'Database runtime lifecycle remains under Configuration.');
     unifiedAdminAssert(str_contains($adminJavaScript, 'data-database-runtime'), 'Database runtime lifecycle is missing from System Health.');
-    unifiedAdminAssert(str_contains($adminJavaScript, "['Port',health.api.port]") && str_contains($adminJavaScript, "['Port',health.sqlParser.port]"), 'System Health does not display actual managed service ports.');
-    unifiedAdminAssert(str_contains($adminJavaScript, "['Server',health.database.server]") && str_contains($adminJavaScript, "['Database',health.database.database]"), 'System Health omits safe database connection details.');
+    unifiedAdminAssert(
+        str_contains($adminJavaScript, 'Service Actions')
+            && str_contains($adminJavaScript, 'data-admin-console-restart')
+            && str_contains($adminJavaScript, 'admin.console.restart')
+            && str_contains($adminJavaScript, 'Waiting for the service to become available.')
+            && !str_contains($adminJavaScript, 'data-admin-console-stop')
+            && !str_contains($adminJavaScript, 'data-admin-console-start'),
+        'System Health does not expose the controlled restart-only Admin Console workflow.'
+    );
+    unifiedAdminAssert(
+        substr_count($adminJavaScript, 'serviceControls("api", health.api)') === 1
+            && substr_count($adminJavaScript, 'serviceControls("sqlParser", health.sqlParser)') === 1
+            && substr_count($adminJavaScript, 'databaseControls(health.database)') === 1
+            && str_contains($adminJavaScript, '<section class="service-actions"'),
+        'Lifecycle controls were not moved into the separate Service Actions section.'
+    );
+    unifiedAdminAssert(str_contains($compactAdminJavaScript, "['Port',service.port]"), 'System Health does not display actual development managed-service ports.');
+    unifiedAdminAssert(str_contains($compactAdminJavaScript, "['Server',health.database.server]") && str_contains($compactAdminJavaScript, "['Database',health.database.database]"), 'System Health omits safe database connection details.');
     unifiedAdminAssert(str_contains((string)file_get_contents(__DIR__ . '/../admin/api.php'), 'AdminAuthorizationMiddleware'), 'Independent Admin authorization boundary is missing.');
     foreach ([
         __DIR__ . '/../admin/api.php',

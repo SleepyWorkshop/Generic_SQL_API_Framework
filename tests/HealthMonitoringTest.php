@@ -35,11 +35,19 @@ $oldKey = getenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE);
 try {
     foreach ([$configuration, $runtime, $logs, $sessions, $backups] as $path) mkdir($path, 0700, true);
     healthWrite($configuration . '/auth.json', ['version' => 4, 'users' => []]);
-    healthWrite($configuration . '/installation.json', ['version' => 1, 'installationId' => 'fake-installation', 'initialized' => true]);
-    healthWrite($configuration . '/admin.json', ['version' => 5, 'server' => [], 'cors' => [], 'authentication' => [], 'runtime' => []]);
-    healthWrite($configuration . '/authorization.json', ['version' => 2, 'roles' => []]);
-    healthWrite($configuration . '/api-keys.json', ['version' => 2, 'keys' => []]);
+    healthWrite($configuration . '/installation.json', ['version' => 1, 'installationId' => str_repeat('a', 64), 'initialized' => true]);
+    healthWrite($configuration . '/admin.json', RuntimeConfiguration::adminDefaults());
+    healthWrite($configuration . '/authorization.json', RuntimeConfiguration::authorizationDefaults());
+    healthWrite($configuration . '/api-keys.json', ['version' => 3, 'keys' => []]);
     healthWrite($configuration . '/database-state.json', ['version' => 1, 'available' => true]);
+    healthWrite($configuration . '/application-runtime-state.json', [
+        'version' => 1,
+        'generation' => 0,
+        'services' => [
+            'api' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+            'sqlParser' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+        ],
+    ]);
     $key = base64_encode(random_bytes(32));
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . $key);
     $encrypted = (new DatabaseCredentialEncryption())->encryptConfiguration([
@@ -65,6 +73,9 @@ try {
     healthAssert($live['status'] === 'healthy' && $live['port'] === 8000, 'Liveness did not report a lightweight success response.');
     $ready = $monitor->readiness();
     healthAssert($ready['status'] === 'healthy' && array_keys($ready['checks']) === ['configuration', 'runtime', 'database'], 'Readiness schema or success state is invalid.');
+    $restoreSafety = $monitor->restoreSafety();
+    healthAssert($restoreSafety['healthy'] === true
+        && $restoreSafety['check'] === 'configuration_and_encryption', 'Valid schema-version 6 configuration failed restore safety validation.');
 
     $processes = [
         'adminConsole' => ['running' => true, 'healthy' => true, 'status' => 'running', 'pid' => 10, 'port' => 8090],
@@ -72,7 +83,9 @@ try {
         'sqlParser' => ['running' => false, 'healthy' => false, 'status' => 'stopped', 'pid' => null, 'port' => null],
     ];
     $detail = $monitor->detailed($processes);
-    healthAssert(isset($detail['status'], $detail['checks']['database'], $detail['checks']['filesystem']) && $tests === 1, 'Detailed health schema or database test is invalid.');
+    healthAssert(isset($detail['status'], $detail['checks']['database'], $detail['checks']['filesystem'])
+        && !isset($detail['checks']['backup']) && $detail['status'] === 'healthy'
+        && $tests === 1, 'Detailed health schema, aggregation, or database test is invalid.');
     $monitor->detailed($processes);
     healthAssert($tests === 1, 'Database health cache did not prevent repeated expensive connectivity work.');
     $serialized = json_encode($detail, JSON_THROW_ON_ERROR);
@@ -99,9 +112,13 @@ try {
 
     healthWrite($configuration . '/admin.json', ['version' => 999]);
     healthAssert($monitor->readiness()['checks']['configuration']['category'] === 'configuration_invalid', 'Invalid configuration schema was not detected.');
+    $invalidRestoreSafety = $monitor->restoreSafety();
+    healthAssert($invalidRestoreSafety['healthy'] === false
+        && $invalidRestoreSafety['check'] === 'configuration.admin.json'
+        && $invalidRestoreSafety['errorCode'] === 'CONFIGURATION_INVALID', 'Restore safety did not provide a safe configuration diagnostic.');
     @unlink($configuration . '/admin.json');
     healthAssert($monitor->readiness()['checks']['configuration']['category'] === 'configuration_missing', 'Missing configuration was not detected.');
-    healthWrite($configuration . '/admin.json', ['version' => 5, 'server' => [], 'cors' => [], 'authentication' => [], 'runtime' => []]);
+    healthWrite($configuration . '/admin.json', RuntimeConfiguration::adminDefaults());
 
     @rmdir($sessions);
     $sessionFailure = $monitor->detailed($processes);
@@ -114,12 +131,14 @@ try {
     $lowDisk = new ApplicationHealthMonitor([
         'configurationDirectory' => $configuration, 'databasePath' => $database,
         'runtimeDirectory' => $runtime, 'logDirectory' => $logs, 'sessionDirectory' => $sessions,
-        'backupDirectory' => $backups, 'databaseAvailable' => static fn (): bool => true,
+        'databaseAvailable' => static fn (): bool => true,
         'diskWarningBytes' => 100, 'diskCriticalBytes' => 10, 'diskSpace' => static fn (): int => 50,
     ]);
     healthAssert($lowDisk->detailed($processes)['checks']['filesystem']['status'] === 'degraded', 'Low disk space was not classified as warning.');
     @rmdir($backups);
-    healthAssert($monitor->detailed($processes)['checks']['backup']['category'] === 'unavailable', 'Backup directory capability failure was not detected.');
+    $withoutBackupDirectory = $monitor->detailed($processes);
+    healthAssert(!isset($withoutBackupDirectory['checks']['backup'])
+        && $withoutBackupDirectory['status'] === 'healthy', 'Backup availability still affects System Health.');
 
     $authFailure = new ApplicationHealthMonitor([
         'configurationDirectory' => $configuration, 'databasePath' => $database,

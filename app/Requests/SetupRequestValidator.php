@@ -3,6 +3,7 @@
 require_once __DIR__ . '/ApiRequestException.php';
 require_once __DIR__ . '/../Security/UsernamePolicy.php';
 require_once __DIR__ . '/../Security/PasswordPolicy.php';
+require_once __DIR__ . '/../Security/UserProfilePolicy.php';
 
 final class SetupRequestValidator
 {
@@ -21,8 +22,12 @@ final class SetupRequestValidator
             throw new ApiRequestException('Invalid setup request.', 'INVALID_SETUP_REQUEST');
         }
 
-        $this->rejectUnknown($request, ['action', 'username', 'password', 'passwordConfirmation']);
+        $this->rejectUnknown($request, ['action', 'name', 'username', 'mobile', 'email', 'password', 'passwordConfirmation']);
         $details = [];
+        foreach (['name' => 'name', 'mobile' => 'mobile', 'email' => 'email'] as $field => $method) {
+            try { $$field = UserProfilePolicy::$method($request[$field] ?? null); }
+            catch (InvalidArgumentException $exception) { $details[] = ['path' => $field, 'message' => $exception->getMessage()]; }
+        }
         $username = $request['username'] ?? null;
         $password = $request['password'] ?? null;
         $confirmation = $request['passwordConfirmation'] ?? null;
@@ -51,7 +56,10 @@ final class SetupRequestValidator
 
         return [
             'action' => $action,
+            'name' => $name,
             'username' => $username,
+            'mobile' => $mobile,
+            'email' => $email,
             'password' => $password,
         ];
     }

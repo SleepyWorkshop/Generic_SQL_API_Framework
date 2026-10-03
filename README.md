@@ -128,7 +128,7 @@ Security boundaries include:
 - hash-only, one-time-reveal managed API keys with `gsk_` secrets;
 - fixed roles and deny-by-default resource authorization;
 - prepared runtime values and allowlisted identifiers/functions;
-- correlated, redacted errors and JSON Lines audit/security logs;
+- correlated, redacted, date-wise subsystem diagnostics and JSON Lines audit/security logs;
 - request-scoped ODBC connections and configurable statement timeouts.
 
 Plaintext database configuration remains readable only for compatibility.
@@ -155,10 +155,11 @@ Linux prefers `runtime/linux/php/php` when present and otherwise uses `php` from
 ```
 
 Both launchers validate the runtime, bootstrap configuration, prepare an ignored
-local encryption key, set database runtime access to disconnected, select the
-configured loopback Admin port, and start only the Admin Console. API and SQL
-Parser lifecycle and database availability are controlled from System Health.
-The PHP built-in server is for local development only.
+local encryption key, select the configured loopback Admin port, start the
+managed API and SQL Parser, connect application database availability, verify
+all three runtime states, and start the Admin Console. A failed component remains
+accurately unavailable while the Admin control plane starts for recovery. The
+PHP built-in server is for local development only.
 
 For manual production provisioning, copy
 `database/config/database.example.json` to the ignored `database.json`, complete
@@ -194,8 +195,9 @@ CI runs PHP 8.2 syntax checks and the database-independent suite.
 
 System Health exposes local API/parser lifecycle and database availability plus
 safe configuration, filesystem, logging, session, encryption, and backup checks.
-The public health route exposes only liveness/readiness fields. Backup tooling
-creates and verifies atomic configuration bundles but does not back up SQL Server;
+The public health route exposes only liveness/readiness fields. The Super Admin
+Backup & Recovery page and CLI create, sign, verify, preview, and safely restore
+ZIP application-configuration recovery points. They do not back up SQL Server;
 database backup remains an operator responsibility.
 
 Production hosting uses IIS with PHP FastCGI on Windows or Nginx with PHP-FPM on

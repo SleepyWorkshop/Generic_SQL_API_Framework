@@ -4,6 +4,11 @@ require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
 require_once __DIR__ . '/../Runtime/DatabaseAvailabilityManager.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
+require_once __DIR__ . '/../Repositories/AuthRepository.php';
+require_once __DIR__ . '/../Repositories/InstallationRepository.php';
+require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
+require_once __DIR__ . '/../Repositories/AuthorizationRepository.php';
+require_once __DIR__ . '/../Repositories/ApiKeyRepository.php';
 
 final class ApplicationHealthMonitor
 {
@@ -13,7 +18,6 @@ final class ApplicationHealthMonitor
     private string $runtimeDirectory;
     private string $logDirectory;
     private string $sessionDirectory;
-    private ?string $backupDirectory;
     private string $databaseCachePath;
     private int $databaseCacheTtl;
     private int $diskWarningBytes;
@@ -35,9 +39,6 @@ final class ApplicationHealthMonitor
             $savePath = (string)end($parts);
         }
         $this->sessionDirectory = $savePath !== '' ? $savePath : sys_get_temp_dir();
-        $configuredBackup = $options['backupDirectory'] ?? getenv('GENERIC_BACKUP_DIR');
-        $this->backupDirectory = is_string($configuredBackup) && trim($configuredBackup) !== ''
-            ? rtrim(trim($configuredBackup), '/\\') : null;
         $this->databaseCachePath = $options['databaseCachePath']
             ?? $this->runtimeDirectory . '/health/database-health.json';
         $this->databaseCacheTtl = max(1, (int)($options['databaseCacheTtl'] ?? 15));
@@ -89,7 +90,6 @@ final class ApplicationHealthMonitor
             'logging' => $this->loggingHealth(),
             'sessions' => $this->sessionHealth(),
             'encryption' => $this->encryptionHealth(),
-            'backup' => $this->backupHealth(),
             'processes' => ['status' => $this->processAggregate($processes), 'services' => $processes],
         ];
         $statuses = array_column($checks, 'status');
@@ -98,35 +98,86 @@ final class ApplicationHealthMonitor
         return ['status' => $status, 'checks' => $checks];
     }
 
+    public function restoreSafety(): array
+    {
+        $configuration = $this->configurationHealth();
+        if ($configuration['status'] !== 'healthy') {
+            return [
+                'healthy' => false,
+                'check' => 'configuration.' . ($configuration['component'] ?? 'unknown'),
+                'errorCode' => $configuration['category'] === 'configuration_missing'
+                    ? 'CONFIGURATION_MISSING' : 'CONFIGURATION_INVALID',
+                'reason' => $configuration['category'],
+            ];
+        }
+        $encryption = $this->encryptionHealth();
+        if ($encryption['status'] !== 'healthy') {
+            return [
+                'healthy' => false,
+                'check' => 'database.encryption',
+                'errorCode' => $encryption['category'] === 'missing'
+                    ? 'ENCRYPTION_KEY_MISSING' : 'DATABASE_CONFIG_INVALID',
+                'reason' => $encryption['category'],
+            ];
+        }
+        return [
+            'healthy' => true,
+            'check' => 'configuration_and_encryption',
+            'errorCode' => null,
+            'reason' => 'healthy',
+        ];
+    }
+
     private function configurationHealth(): array
     {
-        $versions = ['auth.json' => 4, 'installation.json' => 1, 'admin.json' => 5,
-            'authorization.json' => 2, 'api-keys.json' => 2, 'database-state.json' => 1];
-        foreach ($versions as $file => $version) {
+        $files = ['auth.json', 'installation.json', 'admin.json', 'authorization.json',
+            'api-keys.json', 'database-state.json', 'application-runtime-state.json'];
+        foreach ($files as $file) {
             $path = $this->configurationDirectory . DIRECTORY_SEPARATOR . $file;
-            if (!is_file($path)) return ['status' => 'unhealthy', 'category' => 'configuration_missing'];
+            if (!is_file($path)) return ['status' => 'unhealthy', 'category' => 'configuration_missing', 'component' => $file];
             try { $value = JsonFileStore::load($path); }
-            catch (Throwable $exception) { return ['status' => 'unhealthy', 'category' => 'configuration_invalid']; }
-            if (($value['version'] ?? null) !== $version || !$this->configurationShapeIsValid($file, $value)) {
-                return ['status' => 'unhealthy', 'category' => 'configuration_invalid'];
+            catch (Throwable $exception) { return ['status' => 'unhealthy', 'category' => 'configuration_invalid', 'component' => $file]; }
+            if (!$this->configurationShapeIsValid($file, $path, $value)) {
+                return ['status' => 'unhealthy', 'category' => 'configuration_invalid', 'component' => $file];
             }
         }
         return ['status' => 'healthy', 'category' => 'configuration_valid'];
     }
 
-    private function configurationShapeIsValid(string $file, array $value): bool
+    private function configurationShapeIsValid(string $file, string $path, array $value): bool
     {
-        return match ($file) {
-            'auth.json' => is_array($value['users'] ?? null),
-            'installation.json' => is_string($value['installationId'] ?? null)
-                && is_bool($value['initialized'] ?? null),
-            'admin.json' => is_array($value['server'] ?? null) && is_array($value['cors'] ?? null)
-                && is_array($value['authentication'] ?? null) && is_array($value['runtime'] ?? null),
-            'authorization.json' => is_array($value['roles'] ?? null),
-            'api-keys.json' => is_array($value['keys'] ?? null),
-            'database-state.json' => is_bool($value['available'] ?? null),
-            default => false,
-        };
+        try {
+            match ($file) {
+                'auth.json' => (new AuthRepository($path))->validate($value),
+                'installation.json' => (new InstallationRepository($path))->validate($value),
+                'admin.json' => (new AdminConfigurationRepository($path))->validate($value),
+                'authorization.json' => (new AuthorizationRepository($path))->validate($value),
+                'api-keys.json' => (new ApiKeyRepository($path))->validate($value),
+                'database-state.json' => ($value['version'] ?? null) === 1
+                    && is_bool($value['available'] ?? null) ? null : throw new RuntimeException('invalid'),
+                'application-runtime-state.json' => ($value['version'] ?? null) === 1
+                    && $this->applicationRuntimeShapeIsValid($value) ? null : throw new RuntimeException('invalid'),
+                default => throw new RuntimeException('invalid'),
+            };
+            return true;
+        } catch (Throwable $exception) { return false; }
+    }
+
+    private function applicationRuntimeShapeIsValid(array $value): bool
+    {
+        if (!is_int($value['generation'] ?? null) || $value['generation'] < 0) return false;
+        $services = $value['services'] ?? null;
+        if (!is_array($services) || array_keys($services) !== ['api', 'sqlParser']) return false;
+        foreach ($services as $runtime) {
+            if (!is_array($runtime)
+                || array_keys($runtime) !== ['enabled', 'updatedAt', 'reloadedAt']
+                || !is_bool($runtime['enabled'] ?? null)) return false;
+            foreach (['updatedAt', 'reloadedAt'] as $field) {
+                $timestamp = $runtime[$field] ?? null;
+                if ($timestamp !== null && (!is_string($timestamp) || strtotime($timestamp) === false)) return false;
+            }
+        }
+        return true;
     }
 
     private function databaseReadiness(): array
@@ -221,14 +272,6 @@ final class ApplicationHealthMonitor
         $check = $this->directoryHealth($this->sessionDirectory, true);
         return ['status' => $check['status'], 'category' => $check['status'] === 'healthy'
             ? 'operational' : 'unavailable'];
-    }
-
-    private function backupHealth(): array
-    {
-        if ($this->backupDirectory === null) return ['status' => 'degraded', 'category' => 'not_configured'];
-        $check = $this->directoryHealth($this->backupDirectory, true);
-        return ['status' => $check['status'] === 'healthy' ? 'healthy' : 'degraded',
-            'category' => $check['status'] === 'healthy' ? 'capable' : 'unavailable'];
     }
 
     private function directoryHealth(string $path, bool $writable): array

@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../config/constants.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../Authorization/RoleModel.php';
+require_once __DIR__ . '/../Security/UserProfilePolicy.php';
 
 final class AuthRepository
 {
@@ -98,7 +99,7 @@ final class AuthRepository
         });
     }
 
-    private function validate(array $configuration): void
+    public function validate(array $configuration): void
     {
         if (array_diff(array_keys($configuration), ['version', 'users']) !== []
             || ($configuration['version'] ?? null) !== 4
@@ -113,7 +114,8 @@ final class AuthRepository
             if (!is_array($user) || array_is_list($user)
                 || array_diff(array_keys($user), [
                     'id', 'username', 'passwordHash', 'enabled', 'backendRole',
-                    'frontendAccess', 'frontendRole', 'createdAt', 'authVersion'
+                    'frontendAccess', 'frontendRole', 'createdAt', 'authVersion',
+                    'name', 'mobile', 'email'
                 ]) !== []
                 || !is_string($user['id'] ?? null)
                 || preg_match('/^[a-f0-9]{32}$/', $user['id']) !== 1
@@ -131,7 +133,8 @@ final class AuthRepository
                 || !is_string($user['createdAt'] ?? null)
                 || strtotime($user['createdAt']) === false
                 || !is_int($user['authVersion'] ?? null)
-                || $user['authVersion'] < 1) {
+                || $user['authVersion'] < 1
+                || !$this->validOptionalProfile($user)) {
                 throw new RuntimeException('Invalid authentication user configuration.');
             }
 
@@ -141,6 +144,18 @@ final class AuthRepository
             }
             $usernames[$canonicalUsername] = true;
             $userIds[$user['id']] = true;
+        }
+    }
+
+    private function validOptionalProfile(array $user): bool
+    {
+        try {
+            if (array_key_exists('name', $user) && $user['name'] !== null) UserProfilePolicy::name($user['name']);
+            if (array_key_exists('mobile', $user) && $user['mobile'] !== null) UserProfilePolicy::mobile($user['mobile']);
+            if (array_key_exists('email', $user)) UserProfilePolicy::email($user['email']);
+            return true;
+        } catch (InvalidArgumentException) {
+            return false;
         }
     }
 

@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../../config/constants.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/RuntimeControls.php';
+require_once __DIR__ . '/../Backup/BackupSchedule.php';
 
 final class RuntimeConfiguration
 {
@@ -12,6 +13,7 @@ final class RuntimeConfiguration
     public const AUTHORIZATION_FILE = 'authorization.json';
     public const API_KEYS_FILE = 'api-keys.json';
     public const DATABASE_STATE_FILE = 'database-state.json';
+    public const APPLICATION_RUNTIME_STATE_FILE = 'application-runtime-state.json';
 
     public static function directory(): string
     {
@@ -24,7 +26,8 @@ final class RuntimeConfiguration
     public static function path(string $file): string
     {
         if (!in_array($file, [self::AUTH_FILE, self::INSTALLATION_FILE, self::ADMIN_FILE,
-            self::AUTHORIZATION_FILE, self::API_KEYS_FILE, self::DATABASE_STATE_FILE], true)) {
+            self::AUTHORIZATION_FILE, self::API_KEYS_FILE, self::DATABASE_STATE_FILE,
+            self::APPLICATION_RUNTIME_STATE_FILE], true)) {
             throw new InvalidArgumentException('Unsupported runtime configuration file.');
         }
         return self::directory() . DIRECTORY_SEPARATOR . $file;
@@ -69,12 +72,13 @@ final class RuntimeConfiguration
     public static function authorizationDefaults(): array
     {
         return [
-            'version' => 2,
+            'version' => 3,
             'publicRoles' => ['read-only'],
             'legacyApiKeyRoles' => ['read-only'],
             'roles' => [
                 'read-only' => ['name' => 'Read Only', 'domain' => 'backend', 'permissions' => ['data.read', 'metadata.read', 'sql.execute', 'routine.execute'], 'sqlResources' => ['*'], 'writeResources' => []],
                 'data-operator' => ['name' => 'Data Operator', 'domain' => 'backend', 'permissions' => ['data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute'], 'sqlResources' => ['*'], 'writeResources' => ['*']],
+                'api-administrator' => ['name' => 'Admin', 'domain' => 'backend', 'permissions' => ['data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute'], 'sqlResources' => ['*'], 'writeResources' => ['*']],
                 'system-administrator' => ['name' => 'System Administrator', 'domain' => 'backend', 'permissions' => ['admin.manage', 'frontend.users.manage', 'data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute'], 'sqlResources' => ['*'], 'writeResources' => ['*']],
                 'application-administrator' => ['name' => 'Application Administrator', 'domain' => 'frontend', 'permissions' => ['frontend.read', 'frontend.users.manage'], 'sqlResources' => ['*'], 'writeResources' => []],
             ],
@@ -93,7 +97,7 @@ final class RuntimeConfiguration
     public static function adminDefaults(): array
     {
         return [
-            'version' => 5,
+            'version' => 6,
             'server' => [
                 'apiPortMinimum' => 8000,
                 'apiPortMaximum' => 8100,
@@ -116,6 +120,7 @@ final class RuntimeConfiguration
             ],
             'authentication' => ['mode' => 'session'],
             'runtime' => RuntimeControls::defaults(),
+            'backup' => BackupSchedule::defaults(),
         ];
     }
 
@@ -126,8 +131,16 @@ final class RuntimeConfiguration
             self::INSTALLATION_FILE => self::installationDefaults(),
             self::ADMIN_FILE => self::adminDefaults(),
             self::AUTHORIZATION_FILE => self::authorizationDefaults(),
-            self::API_KEYS_FILE => ['version' => 2, 'keys' => []],
+            self::API_KEYS_FILE => ['version' => 3, 'keys' => []],
             self::DATABASE_STATE_FILE => ['version' => 1, 'available' => false, 'updatedAt' => null],
+            self::APPLICATION_RUNTIME_STATE_FILE => [
+                'version' => 1,
+                'generation' => 0,
+                'services' => [
+                    'api' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+                    'sqlParser' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+                ],
+            ],
         ];
     }
 }

@@ -15,6 +15,7 @@ $roadmap = (string)file_get_contents($root . '/docs/Roadmap.md');
 $aiGuide = (string)file_get_contents($root . '/docs/AI-Development-Guide.md');
 $adminExample = json_decode((string)file_get_contents($root . '/config/admin.example.json'), true, 512, JSON_THROW_ON_ERROR);
 $databaseStateExample = json_decode((string)file_get_contents($root . '/config/database-state.example.json'), true, 512, JSON_THROW_ON_ERROR);
+$applicationRuntimeExample = json_decode((string)file_get_contents($root . '/config/application-runtime-state.example.json'), true, 512, JSON_THROW_ON_ERROR);
 
 repositoryDocumentationAssert(
     ($application['app_name'] ?? null) === 'Generic SQL API Framework'
@@ -25,6 +26,17 @@ repositoryDocumentationAssert(
     $adminExample === RuntimeConfiguration::adminDefaults()
         && $databaseStateExample === ['version' => 1, 'available' => false, 'updatedAt' => null],
     'Tracked runtime configuration examples do not match bootstrap defaults.'
+);
+repositoryDocumentationAssert(
+    $applicationRuntimeExample === [
+        'version' => 1,
+        'generation' => 0,
+        'services' => [
+            'api' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+            'sqlParser' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+        ],
+    ],
+    'Tracked application runtime example does not match bootstrap defaults.'
 );
 repositoryDocumentationAssert(
     str_contains($changelog, '## [2.0.0] - Unreleased')

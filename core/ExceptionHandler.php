@@ -5,23 +5,28 @@ require_once __DIR__ . '/Logger.php';
 require_once __DIR__ . '/../app/Requests/ApiRequestException.php';
 require_once __DIR__ . '/../app/Security/DatabaseCredentialException.php';
 require_once __DIR__ . '/QueryTimeoutException.php';
+require_once __DIR__ . '/OperationalLogger.php';
 
 final class ExceptionHandler
 {
     private static bool $registered = false;
     private static bool $handling = false;
 
-    public static function register(): void
+    public static function register(string $subsystem = 'api'): void
     {
+        OperationalLogger::setSubsystem($subsystem);
         if (self::$registered) return;
         self::$registered = true;
         if (self::isProduction()) {
             ini_set('display_errors', '0');
             ini_set('display_startup_errors', '0');
-            ini_set('log_errors', '1');
-            set_error_handler([self::class, 'handlePhpError'], E_WARNING | E_NOTICE | E_USER_WARNING
-                | E_USER_NOTICE | E_DEPRECATED | E_USER_DEPRECATED);
         }
+        // Once bootstrap reaches this handler, supported PHP/runtime failures
+        // are routed to the context-aware OperationalLogger. Startup failures
+        // before bootstrap remain the host web server/service manager's concern.
+        ini_set('log_errors', '0');
+        set_error_handler([self::class, 'handlePhpError'], E_WARNING | E_NOTICE | E_USER_WARNING
+            | E_USER_NOTICE | E_DEPRECATED | E_USER_DEPRECATED | E_RECOVERABLE_ERROR);
         set_exception_handler([self::class, 'handleException']);
         register_shutdown_function([self::class, 'handleShutdown']);
     }
@@ -29,7 +34,17 @@ final class ExceptionHandler
     public static function handlePhpError(int $severity, string $message, string $file, int $line): bool
     {
         if (!(error_reporting() & $severity)) return false;
-        self::safeLog('php.runtime_error', 'PHPError', $message . " at {$file}:{$line}");
+        $level = in_array($severity, [E_DEPRECATED, E_USER_DEPRECATED, E_NOTICE, E_USER_NOTICE], true)
+            ? 'info' : 'warning';
+        try {
+            (new OperationalLogger())->{$level}(OperationalLogger::currentSubsystem(), 'PHP ' . self::severityName($severity), [
+                'message' => $message,
+                'file' => $file,
+                'line' => $line,
+            ]);
+        } catch (Throwable $loggingFailure) {
+            // Error reporting must never replace the primary execution path.
+        }
         return true;
     }
 
@@ -42,7 +57,7 @@ final class ExceptionHandler
             exit;
         }
         self::$handling = true;
-        self::safeLog('application.exception', get_class($exception), self::formatExceptionForLog($exception));
+        self::safeLog('application.exception', get_class($exception), $exception->getMessage(), $exception->getFile(), $exception->getLine());
         [$status, $payload] = self::responseFor($exception);
         Response::emitErrorPayload($payload, $status);
         exit;
@@ -52,14 +67,15 @@ final class ExceptionHandler
     {
         $error = error_get_last();
         if (!is_array($error) || !in_array($error['type'] ?? null,
-            [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) return;
+            [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) return;
         if (self::$handling) return;
         self::$handling = true;
         $timeout = stripos((string)($error['message'] ?? ''), 'Maximum execution time') !== false;
         self::safeLog($timeout ? 'application.timeout' : 'application.fatal',
             $timeout ? 'PHPExecutionTimeout' : 'PHPFatalError',
-            (string)($error['message'] ?? 'Fatal PHP error.') . ' at '
-                . (string)($error['file'] ?? 'unknown') . ':' . (int)($error['line'] ?? 0));
+            (string)($error['message'] ?? 'Fatal PHP error.'),
+            (string)($error['file'] ?? 'unknown'),
+            (int)($error['line'] ?? 0));
         [$status, $payload] = self::fatalResponse($timeout);
         Response::emitErrorPayload($payload, $status);
     }
@@ -102,10 +118,10 @@ final class ExceptionHandler
 
     public static function report(Throwable $exception, string $event = 'application.exception'): void
     {
-        self::safeLog($event, get_class($exception), self::formatExceptionForLog($exception));
+        self::safeLog($event, get_class($exception), $exception->getMessage(), $exception->getFile(), $exception->getLine());
     }
 
-    private static function safeLog(string $event, string $category, string $details): void
+    private static function safeLog(string $event, string $category, string $message, ?string $file = null, ?int $line = null): void
     {
         try {
             $logger = new Logger();
@@ -114,12 +130,32 @@ final class ExceptionHandler
                 'errorCategory' => $category,
                 'reason' => 'request_failed',
             ]);
-            $logger->error('Application failure', [], $details);
+            (new OperationalLogger())->error(OperationalLogger::currentSubsystem(),
+                $event === 'application.fatal' ? 'PHP fatal error' : ($event === 'application.exception' ? 'Uncaught exception' : 'Application failure'), [
+                'error_code' => $event,
+                'exception_category' => $category,
+                'message' => $message,
+                'file' => $file,
+                'line' => $line,
+                'duration_ms' => defined('API_REQUEST_STARTED')
+                    ? round((microtime(true) - API_REQUEST_STARTED) * 1000, 2) : null,
+            ]);
         } catch (Throwable $loggingFailure) {
             // Error reporting must never replace the primary safe response.
         }
     }
 
+    private static function severityName(int $severity): string
+    {
+        return match ($severity) {
+            E_NOTICE, E_USER_NOTICE => 'notice',
+            E_DEPRECATED, E_USER_DEPRECATED => 'deprecated',
+            E_RECOVERABLE_ERROR => 'recoverable error',
+            default => 'warning',
+        };
+    }
+
+    /** Retained for compatibility with security tests and diagnostic tooling. */
     private static function formatExceptionForLog(Throwable $exception): string
     {
         return get_class($exception) . ': ' . $exception->getMessage() . PHP_EOL

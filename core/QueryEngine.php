@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Logger.php';
 require_once __DIR__ . '/QueryTimeoutException.php';
+require_once __DIR__ . '/OperationalLogger.php';
 require_once __DIR__ . '/../app/Security/SecurityConfiguration.php';
 
 class QueryEngine
@@ -22,20 +23,18 @@ class QueryEngine
             try {
                 $this->db = $database ?? new Database();
                 $this->connection = $this->db->getConnection();
-                $this->logger->timing('database_connection', $this->elapsed($started), ['success' => true]);
+                (new OperationalLogger())->info('database', 'Database connection successful', [
+                    'duration_ms' => round($this->elapsed($started), 2),
+                ]);
             } catch (Throwable $exception) {
+                (new OperationalLogger())->error('database', 'Database connection failed', [
+                    'error_code' => $this->errorCategory($exception),
+                    'duration_ms' => round($this->elapsed($started), 2),
+                ]);
                 $this->logger->audit('database.connection', 'failure', 'ERROR', [
                     'component' => 'database',
                     'errorCategory' => $this->errorCategory($exception),
                     'reason' => 'connection_failed',
-                ]);
-                $this->logger->timing('database_connection', $this->elapsed($started), [
-                    'success' => false,
-                    'errorType' => get_class($exception),
-                    'queryPhase' => 'connect',
-                    'sqlState' => $this->sqlState($exception),
-                    'errorCategory' => $this->errorCategory($exception),
-                    'driverMessage' => $this->sanitizedDriverMessage($exception->getMessage()),
                 ]);
                 throw $exception;
             }
@@ -70,19 +69,12 @@ class QueryEngine
         $totalStarted = microtime(true);
         $statement = null;
         $phase = $prepared ? 'prepare' : 'execute';
-        $logContext = $context + [
-            'sql' => $this->logger->safeSql($sql),
-            'parameters' => $this->logger->parameterMetadata($params),
-        ];
         try {
             if ($prepared) {
-                $started = microtime(true);
                 $statement = $this->prepareStatement($sql);
-                $this->logger->timing('query_prepare', $this->elapsed($started), $logContext);
                 if (!$statement) throw new RuntimeException($this->lastError());
                 $timeoutConfigured = $this->configureStatementTimeout($statement);
                 $phase = 'execute';
-                $started = microtime(true);
                 if (!$timeoutConfigured && $params === []) {
                     $this->freeStatement($statement);
                     $statement = $this->executeDirect($sql);
@@ -100,46 +92,32 @@ class QueryEngine
                     $statement = $this->prepareStatement($sql);
                     $executed = $statement !== false && $this->executeStatement($statement, $params);
                 }
-                $this->logger->timing('query_execute', $this->elapsed($started), $logContext);
                 if ($executed === false) throw new RuntimeException($this->lastError());
             } else {
-                $started = microtime(true);
                 $statement = $this->executeDirect($sql);
-                $this->logger->timing('query_execute', $this->elapsed($started), $logContext);
                 if (!$statement) throw new RuntimeException($this->lastError());
             }
 
             $phase = 'fetch';
-            $started = microtime(true);
             $rows = [];
             do {
                 while ($row = $this->fetchRow($statement)) $rows[] = $row;
             } while ($consumeAllResults && $this->nextResult($statement));
-            $this->logger->timing('rows_fetch', $this->elapsed($started), $context + ['rowsReturned' => count($rows)]);
             $result = [
                 'executionTime' => round($this->elapsed($totalStarted), 2),
                 'rowsReturned' => count($rows),
                 'data' => $rows,
             ];
-            $this->logger->timing('query_total', $result['executionTime'], $context + ['rowsReturned' => $result['rowsReturned']]);
+            (new OperationalLogger())->info('database', 'Database query execution successful', [
+                'duration_ms' => $result['executionTime'],
+                'rows_returned' => $result['rowsReturned'],
+                'resource' => is_string($context['resource'] ?? null) ? $context['resource'] : null,
+            ]);
             return $result;
         } catch (Throwable $exception) {
             $converted = $this->isTimeout($exception)
                 ? new QueryTimeoutException("Database query exceeded the configured {$this->queryTimeoutSeconds}-second timeout.", 0, $exception)
                 : $exception;
-            $this->logger->error(
-                $sql,
-                $params,
-                get_class($converted) . ': ' . $this->sanitizedDriverMessage($converted->getMessage()),
-                $this->elapsed($totalStarted)
-            );
-            $this->logger->timing('query_error', $this->elapsed($totalStarted), $context + [
-                'queryPhase' => $phase,
-                'errorType' => get_class($converted),
-                'sqlState' => $this->sqlState($converted),
-                'errorCategory' => $this->errorCategory($converted),
-                'driverMessage' => $this->sanitizedDriverMessage($converted->getMessage()),
-            ]);
             $this->logger->audit(
                 $converted instanceof QueryTimeoutException ? 'database.query_timeout' : 'database.query_failure',
                 'failure',
@@ -152,6 +130,14 @@ class QueryEngine
                     'durationMs' => round($this->elapsed($totalStarted), 2),
                 ]
             );
+            (new OperationalLogger())->error('database', $converted instanceof QueryTimeoutException
+                ? 'Database query timeout' : 'Database query execution failed', [
+                'error_code' => $this->errorCategory($converted),
+                'query_phase' => is_string($context['queryPhase'] ?? null) ? $context['queryPhase'] : $phase,
+                'sql_state' => $this->safeSqlState(),
+                'duration_ms' => round($this->elapsed($totalStarted), 2),
+                'resource' => is_string($context['resource'] ?? null) ? $context['resource'] : null,
+            ]);
             throw $converted;
         } finally {
             if ($statement) $this->freeStatement($statement);
@@ -190,6 +176,12 @@ class QueryEngine
         return function_exists('odbc_error') ? (string)@odbc_error($this->connection) : '';
     }
 
+    private function safeSqlState(): ?string
+    {
+        $state = strtoupper(trim($this->lastSqlState()));
+        return preg_match('/^[A-Z0-9]{5}$/', $state) === 1 ? $state : null;
+    }
+
     private function isUnsupportedStatementOption(): bool
     {
         return strtoupper(trim($this->lastSqlState())) === 'IM001'
@@ -199,9 +191,8 @@ class QueryEngine
     private function markTimeoutUnsupported(): void
     {
         $this->queryTimeoutSupported = false;
-        $this->logger->timing('query_timeout_configuration', 0, [
-            'supported' => false,
-            'errorCategory' => 'driver_capability',
+        (new OperationalLogger())->warning('database', 'Database query timeout unsupported', [
+            'error_code' => 'DRIVER_CAPABILITY',
         ]);
     }
 
@@ -232,14 +223,6 @@ class QueryEngine
             '42' => 'sql',
             default => 'driver',
         };
-    }
-
-    private function sanitizedDriverMessage(string $message): string
-    {
-        $message = (string)preg_replace('/(?i)(password|pwd|uid|user(?:name)?)\s*=\s*[^;\s]+/', '$1=[REDACTED]', $message);
-        $message = (string)preg_replace("/'(?:''|[^'])*'/", "'[REDACTED]'", $message);
-        $message = trim((string)preg_replace('/\s+/', ' ', $message));
-        return strlen($message) > 500 ? substr($message, 0, 500) . ' ...' : $message;
     }
 
     private function elapsed(float $started): float { return (microtime(true) - $started) * 1000; }

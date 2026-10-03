@@ -5,6 +5,7 @@ require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../Runtime/DatabaseAuthenticationSupport.php';
 require_once __DIR__ . '/../Configuration/RuntimeControls.php';
+require_once __DIR__ . '/../Backup/BackupSchedule.php';
 
 final class AdminRequestValidator
 {
@@ -19,6 +20,7 @@ final class AdminRequestValidator
         'admin.status',
         'admin.health',
         'admin.system.info',
+        'admin.console.restart',
         'admin.api.start',
         'admin.api.stop',
         'admin.api.restart',
@@ -30,6 +32,9 @@ final class AdminRequestValidator
         'admin.database.disconnect',
         'admin.database.restart',
         'admin.settings.get',
+        'admin.backup.history',
+        'admin.backup.create',
+        'admin.backup.schedule',
     ];
 
     public function validate(array $request): array
@@ -74,6 +79,61 @@ final class AdminRequestValidator
                 $this->invalid([['path' => rtrim($path, '.'), 'message' => $exception->getMessage()]]);
             }
             return ['action' => $action, 'runtime' => $runtime];
+        }
+        if ($action === 'admin.backup.schedule.save') {
+            $this->rejectUnknown($request, ['action', 'backup']);
+            $backup = $request['backup'] ?? null;
+            if (!is_array($backup) || array_is_list($backup)) {
+                $this->invalid([['path' => 'backup', 'message' => 'Backup schedule must be an object.']]);
+            }
+            try {
+                BackupSchedule::validate($backup);
+            } catch (InvalidArgumentException $exception) {
+                $this->invalid([['path' => 'backup', 'message' => $exception->getMessage()]]);
+            }
+            return ['action' => $action, 'backup' => $backup];
+        }
+        if ($action === 'admin.backup.download') {
+            $this->rejectUnknown($request, ['action', 'recoveryPointId']);
+            $id = $request['recoveryPointId'] ?? null;
+            if (!is_string($id) || preg_match('/^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{12}$/', $id) !== 1) $this->invalid([['path' => 'recoveryPointId', 'message' => 'Invalid recovery point.']]);
+            return ['action' => $action, 'recoveryPointId' => $id];
+        }
+        if ($action === 'admin.backup.preview') {
+            $this->rejectUnknown($request, ['action', 'filename', 'archive']);
+            $filename = $request['filename'] ?? null;
+            $archive = $request['archive'] ?? null;
+            if (!is_string($filename) || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,180}\.zip$/i', $filename) !== 1) $this->invalid([['path' => 'filename', 'message' => 'A ZIP backup file is required.']]);
+            if (!is_string($archive) || $archive === '' || strlen($archive) > 28 * 1024 * 1024 || preg_match('/^[A-Za-z0-9+\/=\r\n]+$/', $archive) !== 1) $this->invalid([['path' => 'archive', 'message' => 'Backup upload is invalid or too large.']]);
+            return ['action' => $action, 'filename' => $filename, 'archive' => $archive];
+        }
+        if ($action === 'admin.backup.restore') {
+            $this->rejectUnknown($request, ['action', 'uploadToken', 'confirmed']);
+            $token = $request['uploadToken'] ?? null;
+            if (!is_string($token) || preg_match('/^[a-f0-9]{48}$/', $token) !== 1 || ($request['confirmed'] ?? null) !== true) $this->invalid([['path' => 'confirmed', 'message' => 'Verified restore confirmation is required.']]);
+            return ['action' => $action, 'uploadToken' => $token, 'confirmed' => true];
+        }
+        if ($action === 'admin.operational.event') {
+            $this->rejectUnknown($request, ['action', 'event', 'page', 'operation', 'errorCode', 'requestId']);
+            $event = $request['event'] ?? null;
+            $allowed = [
+                'frontend.restore.confirm.opened', 'frontend.restore.confirmed',
+                'frontend.restore.request.started', 'frontend.restore.request.failed',
+                'frontend.restore.request.success', 'frontend.restore.completed', 'frontend.api.request.failed',
+                'frontend.javascript.error',
+            ];
+            if (!is_string($event) || !in_array($event, $allowed, true)) {
+                $this->invalid([['path' => 'event', 'message' => 'Unsupported frontend operational event.']]);
+            }
+            $validated = ['action' => $action, 'event' => $event];
+            foreach (['page', 'operation', 'errorCode', 'requestId'] as $field) {
+                $value = $request[$field] ?? null;
+                if ($value !== null && (!is_string($value) || strlen($value) > 100 || preg_match('/^[A-Za-z0-9_.:\/-]+$/', $value) !== 1)) {
+                    $this->invalid([['path' => $field, 'message' => 'Invalid operational event metadata.']]);
+                }
+                $validated[$field] = $value;
+            }
+            return $validated;
         }
         throw new ApiRequestException('Invalid admin request.', 'INVALID_ADMIN_REQUEST');
     }

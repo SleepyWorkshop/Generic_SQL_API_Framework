@@ -1,0 +1,16 @@
+{
+    "version": 1,
+    "generation": 0,
+    "services": {
+        "api": {
+            "enabled": true,
+            "updatedAt": null,
+            "reloadedAt": null
+        },
+        "sqlParser": {
+            "enabled": true,
+            "updatedAt": null,
+            "reloadedAt": null
+        }
+    }
+}

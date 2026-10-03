@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Logger.php';
 require_once __DIR__ . '/RequestId.php';
+require_once __DIR__ . '/OperationalLogger.php';
 
 class Response
 {
@@ -31,6 +32,7 @@ class Response
             'message' => $message,
             'data' => $rows,
             'meta' => [
+                'requestId' => RequestId::get(),
                 'page' => $pagination['page'] ?? null,
                 'pageSize' => $pagination['pageSize'] ?? null,
                 'totalRows' => is_array($data) && isset($data['totalRows'])
@@ -66,9 +68,10 @@ class Response
         $started = microtime(true);
         $payload = self::successPayload($data, (string)$message);
         $json = self::encodePayload($payload);
-        self::logResponseTiming($started, true);
+        self::logResponseTiming($started, true, null, (int)$code);
         self::discardBufferedOutput();
         http_response_code($code);
+        header('X-Request-ID: ' . RequestId::get());
         header('Content-Type: application/json; charset=utf-8');
         echo $json;
         exit;
@@ -82,7 +85,7 @@ class Response
     ) {
         $started = microtime(true);
         $payload = self::errorPayload((string)$message, $errorCode, $details);
-        self::logResponseTiming($started, false, $errorCode);
+        self::logResponseTiming($started, false, $errorCode, (int)$code);
         self::emitErrorPayload($payload, $code);
         exit;
     }
@@ -97,6 +100,7 @@ class Response
         self::discardBufferedOutput();
         if (!headers_sent()) {
             http_response_code($code);
+            header('X-Request-ID: ' . RequestId::get());
             header('Content-Type: application/json; charset=utf-8');
             header('Cache-Control: no-store');
         }
@@ -111,18 +115,19 @@ class Response
         );
     }
 
-    private static function logResponseTiming(float $started, bool $success, ?string $errorCode = null): void
+    private static function logResponseTiming(float $started, bool $success, ?string $errorCode = null, int $status = 200): void
     {
         if (!defined('API_REQUEST_STARTED')) return;
-        $logger = new Logger();
-        $logger->timing('response_construction', (microtime(true) - $started) * 1000, [
-            'success' => $success,
-            'errorCode' => $errorCode,
-        ]);
-        $logger->timing('request_total', (microtime(true) - API_REQUEST_STARTED) * 1000, [
-            'success' => $success,
-            'errorCode' => $errorCode,
-        ]);
+        $duration = round((microtime(true) - API_REQUEST_STARTED) * 1000, 2);
+        $operational = new OperationalLogger();
+        $context = [
+            'action' => self::$requestContext['action'] ?? null,
+            'status' => $status,
+            'duration_ms' => $duration,
+            'error_code' => $errorCode,
+        ];
+        if ($success) $operational->info('api', 'API request completed', $context);
+        else $operational->error('api', 'API request failed', $context);
     }
 
     private static function discardBufferedOutput(): void

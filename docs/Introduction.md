@@ -39,11 +39,12 @@ The request crosses a strict boundary: public JSON uses `source`, `fields`, and 
 
 `start-windows.bat` uses the bundled `runtime/windows/php/`, verifies required
 extensions with `extension_loaded()`, initializes configuration, prepares the
-local encryption key, and starts only Admin Console. API and SQL Parser are
-started manually from System Health. `start-linux.sh` provides the same lifecycle with
-the documented system-PHP fallback. Database configuration and encrypted saving
-are performed through Admin Console. Normal tests use fakes and need neither
-ODBC nor a database configuration file.
+local encryption key, starts API and SQL Parser, enables application database
+availability, verifies the development runtime, and starts Admin Console. The
+same controls remain available in System Health after startup. `start-linux.sh`
+provides the same lifecycle with the documented system-PHP fallback. Database
+configuration and encrypted saving are performed through Admin Console. Normal
+tests use fakes and need neither ODBC nor a database configuration file.
 
 Continue with the [documentation map](README.md), [HTTP API](API.md),
 [frontend integration](Frontend-Integration.md), or [capability matrix](Capability-Matrix.md).

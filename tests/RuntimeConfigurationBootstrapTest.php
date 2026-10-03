@@ -32,8 +32,8 @@ $previousDirectory = getenv('GENERIC_RUNTIME_CONFIG_DIR');
 try {
     putenv('GENERIC_RUNTIME_CONFIG_DIR=' . $firstDirectory);
     $result = RuntimeConfiguration::ensure();
-    bootstrapAssert(count($result['created']) === 6, 'Fresh bootstrap did not create all runtime files.');
-    foreach ([RuntimeConfiguration::AUTH_FILE, RuntimeConfiguration::INSTALLATION_FILE, RuntimeConfiguration::ADMIN_FILE, RuntimeConfiguration::AUTHORIZATION_FILE, RuntimeConfiguration::API_KEYS_FILE, RuntimeConfiguration::DATABASE_STATE_FILE] as $file) {
+    bootstrapAssert(count($result['created']) === 7, 'Fresh bootstrap did not create all runtime files.');
+    foreach ([RuntimeConfiguration::AUTH_FILE, RuntimeConfiguration::INSTALLATION_FILE, RuntimeConfiguration::ADMIN_FILE, RuntimeConfiguration::AUTHORIZATION_FILE, RuntimeConfiguration::API_KEYS_FILE, RuntimeConfiguration::DATABASE_STATE_FILE, RuntimeConfiguration::APPLICATION_RUNTIME_STATE_FILE] as $file) {
         bootstrapAssert(is_file($firstDirectory . '/' . $file), "Bootstrap did not create {$file}.");
     }
 
@@ -41,13 +41,25 @@ try {
     $installation = JsonFileStore::load($firstDirectory . '/installation.json');
     $admin = JsonFileStore::load($firstDirectory . '/admin.json');
     $databaseState = JsonFileStore::load($firstDirectory . '/database-state.json');
+    $applicationRuntime = JsonFileStore::load($firstDirectory . '/application-runtime-state.json');
     bootstrapAssert($auth === ['version' => 4, 'users' => []], 'Auth defaults are unsafe or malformed.');
     bootstrapAssert($installation['initialized'] === false, 'Fresh installation was initialized automatically.');
     bootstrapAssert(preg_match('/^[a-f0-9]{64}$/', $installation['installationId']) === 1, 'Installation ID was not generated securely.');
     bootstrapAssert($admin['authentication']['mode'] === 'session', 'Authentication default was not session mode.');
     bootstrapAssert($databaseState === ['version' => 1, 'available' => false, 'updatedAt' => null], 'Database runtime did not start disconnected.');
     bootstrapAssert(
-        $admin['version'] === 5
+        $applicationRuntime === [
+            'version' => 1,
+            'generation' => 0,
+            'services' => [
+                'api' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+                'sqlParser' => ['enabled' => true, 'updatedAt' => null, 'reloadedAt' => null],
+            ],
+        ],
+        'Production application runtimes did not start enabled with a valid schema.'
+    );
+    bootstrapAssert(
+        $admin['version'] === 6
             && $admin['server']['apiPortMinimum'] === 8000
             && $admin['server']['apiPortMaximum'] === 8100
             && $admin['server']['parserPortMinimum'] === 8101
@@ -55,6 +67,7 @@ try {
             && $admin['server']['adminPort'] === 8090
             && $admin['server']['bindAddress'] === '127.0.0.1'
             && $admin['runtime'] === RuntimeControls::defaults()
+            && $admin['backup'] === BackupSchedule::defaults()
             && !array_key_exists('features', $admin),
         'Admin runtime defaults are unsafe or malformed.'
     );
@@ -65,8 +78,14 @@ try {
 
     $admin['authentication']['mode'] = 'none';
     JsonFileStore::save($firstDirectory . '/admin.json', $admin);
+    $applicationRuntime['services']['api']['enabled'] = false;
+    JsonFileStore::save($firstDirectory . '/application-runtime-state.json', $applicationRuntime);
     bootstrapAssert(RuntimeConfiguration::ensure()['created'] === [], 'Repeat bootstrap recreated existing configuration.');
     bootstrapAssert(JsonFileStore::load($firstDirectory . '/admin.json')['authentication']['mode'] === 'none', 'Bootstrap overwrote an existing setting.');
+    bootstrapAssert(
+        JsonFileStore::load($firstDirectory . '/application-runtime-state.json')['services']['api']['enabled'] === false,
+        'Bootstrap overwrote persisted application runtime availability.'
+    );
 
     putenv('GENERIC_RUNTIME_CONFIG_DIR=' . $secondDirectory);
     RuntimeConfiguration::ensure();
@@ -117,10 +136,10 @@ try {
     );
 
     $gitignore = (string)file_get_contents(__DIR__ . '/../.gitignore');
-    foreach (['config/auth.json', 'config/installation.json', 'config/admin.json', 'config/authorization.json', 'config/api-keys.json', 'config/database-state.json'] as $ignoredPath) {
+    foreach (['config/auth.json', 'config/installation.json', 'config/admin.json', 'config/authorization.json', 'config/api-keys.json', 'config/database-state.json', 'config/application-runtime-state.json'] as $ignoredPath) {
         bootstrapAssert(str_contains($gitignore, $ignoredPath), "{$ignoredPath} is not ignored.");
     }
-    foreach (['auth', 'installation', 'admin'] as $name) {
+    foreach (['auth', 'installation', 'admin', 'application-runtime-state'] as $name) {
         $example = (string)file_get_contents(__DIR__ . "/../config/{$name}.example.json");
         bootstrapAssert(!str_contains($example, 'passwordHash'), "{$name} example contains credential material.");
     }

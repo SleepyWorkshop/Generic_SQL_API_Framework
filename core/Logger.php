@@ -1,15 +1,25 @@
 <?php
 
 require_once __DIR__ . '/RequestId.php';
+require_once __DIR__ . '/OperationalLogger.php';
 
 class Logger
 {
     private string $logDirectory;
-    private string $logFile;
+    private ?string $logFile;
+    private string $auditDirectory;
+    private bool $dedicatedAuditDirectory;
 
     public function __construct(?string $logDirectory = null)
     {
-        $this->logDirectory = $logDirectory ?? __DIR__ . "/../logs";
+        $this->dedicatedAuditDirectory = $logDirectory === null;
+        $configured = getenv('GENERIC_LOG_DIR');
+        $this->logDirectory = $logDirectory ?? (
+            is_string($configured) && trim($configured) !== ''
+                ? trim($configured) : __DIR__ . "/../logs"
+        );
+        $this->auditDirectory = $this->dedicatedAuditDirectory
+            ? $this->logDirectory . '/audit' : $this->logDirectory;
 
         if (!is_dir($this->logDirectory)) {
             $this->attempt(fn () => mkdir($this->logDirectory, 0700, true));
@@ -19,24 +29,38 @@ class Logger
             // protection remains the deployer's NTFS ACL.
             $this->attempt(fn () => chmod($this->logDirectory, 0700));
         }
+        if ($this->dedicatedAuditDirectory && !is_dir($this->auditDirectory)) {
+            $this->attempt(fn () => mkdir($this->auditDirectory, 0700, true));
+        }
+        if (is_dir($this->auditDirectory)) $this->attempt(fn () => chmod($this->auditDirectory, 0700));
 
-        $this->logFile =
-            $this->logDirectory .
-            "/" .
-            date("Y-m-d") .
-            ".log";
+        $this->logFile = $this->dedicatedAuditDirectory ? null
+            : $this->logDirectory . "/" . date("Y-m-d") . ".log";
     }
 
     public function write(string $message): void
     {
+        if ($this->logFile === null) {
+            (new OperationalLogger())->info(
+                OperationalLogger::currentSubsystem(),
+                'Application diagnostic',
+                ['message' => $message]
+            );
+            return;
+        }
+        $this->writeTo($this->logFile, $message);
+    }
+
+    private function writeTo(string $path, string $message): void
+    {
         $entry = $this->redactSensitiveData($message) . PHP_EOL;
 
-        $this->attempt(function () use ($entry): void {
-            $stream = fopen($this->logFile, 'ab');
+        $this->attempt(function () use ($entry, $path): void {
+            $stream = fopen($path, 'ab');
             if ($stream === false) {
                 throw new RuntimeException('Unable to open the application log.');
             }
-            @chmod($this->logFile, 0600);
+            @chmod($path, 0600);
 
             $locked = false;
             try {
@@ -87,7 +111,7 @@ class Logger
             $message
         );
         $message = (string)preg_replace_callback(
-            '/(?i)((?:["\']?)(?:password|pwd|uid|x-api-key|api[_-]?key|csrf[_-]?token|session[_-]?id|GENERIC_SQL_API_ENCRYPTION_KEY)(?:["\']?)\s*[=:]\s*)("(?:\\\\.|[^"\\\\])*"|[^;"\'\s,}]+)/',
+            '/(?i)((?:["\']?)(?:password|pwd|uid|x-api-key|api[_-]?key|csrf[_-]?token|session[_-]?id|GENERIC_SQL_API_ENCRYPTION_KEY|GENERIC_BACKUP_SIGNING_KEY)(?:["\']?)\s*[=:]\s*)("(?:\\\\.|[^"\\\\])*"|[^;"\'\s,}]+)/',
             static fn (array $match): string => $match[1]
                 . (str_starts_with($match[2], '"') ? '"[REDACTED]"' : '[REDACTED]'),
             $message
@@ -95,6 +119,10 @@ class Logger
         $environmentKey = getenv('GENERIC_SQL_API_ENCRYPTION_KEY');
         if (is_string($environmentKey) && $environmentKey !== '') {
             $message = str_replace($environmentKey, '[REDACTED]', $message);
+        }
+        $backupSigningKey = getenv('GENERIC_BACKUP_SIGNING_KEY');
+        if (is_string($backupSigningKey) && $backupSigningKey !== '') {
+            $message = str_replace($backupSigningKey, '[REDACTED]', $message);
         }
         return $message;
     }
@@ -136,6 +164,14 @@ class Logger
 
     public function timing(string $phase, float $elapsedMilliseconds, array $context = []): void
     {
+        if ($this->logFile === null) {
+            (new OperationalLogger())->info(
+                OperationalLogger::currentSubsystem(),
+                ucwords(str_replace('_', ' ', $phase)),
+                ['duration_ms' => round($elapsedMilliseconds, 2), ...$context]
+            );
+            return;
+        }
         $record = [
             'timestamp' => date(DATE_ATOM),
             'requestId' => RequestId::get(),
@@ -189,7 +225,13 @@ class Logger
             'component' => $safeContext['component'] ?? 'backend',
         ] + $safeContext;
         $encoded = json_encode($record, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
-        if (is_string($encoded)) $this->write($encoded);
+        if (is_string($encoded)) {
+            if ($this->dedicatedAuditDirectory) {
+                $this->writeTo($this->auditDirectory . '/' . date('Y-m-d') . '.jsonl', $encoded);
+            } else {
+                $this->write($encoded);
+            }
+        }
     }
 
     private function safeAuditContext(array $context): array
@@ -200,6 +242,9 @@ class Logger
             'targetId', 'targetUsername', 'keyId', 'fingerprint', 'ownerId',
             'reason', 'errorCategory', 'configurationCategory', 'identityType',
             'identityHash', 'pid', 'port', 'durationMs',
+            'recoveryPointId', 'operation', 'verification', 'authenticity',
+            'trigger', 'createdBy', 'status',
+            'errorCode', 'check',
         ];
         $safe = [];
         foreach ($allowed as $field) {
@@ -232,12 +277,26 @@ class Logger
         ];
     }
 
-        public function error(
+    public function error(
         string $sql,
         array $params,
         string $error,
         float $executionTime = 0
     ): void {
+
+        if ($this->logFile === null) {
+            (new OperationalLogger())->error(
+                OperationalLogger::currentSubsystem(),
+                'Database operation failed',
+                [
+                    'duration_ms' => round($executionTime, 2),
+                    'sql' => $this->safeSql($sql),
+                    'parameters' => $this->parameterMetadata($params),
+                    'error' => $error,
+                ]
+            );
+            return;
+        }
 
         $message =
             "========================================\n";

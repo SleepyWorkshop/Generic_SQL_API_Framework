@@ -5,9 +5,10 @@ require_once __DIR__ . '/../Security/SecurityConfiguration.php';
 
 final class RequestBodyReader
 {
-    public static function read(?int $contentLength = null, $stream = null): string
+    public static function read(?int $contentLength = null, $stream = null, ?int $maximumOverride = null): string
     {
-        $maximum = SecurityConfiguration::requestOptions()['maxBodyBytes'];
+        $maximum = $maximumOverride ?? SecurityConfiguration::requestOptions()['maxBodyBytes'];
+        if ($maximum < 1 || $maximum > 30 * 1024 * 1024) throw new InvalidArgumentException('Request body limit is invalid.');
         $contentLength ??= isset($_SERVER['CONTENT_LENGTH']) && is_numeric($_SERVER['CONTENT_LENGTH'])
             ? (int)$_SERVER['CONTENT_LENGTH']
             : null;

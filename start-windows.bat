@@ -11,6 +11,7 @@ set "LOGS=%ROOT%\logs"
 set "ADMIN=%ROOT%\admin"
 
 set "GENERIC_RUNTIME_CONFIG_DIR=%ROOT%\config"
+set "GENERIC_APP_ENV=development"
 
 echo ========================================
 echo          Generic SQL API Framework
@@ -98,20 +99,6 @@ if errorlevel 1 (
 )
 
 echo [OK] Runtime configuration
-
-REM ==================================================
-REM Reset request-scoped database runtime access
-REM ==================================================
-
-"%PHP%" -c "%PHP_INI%" "%ROOT%\scripts\database-runtime-control.php" disconnect >nul
-
-if errorlevel 1 (
-    echo [FAILED] Unable to reset database runtime state.
-    pause
-    exit /b 1
-)
-
-echo [OK] Database runtime disconnected
 
 REM ==================================================
 REM Prepare local database encryption key
@@ -225,12 +212,56 @@ if not defined GENERIC_ADMIN_STARTED_AT (
     exit /b 1
 )
 
-set "ADMIN_URL=http://127.0.0.1:%ADMIN_PORT%/admin"
+set "ADMIN_URL=http://127.0.0.1:%ADMIN_PORT%/"
+
+REM ==================================================
+REM Establish complete development runtime
+REM ==================================================
+
+set "API_STATE=unavailable"
+set "PARSER_STATE=unavailable"
+set "DATABASE_STATE=disconnected"
+set "STARTUP_WARNINGS=0"
+
+"%PHP%" -c "%PHP_INI%" "%ROOT%\scripts\api-runtime-control.php" start >nul
+if errorlevel 1 (
+    set "STARTUP_WARNINGS=1"
+    echo [WARNING] API runtime could not be started. Use System Health to retry.
+) else (
+    set "API_STATE=running"
+    echo [OK] API runtime started
+)
+
+"%PHP%" -c "%PHP_INI%" "%ROOT%\scripts\sqlparser-runtime-control.php" start >nul
+if errorlevel 1 (
+    set "STARTUP_WARNINGS=1"
+    echo [WARNING] SQL Parser runtime could not be started. Use System Health to retry.
+) else (
+    set "PARSER_STATE=running"
+    echo [OK] SQL Parser runtime started
+)
+
+"%PHP%" -c "%PHP_INI%" "%ROOT%\scripts\database-runtime-control.php" connect >nul
+if errorlevel 1 (
+    set "STARTUP_WARNINGS=1"
+    echo [WARNING] Database application runtime remains disconnected. Configure it and retry from System Health.
+) else (
+    set "DATABASE_STATE=connected"
+    echo [OK] Database application runtime connected
+)
+
+"%PHP%" -c "%PHP_INI%" "%ROOT%\scripts\verify-development-runtime.php" >nul
+if errorlevel 1 (
+    set "STARTUP_WARNINGS=1"
+    echo [WARNING] Development runtime verification found an unavailable component.
+)
 
 echo.
-echo API:    stopped until started from System Health
-echo Parser: stopped until started from System Health
+echo API:      %API_STATE%
+echo Parser:   %PARSER_STATE%
+echo Database: %DATABASE_STATE%
 echo Admin:  %ADMIN_URL%
+if "%STARTUP_WARNINGS%"=="1" echo Startup completed with warnings; the Admin Console remains available for recovery.
 echo.
 echo The Admin Console is bound to this computer only.
 echo Press Ctrl+C to stop it.
@@ -244,13 +275,12 @@ REM ==================================================
 start "" "%ADMIN_URL%"
 
 REM ==================================================
-REM Start Admin Console only
+REM Start Admin Console control plane
 REM ==================================================
 
 "%PHP%" ^
     -c "%PHP_INI%" ^
     -d "opcache.file_cache=%OPCACHE%" ^
-    -d "error_log=%LOGS%\php_errors.log" ^
     -S "127.0.0.1:%ADMIN_PORT%" ^
     -t "%ADMIN%" ^
     "%ADMIN%\router.php"

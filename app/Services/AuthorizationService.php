@@ -5,6 +5,7 @@ require_once __DIR__ . '/../Authorization/RoleModel.php';
 require_once __DIR__ . '/../Repositories/AuthorizationRepository.php';
 require_once __DIR__ . '/../Requests/ApiRequestException.php';
 require_once __DIR__ . '/../../core/Logger.php';
+require_once __DIR__ . '/../../core/OperationalLogger.php';
 
 final class AuthorizationService
 {
@@ -15,6 +16,7 @@ final class AuthorizationService
     public function legacyApiKeyRoles(): array { return $this->repository->load()['legacyApiKeyRoles']; }
     public function roleExists(string $role): bool { return isset($this->roles()[$role]); }
     public function backendRoleExists(?string $role): bool { return $role === null || in_array($role, RoleModel::backendRoles(), true); }
+    public function apiKeyRoleExists(?string $role): bool { return $role !== null && in_array($role, RoleModel::apiKeyRoles(), true); }
     public function frontendRoleExists(?string $role): bool { return $role === null || in_array($role, RoleModel::frontendRoles(), true); }
     public function permissionsForRoles(array $roles): array
     {
@@ -48,6 +50,10 @@ final class AuthorizationService
         if (!$allowed || !$resourceAllowed) {
             $this->deny($principal, $permission, $resource !== null, $allowed ? 'resource_scope_denied' : 'permission_denied', $audit, $resource);
         }
+        (new OperationalLogger())->info('api', 'API authorization accepted', [
+            'permission' => $permission,
+            'resource' => $resource,
+        ]);
     }
 
     public function authorizeAny(Principal $principal, array $permissions, ?string $resource = null, ?string $scope = null): void
@@ -64,6 +70,11 @@ final class AuthorizationService
     private function deny(Principal $principal, string $permission, bool $resourceDenied, string $reason, bool $audit, ?string $resource = null): never
     {
         if ($audit) {
+            (new OperationalLogger())->warning('api', 'API authorization denied', [
+                'permission' => $permission,
+                'resource' => $resource,
+                'error_code' => $resourceDenied ? 'RESOURCE_ACCESS_DENIED' : 'AUTHORIZATION_DENIED',
+            ]);
             $this->logger->audit('authorization.denied', 'denied', 'NOTICE', [
                 'actorType' => $principal->authenticationType === 'api_key' ? 'api_key' : 'user',
                 'actorId' => $principal->userId,

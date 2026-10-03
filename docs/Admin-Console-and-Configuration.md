@@ -2,7 +2,7 @@
 
 The Admin Console is an independent loopback application available only to an enabled System Administrator. Loopback enforcement, session authentication, backend authorization, and CSRF validation remain server-side requirements.
 
-The launchers start the Admin Console only. API and SQL Parser begin stopped, and database runtime access begins disconnected. All three are started or connected manually from System Health. Stopping either process never stops Admin. The parser remains independent of API authentication, sessions, and database connectivity.
+The development launchers establish the complete runtime: API and SQL Parser are started through their existing process managers, application database availability is validated and enabled, all three states are verified, and the Admin Console starts as the independent control plane. A failed component remains accurately unavailable and can be retried from System Health. Development Start/Stop/Restart continues to control real managed processes. In production, IIS/Nginx and FastCGI/PHP-FPM own the processes while the same actions are labeled Enable/Disable/Reload and change only application availability. Disabling either runtime never stops Admin. The parser remains independent of API authentication, sessions, and database connectivity.
 
 ## Pages
 
@@ -16,14 +16,14 @@ The launchers start the Admin Console only. API and SQL Parser begin stopped, an
 
 ## Configuration and runtime ownership
 
-`config/admin.json` schema version 5 contains server, CORS, authentication, and validated runtime configuration. Versions 1–4 migrate in place; obsolete feature values are dropped because Read, Write, Pagination, Sorting, and Metadata remain framework capabilities governed by authorization.
+`config/admin.json` schema version 6 contains server, CORS, authentication, validated runtime configuration, and the non-secret backup schedule. Versions 1–5 migrate in place; obsolete feature values are dropped because Read, Write, Pagination, Sorting, and Metadata remain framework capabilities governed by authorization.
 
-The Server section owns loopback port ranges. Process state under `runtime/` is operational data, not configuration. System Health obtains each managed process's PID, selected port, and start time from that state. Stopped, crashed, and stale processes report null operational fields rather than configured or historical values. Browser requests may select only fixed lifecycle operations and cannot supply commands, paths, executables, or arguments.
+The Server section owns development loopback port ranges; production listener configuration remains deployment-owned. Development process state under `runtime/` is operational data, not configuration. System Health obtains each managed process's PID, selected port, and start time from that state. Production application availability uses locked, atomically replaced `config/application-runtime-state.json` and reports external infrastructure separately, with no PID/port/start-time claim. Browser requests may select only fixed lifecycle operations and cannot supply commands, paths, executables, or arguments.
 
 The Database section reuses the validated SQL Server configuration, request-scoped driver, and AES-256-GCM credential envelope. System Health exposes only safe server, explicit port, database name, and connection status; it never invents a database PID or default port. Stored plaintext passwords, ciphertext, encryption keys, session IDs, password hashes, and API-key secrets are never returned.
 
-Runtime & Performance controls query timeout, API/login rate limits, session expiration, JSON body size, and pagination defaults/maximums. These values apply to new requests immediately and do not restart a service. See [Runtime and performance controls](Runtime-and-Performance-Controls.md).
+Runtime & Performance controls query timeout, API/login rate limits, session expiration, JSON body size, and pagination defaults/maximums. These values apply to new requests immediately and do not restart a service. Production Reload records/reapplies the application runtime boundary without restarting IIS/Nginx/FastCGI/PHP-FPM. See [Runtime and performance controls](Runtime-and-Performance-Controls.md).
 
 ## Platform startup
 
-`start-windows.bat` uses the bundled Windows PHP runtime. `start-linux.sh` prefers the bundled Linux runtime and falls back to installed PHP. Both bootstrap missing runtime configuration, prepare the local encryption key, reset database runtime availability to disconnected, and keep only the Admin server in the foreground. API and SQL Parser remain stopped until manually started from System Health.
+`start-windows.bat` uses the bundled Windows PHP runtime. `start-linux.sh` prefers the bundled Linux runtime and falls back to installed PHP. Both pin development mode, bootstrap missing runtime configuration, prepare the local encryption key, start API and SQL Parser, connect application database availability, verify the resulting state, and keep the Admin server in the foreground. They never start or stop SQL Server or production web-server services.

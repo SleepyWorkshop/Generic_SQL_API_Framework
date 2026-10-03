@@ -6,13 +6,12 @@ ob_start();
 
 require_once __DIR__ . '/../config/constants.php';
 require_once __DIR__ . '/../core/ExceptionHandler.php';
-ExceptionHandler::register();
+ExceptionHandler::register('api');
 require_once __DIR__ . '/../app/Security/SecurityConfiguration.php';
 require_once __DIR__ . '/../app/Http/RequestBodyReader.php';
 
 if (SecurityConfiguration::isProduction()) {
     ini_set('display_errors', '0');
-    ini_set('log_errors', '1');
 }
 
 $allowed_origins = SecurityConfiguration::allowedOrigins();
@@ -65,6 +64,7 @@ require_once __DIR__ . '/../app/Middleware/LoggingMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/AuthorizationMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/DatabaseAvailabilityMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/ApiRateLimitMiddleware.php';
+require_once __DIR__ . '/../app/Middleware/ApplicationRuntimeMiddleware.php';
 require_once __DIR__ . '/../core/Validator.php';
 require_once __DIR__ . '/../app/Controllers/MetadataController.php';
 require_once __DIR__ . '/../app/Controllers/QueryController.php';
@@ -97,6 +97,8 @@ if (!is_array($publicRequest)) {
         [['path' => '', 'message' => 'Request body must be a JSON object.']]
     );
 }
+Response::setRequestContext(['action' => is_string($publicRequest['action'] ?? null) ? $publicRequest['action'] : null]);
+(new LoggingMiddleware())->handle($publicRequest);
 
 $setupActions = ['setup.status', 'setup.createAdmin'];
 $authActions = ['auth.csrf', 'auth.login', 'auth.session', 'auth.logout'];
@@ -122,16 +124,13 @@ unset($_SERVER['GENERIC_AUTH_PROVIDER']);
 if (str_starts_with((string)($publicRequest['action'] ?? ''), 'admin.')) {
     Response::error('Not found.', 404, 'NOT_FOUND');
 }
+(new ApplicationRuntimeMiddleware('api'))->handle($publicRequest);
 $authentication = new AuthenticationMiddleware(true, $publicAuthenticationActions);
 $authentication->handle($publicRequest);
 (new ApiRateLimitMiddleware())->handle($publicRequest);
 (new AdminAuthorizationMiddleware(array_merge($userManagementActions,$apiKeyActions,$roleActions)))->handle($publicRequest);
 (new FrontendUserAuthorizationMiddleware($frontendUserActions))->handle($publicRequest);
 (new CsrfProtectionMiddleware())->handle($publicRequest);
-
-// Execute Middleware
-$middleware = new LoggingMiddleware();
-$middleware->handle($publicRequest);
 
 if (in_array($publicRequest['action'] ?? null, $setupActions, true)) {
     $request = (new SetupRequestValidator())->validate($publicRequest);

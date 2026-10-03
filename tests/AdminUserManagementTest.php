@@ -47,6 +47,7 @@ $oldAdminPath = getenv('GENERIC_ADMIN_CONFIG_PATH');
 $actions = [
     'auth.users.list', 'auth.users.create', 'auth.users.update', 'auth.users.enable',
     'auth.users.disable', 'auth.users.delete', 'auth.users.changePassword',
+    'admin.console.restart',
     'admin.api.start', 'admin.api.stop', 'admin.api.restart',
     'admin.sqlParser.start', 'admin.sqlParser.stop', 'admin.sqlParser.restart',
     'admin.database.connect', 'admin.database.disconnect', 'admin.database.restart',
@@ -111,18 +112,51 @@ try {
     userManagementAssert(
         !str_contains(json_encode($listed, JSON_THROW_ON_ERROR), 'password')
             && !str_contains(json_encode($listed, JSON_THROW_ON_ERROR), 'authVersion')
-            && array_keys($listed[0]) === ['username', 'enabled', 'backendRole', 'frontendAccess', 'frontendRole', 'createdAt'],
+            && array_keys($listed[0]) === ['name', 'username', 'mobile', 'email', 'enabled', 'backendRole', 'frontendAccess', 'frontendRole', 'createdAt'],
         'User list exposed internal authentication material.'
     );
 
-    $created = $service->createUser('New.User', 'new-user-password-123', RoleModel::READ_ONLY, false, null);
+    $created = $service->createUser(
+        'New.User', 'new-user-password-123', RoleModel::READ_ONLY, false, null, true,
+        'New User', '+15550000010', null
+    );
     userManagementAssert(
         $created['username'] === 'New.User'
             && $created['enabled'] === true
             && $created['backendRole'] === RoleModel::READ_ONLY
+            && $created['name'] === 'New User'
+            && $created['mobile'] === '+15550000010'
+            && $created['email'] === null
             && strtotime($created['createdAt']) !== false
             && !str_contains(json_encode($created, JSON_THROW_ON_ERROR), 'password'),
         'Created user response was unsafe or malformed.'
+    );
+    $service->assignAuthorization(
+        'New.User', RoleModel::DATA_OPERATOR, true, null, $admin['id']
+    );
+    userManagementAssert(
+        $repository->findUser('New.User')['backendRole'] === RoleModel::DATA_OPERATOR,
+        'Super Admin could not change another user authorization.'
+    );
+    userManagementFailure(
+        fn () => $service->assignAuthorization(
+            'Admin', RoleModel::READ_ONLY, true, null, $admin['id']
+        ),
+        'AUTHORIZATION_DENIED',
+        403
+    );
+    $applicationAdmin = $service->createUser(
+        'Application.Admin', 'application-admin-password', null, true,
+        RoleModel::APPLICATION_ADMINISTRATOR, true
+    );
+    $storedApplicationAdmin = $repository->findUser($applicationAdmin['username']);
+    userManagementFailure(
+        fn () => $service->assignAuthorization(
+            'Application.Admin', RoleModel::SYSTEM_ADMINISTRATOR, true,
+            RoleModel::APPLICATION_ADMINISTRATOR, $storedApplicationAdmin['id']
+        ),
+        'AUTHORIZATION_DENIED',
+        403
     );
     userManagementFailure(
         fn () => $service->createUser('new.user', 'another-password-123', RoleModel::READ_ONLY, false, null),
@@ -146,10 +180,15 @@ try {
 
     $createdUserId = $repository->findUser('New.User')['id'];
     $authService->login('New.User', 'new-user-password-123');
-    $renamed = $service->updateUsername('New.User', 'Renamed.User');
+    $renamed = $service->updateUserProfile('New.User', 'Renamed User', 'Renamed.User', '+15550000011', 'renamed@example.test');
     userManagementAssert(
         $repository->findUser('Renamed.User')['id'] === $createdUserId,
         'Username update changed stable user identity.'
+    );
+    userManagementAssert(
+        $renamed['name'] === 'Renamed User' && $renamed['mobile'] === '+15550000011'
+            && $renamed['email'] === 'renamed@example.test',
+        'User profile update did not persist safe profile fields.'
     );
     userManagementFailure(fn () => $authentication->handle(['action' => 'select']), 'AUTHENTICATION_REQUIRED', 401);
     userManagementFailure(fn () => $authService->login('New.User', 'new-user-password-123'), 'INVALID_CREDENTIALS', 401);
@@ -179,9 +218,9 @@ try {
         userManagementAssert(!str_contains($userLog, $secret), 'User-management logs exposed credential material.');
     }
 
-    userManagementFailure(fn () => $service->deleteUser('Admin', 'admin'), 'CANNOT_DELETE_CURRENT_USER', 409);
-    userManagementFailure(fn () => $service->setEnabled('Admin', false), 'LAST_ENABLED_ADMIN', 409);
-    userManagementFailure(fn () => $service->deleteUser('Admin', 'Other.Admin'), 'LAST_ENABLED_ADMIN', 409);
+    userManagementFailure(fn () => $service->deleteUser('Admin', 'admin'), 'LAST_ENABLED_ADMIN', 403);
+    userManagementFailure(fn () => $service->setEnabled('Admin', false), 'LAST_ENABLED_ADMIN', 403);
+    userManagementFailure(fn () => $service->deleteUser('Admin', 'Other.Admin'), 'LAST_ENABLED_ADMIN', 403);
 
     $service->createUser('Second.Admin', 'second-admin-password', RoleModel::SYSTEM_ADMINISTRATOR, false, null);
     $admin = $repository->findUser('Admin');
@@ -202,25 +241,67 @@ try {
     $validator = new UserManagementRequestValidator();
     $validatedCreate = $validator->validate([
         'action' => 'auth.users.create',
+        'name' => 'Default Role',
         'username' => 'Default.Role',
+        'mobile' => '+15550000001',
+        'email' => null,
         'password' => 'valid-password-123',
         'passwordConfirmation' => 'valid-password-123',
-        'backendRole' => RoleModel::READ_ONLY,
+        'role' => RoleModel::READ_ONLY,
     ]);
-    userManagementAssert($validatedCreate['backendRole'] === RoleModel::READ_ONLY && $validatedCreate['frontendAccess'] === false, 'Create-user authorization was not validated safely.');
+    userManagementAssert($validatedCreate['backendRole'] === RoleModel::READ_ONLY && $validatedCreate['frontendAccess'] === true && $validatedCreate['frontendRole'] === null, 'Create-user role preset was not validated safely.');
     userManagementAssert($validatedCreate['enabled'] === true, 'Create-user enabled status did not default safely.');
+    $expectedPresets = [
+        RoleModel::SYSTEM_ADMINISTRATOR => [RoleModel::SYSTEM_ADMINISTRATOR, true, RoleModel::APPLICATION_ADMINISTRATOR],
+        RoleModel::APPLICATION_ADMINISTRATOR => [null, true, RoleModel::APPLICATION_ADMINISTRATOR],
+        RoleModel::DATA_OPERATOR => [RoleModel::DATA_OPERATOR, true, null],
+        RoleModel::READ_ONLY => [RoleModel::READ_ONLY, true, null],
+    ];
+    foreach ($expectedPresets as $role => [$backendRole, $frontendAccess, $frontendRole]) {
+        $preset = $validator->validate(['action' => 'auth.users.assignAuthorization', 'username' => 'Operator', 'role' => $role]);
+        userManagementAssert(
+            $preset['backendRole'] === $backendRole && $preset['frontendAccess'] === $frontendAccess
+                && $preset['frontendRole'] === $frontendRole,
+            "Role preset {$role} was not deterministic."
+        );
+    }
     $validatedUpdate = $validator->validate([
         'action' => 'auth.users.update',
         'username' => 'Operator',
+        'name' => 'Updated Operator',
         'newUsername' => 'Updated.Operator',
+        'mobile' => '+15550000002',
+        'email' => '',
     ]);
     userManagementAssert($validatedUpdate['newUsername'] === 'Updated.Operator', 'Username update was not validated.');
+    userManagementAssert($validatedUpdate['name'] === 'Updated Operator' && $validatedUpdate['email'] === null, 'User profile was not validated.');
     userManagementFailure(fn () => $validator->validate([
         'action' => 'auth.users.create',
+        'name' => 'Unsafe User',
         'username' => 'Unsafe.User',
+        'mobile' => '+15550000003',
         'password' => 'valid-password-123',
         'passwordConfirmation' => 'valid-password-123',
         'passwordHash' => 'client-hash',
+    ]), 'INVALID_USER_REQUEST', 400);
+    userManagementFailure(fn () => $validator->validate([
+        'action' => 'auth.users.assignAuthorization',
+        'username' => 'Operator',
+        'role' => RoleModel::READ_ONLY,
+        'backendRole' => RoleModel::SYSTEM_ADMINISTRATOR,
+        'frontendAccess' => true,
+        'frontendRole' => RoleModel::APPLICATION_ADMINISTRATOR,
+    ]), 'INVALID_USER_REQUEST', 400);
+    userManagementFailure(fn () => $validator->validate([
+        'action' => 'auth.users.create',
+        'name' => 'Injected User',
+        'username' => 'Injected.User',
+        'mobile' => '+15550000004',
+        'email' => null,
+        'password' => 'valid-password-123',
+        'passwordConfirmation' => 'valid-password-123',
+        'role' => RoleModel::READ_ONLY,
+        'backendRole' => RoleModel::SYSTEM_ADMINISTRATOR,
     ]), 'INVALID_USER_REQUEST', 400);
     userManagementFailure(fn () => $validator->validate([
         'action' => 'auth.users.changePassword',

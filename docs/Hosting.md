@@ -18,9 +18,10 @@ The bundled launchers use PHP's built-in server only for local development. Prod
 
 Both launchers enforce PHP 8.2 or newer, load the repository runtime INI, check
 ODBC/OpenSSL/JSON/session support, prepare OPcache and log directories, bootstrap
-runtime configuration, reset database availability, prepare the local encryption
-key, reject an occupied Admin port, bind Admin to loopback, and leave API/Parser
-stopped. Windows uses the bundled executable, ACL-protected temporary key capture,
+runtime configuration, prepare the local encryption key, reject an occupied
+Admin port, start the managed API and Parser, validate and enable application
+database availability, verify all three states, and bind Admin to loopback.
+Windows uses the bundled executable, ACL-protected temporary key capture,
 PowerShell for the UTC start time, and the default browser. Linux prefers a
 bundled executable, falls back to `PATH`, captures the key without a temporary
 file, uses POSIX process behavior, and opens through `xdg-open` or WSL when
@@ -45,31 +46,38 @@ locate php.exe and php.ini
   -> verify ODBC, OpenSSL, JSON, and session with extension_loaded()
   -> create missing ignored runtime configuration with safe defaults
   -> load/generate the ignored local database-encryption key
-  -> reset database runtime availability to disconnected
   -> verify the configured Admin loopback port
+  -> start and verify the managed API process
+  -> start and verify the managed SQL Parser process
+  -> validate configuration and enable application database availability
+  -> verify the complete development runtime
   -> php -S 127.0.0.1:<admin-port> -t admin admin/router.php
-  -> open http://127.0.0.1:<admin-port>/admin
+  -> open http://127.0.0.1:<admin-port>/
 ```
 
 The script explicitly loads `runtime/windows/php/php.ini`, configures OPcache's
-file cache, and writes PHP errors to `logs/php_errors.log`. It does not require a
-working database before startup: configure and test submitted settings through
-Configuration → Database, then connect runtime access from System Health. The launcher generates a local key only when neither an environment
+file cache. After application bootstrap, supported PHP/runtime errors are routed
+to the context-specific operational `.txt` log. Startup failures before bootstrap
+remain visible through the console or hosting service error channel. It attempts to connect
+application database availability using the saved configuration. If configuration
+or connectivity is unavailable, it reports the failure, leaves database access
+disconnected, and still starts Admin so the settings can be repaired. The launcher generates a local key only when neither an environment
 key nor key file exists and no already-encrypted database file depends on a
 missing key. It never rewrites database configuration itself. The Windows
 launcher restricts its short-lived key-output file to the invoking identity
 before capture and deletes it immediately after importing the value into the
 process environment. Each built-in server is single-process/single-threaded.
-API and SQL Parser remain stopped and
-database runtime access remains disconnected until manually controlled from
-System Health; all services retain independent lifecycles.
+API and SQL Parser retain independent managed lifecycles after automatic startup,
+and database Connect/Disconnect remains an application availability gate.
 
-Configuration bootstrap creates missing `config/auth.json`,
-`config/installation.json`, and `config/admin.json`; it never overwrites existing
+Configuration bootstrap creates all missing ignored runtime configuration,
+including `config/application-runtime-state.json`; it never overwrites existing
 values. The same idempotent bootstrap runs in the Linux launcher and repository
 load path, so manual file creation is unnecessary.
 
-The Admin Console is `/admin` on its configured port. System Health reports and
+In development the `admin/` directory is the document root, so the Admin Console
+is served at `/` on its configured port (an older `/admin` bookmark redirects
+there). System Health reports and
 controls the independent API and SQL Parser processes and the database
 availability gate. Stopping or restarting either process does not stop Admin
 Console or the other managed service.
@@ -78,13 +86,13 @@ Console or the other managed service.
 
 From the backend root run `./start-linux.sh`. It prefers
 `runtime/linux/php/php`, falls back to installed PHP when that bundled binary is
-absent, and loads `runtime/linux/php/php.ini`. It performs the same bootstrap,
-keeps Admin server in the foreground, leaves API and SQL Parser stopped and the database disconnected, and
+absent, and loads `runtime/linux/php/php.ini`. It performs the same complete
+development startup and verification, keeps Admin server in the foreground, and
 attempts to open a browser through `xdg-open` or WSL `cmd.exe`.
 
 ## Required deployment configuration
 
-Create `database/config/database.json` as described in [Database Configuration](Database-Configuration.md). SQL Server must be reachable and the PHP process identity or SQL credentials must have the needed permissions. For the recommended complete encrypted envelope (or a legacy encrypted password), expose the matching Base64-encoded 32-byte `GENERIC_SQL_API_ENCRYPTION_KEY` through the host's environment or secret manager to the PHP process; do not place the key in the JSON or launcher. The `logs/` directory must be writable; `Logger` creates it if absent and writes dated `YYYY-MM-DD.log` files containing successful and failed SQL execution details.
+Create `database/config/database.json` as described in [Database Configuration](Database-Configuration.md). SQL Server must be reachable and the PHP process identity or SQL credentials must have the needed permissions. For the recommended complete encrypted envelope (or a legacy encrypted password), expose the matching Base64-encoded 32-byte `GENERIC_SQL_API_ENCRYPTION_KEY` through the host's environment or secret manager to the PHP process; do not place the key in the JSON or launcher. The `logs/` directory must be writable; operational diagnostics use the dated `api`, `admin`, `database`, and `sqlparser` text files, while audit records use `audit/*.jsonl`.
 
 ## Production hosting
 
@@ -96,7 +104,17 @@ GENERIC_ADMIN_ENABLED=1 php -S 127.0.0.1:8090 -t admin admin/router.php
 
 Use IIS/FastCGI on Windows or Nginx/PHP-FPM on Linux for production concurrency. Windows uses `php-cgi.exe`; it does not provide PHP-FPM. Size workers, request queues, memory, and SQL Server capacity from target-host measurements. PHP's built-in server and both launchers are development conveniences, not production process managers.
 
-The built-in server handles each managed API/Parser process serially and must not be used to infer production concurrency. IIS FastCGI and PHP-FPM run independent PHP workers with request-scoped ODBC connections and shared local file-backed configuration, rate-limit, session, and runtime state. Those workers must use one reliable local filesystem; the framework does not provide distributed locks or multi-host state coordination. Same-session PHP requests can serialize on the session-file lock as expected.
+Set `GENERIC_APP_ENV=production` on the PHP worker environment. IIS/Nginx and
+FastCGI/PHP-FPM continue to own listeners, workers, and service lifecycle. The
+Admin Console controls only application availability: Enable/Start admits API or
+Parser requests, Disable/Stop returns a safe 503 for their execution requests,
+and Reload/Restart refreshes the application runtime boundary without issuing an
+OS or web-server command. The Admin application and liveness routes remain
+reachable so operators and infrastructure monitors can recover a disabled
+runtime. Database Connect/Disconnect remains an application gate and never
+starts or stops SQL Server.
+
+The built-in server handles each managed API/Parser process serially and must not be used to infer production concurrency. IIS FastCGI and PHP-FPM run independent PHP workers with request-scoped ODBC connections and shared local file-backed configuration, rate-limit, session, and runtime state. Those workers must use one reliable local filesystem; the framework does not provide distributed locks or multi-host state coordination. Production application availability survives worker requests and host reboot because bootstrap never overwrites its state file. Same-session PHP requests can serialize on the session-file lock as expected.
 
 IIS `web.config` examples, an Nginx HTTPS server-block example, PHP production/OPcache settings, route boundaries, TLS, security headers, permissions, logging, and deployment steps are documented in [Production web-server hosting](Production-Security-and-Deployment.md).
 
@@ -125,4 +143,4 @@ for password and encryption-key rotation procedures.
 - no SQL Parser port available: change the parser range, then start or restart the parser.
 - configured Admin port occupied: stop the conflicting service or update the Admin port and relaunch.
 - runtime configuration bootstrap failure: use the reported safe reason code. The launcher pins `GENERIC_RUNTIME_CONFIG_DIR` to its repository `config/` directory so stale inherited overrides cannot redirect startup.
-- query failures: inspect `logs/YYYY-MM-DD.log` by request ID, SQLSTATE, `errorCategory`, and `queryPhase`. Parameter values and credential material are intentionally omitted.
+- query failures: inspect `logs/database/YYYY-MM-DD.txt` by request ID, safe error category, and query phase. Parameter values and credential material are intentionally omitted.

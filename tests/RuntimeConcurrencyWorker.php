@@ -5,6 +5,7 @@ require_once __DIR__ . '/../app/Security/ApiRateLimiter.php';
 require_once __DIR__ . '/../app/Security/LoginRateLimiter.php';
 require_once __DIR__ . '/../app/Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../app/Runtime/ApiProcessManager.php';
+require_once __DIR__ . '/../app/Runtime/ApplicationRuntimeManager.php';
 
 $mode = $argv[1] ?? '';
 
@@ -112,6 +113,18 @@ try {
             throw new InvalidArgumentException('Unsupported process operation.');
         }
         JsonFileStore::save($resultPath, $manager->{$operation}());
+        exit(0);
+    }
+
+    if ($mode === 'application-runtime') {
+        $path = (string)($argv[2] ?? '');
+        $service = (string)($argv[3] ?? '');
+        $iterations = (int)($argv[4] ?? 0);
+        $manager = new ApplicationRuntimeManager($path);
+        $operations = ['start', 'stop', 'restart'];
+        for ($iteration = 0; $iteration < $iterations; $iteration++) {
+            $manager->control($service, $operations[$iteration % count($operations)]);
+        }
         exit(0);
     }
 

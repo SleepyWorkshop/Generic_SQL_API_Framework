@@ -109,8 +109,12 @@ productionHostingAssert(
 );
 foreach ([$linuxLauncher, $windowsLauncher] as $launcher) {
     productionHostingAssert(str_contains($launcher, 'PHP_VERSION_ID >= 80200'), 'Development launcher does not enforce the supported PHP version.');
-    productionHostingAssert(str_contains($launcher, 'database-runtime-control.php') && str_contains($launcher, 'disconnect'), 'Disconnected startup was changed.');
-    productionHostingAssert(!str_contains($launcher, 'api-runtime-control.php start') && !str_contains($launcher, 'sqlparser-runtime-control.php start'), 'Development launcher auto-starts a managed service.');
+    productionHostingAssert(str_contains($launcher, 'GENERIC_APP_ENV') && str_contains($launcher, 'development'), 'Development launcher does not pin development hosting mode.');
+    productionHostingAssert(str_contains($launcher, 'api-runtime-control.php') && str_contains($launcher, 'start'), 'Development launcher does not start the managed API.');
+    productionHostingAssert(str_contains($launcher, 'sqlparser-runtime-control.php') && str_contains($launcher, 'start'), 'Development launcher does not start the managed SQL Parser.');
+    productionHostingAssert(str_contains($launcher, 'database-runtime-control.php') && str_contains($launcher, 'connect'), 'Development launcher does not connect application database availability.');
+    productionHostingAssert(str_contains($launcher, 'verify-development-runtime.php'), 'Development launcher does not verify the completed runtime.');
+    productionHostingAssert(!preg_match('/systemctl|iisreset|appcmd|net\s+(?:start|stop)|sc\s+(?:start|stop)|nginx\s+-s/i', $launcher), 'Development launcher contains infrastructure service control.');
 }
 
 $hostingDocumentation = (string)file_get_contents($root . '/docs/Production-Security-and-Deployment.md');

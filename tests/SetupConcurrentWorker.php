@@ -16,7 +16,7 @@ $service = new SetupService(
 );
 
 try {
-    $service->createInitialAdmin($username, $password);
+    $service->createInitialAdmin($username . ' Name', $username, '+15550000001', null, $password);
     exit(0);
 } catch (ApiRequestException $exception) {
     exit($exception->getErrorCode() === 'INSTALLATION_ALREADY_INITIALIZED' ? 2 : 4);

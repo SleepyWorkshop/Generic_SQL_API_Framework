@@ -51,6 +51,10 @@ try {
         ],
     ])['server'];
     runtimeAssert($validServer['apiPortMinimum'] === 18120, 'Valid port range was not normalized.');
+    runtimeAssert(
+        $validator->validate(['action' => 'admin.console.restart'])['action'] === 'admin.console.restart',
+        'Admin Console restart action was not accepted by the fixed action allowlist.'
+    );
     runtimeFailure(fn () => $validator->validate([
         'action' => 'admin.server.save',
         'server' => [...$validServer, 'apiPortMinimum' => 18130],
@@ -80,10 +84,11 @@ try {
     ]);
     $migrated = $repository->load();
     runtimeAssert(
-        $migrated['version'] === 5
+        $migrated['version'] === 6
             && $migrated['authentication']['mode'] === 'none'
             && isset($migrated['server'])
             && $migrated['runtime'] === RuntimeControls::defaults()
+            && $migrated['backup'] === BackupSchedule::defaults()
             && !isset($migrated['features']),
         'Version-1 Admin configuration was not safely migrated.'
     );
@@ -91,11 +96,11 @@ try {
     $versionTwo['version'] = 2;
     $versionTwo['features'] = ['readData' => true, 'writeData' => true, 'pagination' => true, 'sorting' => true, 'metadata' => true];
     unset($versionTwo['server']['parserPortMinimum'], $versionTwo['server']['parserPortMaximum']);
-    unset($versionTwo['runtime']);
+    unset($versionTwo['runtime'], $versionTwo['backup']);
     JsonFileStore::save($configurationPath, $versionTwo);
     $migratedVersionTwo = $repository->load();
     runtimeAssert(
-        $migratedVersionTwo['version'] === 5
+        $migratedVersionTwo['version'] === 6
             && $migratedVersionTwo['server']['parserPortMinimum'] === 8101
             && !isset($migratedVersionTwo['features']),
         'Version-2 Admin configuration was not safely migrated.'
@@ -107,9 +112,10 @@ try {
     JsonFileStore::save($configurationPath, $versionFour);
     $migratedVersionFour = $repository->load();
     runtimeAssert(
-        $migratedVersionFour['version'] === 5
+        $migratedVersionFour['version'] === 6
             && $migratedVersionFour['authentication']['mode'] === 'api_key'
-            && $migratedVersionFour['runtime'] === RuntimeControls::defaults(),
+            && $migratedVersionFour['runtime'] === RuntimeControls::defaults()
+            && $migratedVersionFour['backup'] === BackupSchedule::defaults(),
         'Version-4 Admin configuration was not safely migrated.'
     );
     $configuration = AdminConfigurationRepository::defaults();
@@ -153,15 +159,24 @@ try {
     JsonFileStore::save($databaseStatePath, ['version' => 1, 'available' => false, 'updatedAt' => null]);
     $databaseAvailability = new DatabaseAvailabilityManager($databaseStatePath);
     $connectionTests = 0;
+    $connectionTester = static function () use (&$connectionTests): void { $connectionTests++; };
     $adminService = new AdminService(
         $repository,
         $databasePath,
-        static function () use (&$connectionTests): void { $connectionTests++; },
+        $connectionTester,
         $manager,
         null,
         $parserManager,
         null,
-        $databaseAvailability
+        $databaseAvailability,
+        null,
+        new ApplicationHealthMonitor([
+            'databasePath' => $databasePath,
+            'runtimeDirectory' => $directory,
+            'databaseCachePath' => $directory . '/database-health.json',
+            'databaseAvailable' => static fn (): bool => $databaseAvailability->available(),
+            'databaseTester' => $connectionTester,
+        ])
     );
     $initialApi = $manager->status();
     $initialParser = $parserManager->status();
@@ -180,6 +195,13 @@ try {
         'Missing SQL Parser PID state did not return a clean stopped status.'
     );
     $initialHealth = $adminService->status();
+    $adminRestart = $adminService->restartAdminConsole();
+    runtimeAssert(
+        $adminRestart['accepted'] === true
+            && $adminRestart['status'] === 'restarting'
+            && $adminRestart['controlMode'] === 'application',
+        'Admin Console application restart was not accepted through the existing Admin service boundary.'
+    );
     runtimeAssert(
         $initialHealth['database']['available'] === false
             && $initialHealth['database']['status'] === 'disconnected'
@@ -345,19 +367,20 @@ try {
     runtimeAssert(str_contains($windowsLauncher, 'runtime\windows\php\php.exe'), 'Windows runtime is not automatically selected.');
     runtimeAssert(str_contains($linuxLauncher, 'runtime/linux/php/php'), 'Linux bundled runtime is not preferred.');
     foreach ([$windowsLauncher, $linuxLauncher] as $launcher) {
-        runtimeAssert(!str_contains($launcher, 'api-runtime-control.php start'), 'Launcher still starts the managed API lifecycle.');
-        runtimeAssert(!str_contains($launcher, 'sqlparser-runtime-control.php start'), 'Launcher still starts the managed SQL Parser lifecycle.');
-        runtimeAssert(str_contains($launcher, 'database-runtime-control.php') && str_contains($launcher, 'disconnect'), 'Launcher does not reset database runtime access to disconnected.');
-        runtimeAssert(!str_contains($launcher, 'database-runtime-control.php connect'), 'Launcher automatically connects database runtime access.');
+        runtimeAssert(str_contains($launcher, 'api-runtime-control.php') && str_contains($launcher, 'start'), 'Launcher does not establish the managed API lifecycle.');
+        runtimeAssert(str_contains($launcher, 'sqlparser-runtime-control.php') && str_contains($launcher, 'start'), 'Launcher does not establish the managed SQL Parser lifecycle.');
+        runtimeAssert(str_contains($launcher, 'database-runtime-control.php') && str_contains($launcher, 'connect'), 'Launcher does not enable application database runtime access.');
+        runtimeAssert(str_contains($launcher, 'verify-development-runtime.php'), 'Launcher does not verify the complete development runtime.');
         runtimeAssert(str_contains($launcher, '-t') && str_contains($launcher, 'router.php'), 'Launcher does not start the independent Admin app.');
     }
 
     $adminJavaScript = (string)file_get_contents(__DIR__ . '/../admin/assets/admin.js');
+    $compactAdminJavaScript = str_replace('"', "'", preg_replace('/\s+/', '', $adminJavaScript));
     runtimeAssert(!str_contains(strtolower($adminJavaScript), 'test saved configuration'), 'Removed saved-configuration runtime test remains in the Admin Console.');
     runtimeAssert(!str_contains($adminJavaScript, 'Runtime access'), 'Database runtime controls remain under Configuration.');
     runtimeAssert(!str_contains($adminJavaScript, 'data-database="'), 'Legacy Configuration database runtime controls remain.');
     runtimeAssert(str_contains($adminJavaScript, 'data-database-runtime'), 'System Health database runtime controls are missing.');
-    runtimeAssert(str_contains($adminJavaScript, "['Port',health.api.port]") && str_contains($adminJavaScript, "['Port',health.sqlParser.port]"), 'System Health does not render actual API and SQL Parser ports.');
+    runtimeAssert(str_contains($compactAdminJavaScript, "['Port',service.port]"), 'System Health does not render actual development API and SQL Parser ports.');
 
     $adminApiSource = (string)file_get_contents(__DIR__ . '/../admin/api.php');
     $adminControllerSource = (string)file_get_contents(__DIR__ . '/../app/Controllers/AdminController.php');

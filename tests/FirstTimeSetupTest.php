@@ -65,30 +65,38 @@ try {
 
     $validator = new SetupRequestValidator();
     foreach ([
-        ['request' => ['action' => 'setup.createAdmin', 'username' => "bad\nname", 'password' => 'valid-password-123', 'passwordConfirmation' => 'valid-password-123']],
-        ['request' => ['action' => 'setup.createAdmin', 'username' => 'admin', 'password' => '', 'passwordConfirmation' => '']],
-        ['request' => ['action' => 'setup.createAdmin', 'username' => 'admin', 'password' => 'short', 'passwordConfirmation' => 'short']],
-        ['request' => ['action' => 'setup.createAdmin', 'username' => 'admin', 'password' => 'valid-password-123', 'passwordConfirmation' => 'different-password']],
+        ['request' => ['action' => 'setup.createAdmin', 'name' => 'Initial Admin', 'mobile' => '+15550000001', 'username' => "bad\nname", 'password' => 'valid-password-123', 'passwordConfirmation' => 'valid-password-123']],
+        ['request' => ['action' => 'setup.createAdmin', 'name' => '', 'mobile' => '+15550000001', 'username' => 'admin', 'password' => 'valid-password-123', 'passwordConfirmation' => 'valid-password-123']],
+        ['request' => ['action' => 'setup.createAdmin', 'name' => 'Initial Admin', 'mobile' => 'invalid', 'username' => 'admin', 'password' => 'valid-password-123', 'passwordConfirmation' => 'valid-password-123']],
+        ['request' => ['action' => 'setup.createAdmin', 'name' => 'Initial Admin', 'mobile' => '+15550000001', 'username' => 'admin', 'password' => '', 'passwordConfirmation' => '']],
+        ['request' => ['action' => 'setup.createAdmin', 'name' => 'Initial Admin', 'mobile' => '+15550000001', 'username' => 'admin', 'password' => 'short', 'passwordConfirmation' => 'short']],
+        ['request' => ['action' => 'setup.createAdmin', 'name' => 'Initial Admin', 'mobile' => '+15550000001', 'username' => 'admin', 'email' => 'invalid', 'password' => 'valid-password-123', 'passwordConfirmation' => 'different-password']],
     ] as $invalid) {
         setupFailure(fn () => $validator->validate($invalid['request']), 'INVALID_SETUP_REQUEST');
     }
 
     $request = $validator->validate([
         'action' => 'setup.createAdmin',
+        'name' => ' Initial Administrator ',
         'username' => ' Initial.Admin ',
+        'mobile' => ' +1 555 000 0001 ',
+        'email' => '',
         'password' => 'a secure password with spaces ',
         'passwordConfirmation' => 'a secure password with spaces ',
     ]);
     setupAssert($request['username'] === 'Initial.Admin', 'Username was not trimmed.');
     setupAssert(str_ends_with($request['password'], ' '), 'Password was silently trimmed.');
 
-    $result = $service->createInitialAdmin($request['username'], $request['password']);
+    $result = $service->createInitialAdmin($request['name'], $request['username'], $request['mobile'], $request['email'], $request['password']);
     setupAssert($result === ['initialized' => true], 'Setup result exposed extra data.');
 
     $authentication = (new AuthRepository($authPath))->load();
     setupAssert(count($authentication['users']) === 1, 'Initial setup did not create exactly one user.');
     $user = $authentication['users'][0];
+    setupAssert($user['name'] === 'Initial Administrator', 'Initial name was not stored correctly.');
     setupAssert($user['username'] === 'Initial.Admin', 'Initial username was not stored correctly.');
+    setupAssert($user['mobile'] === '+1 555 000 0001', 'Initial mobile number was not stored correctly.');
+    setupAssert($user['email'] === null, 'Optional initial email was not normalized.');
     setupAssert($user['enabled'] === true, 'Initial user is not enabled.');
     setupAssert($user['backendRole'] === RoleModel::SYSTEM_ADMINISTRATOR, 'Initial user is not a System Administrator.');
     setupAssert($user['frontendRole'] === RoleModel::APPLICATION_ADMINISTRATOR, 'Initial user is not an Application Administrator.');
@@ -112,7 +120,7 @@ try {
     );
 
     setupFailure(
-        fn () => $service->createInitialAdmin('SecondAdmin', 'another-secure-password'),
+        fn () => $service->createInitialAdmin('Second Admin', 'SecondAdmin', '+15550000002', null, 'another-secure-password'),
         'INSTALLATION_ALREADY_INITIALIZED'
     );
     setupAssert(count((new AuthRepository($authPath))->load()['users']) === 1, 'Second setup created another administrator.');
