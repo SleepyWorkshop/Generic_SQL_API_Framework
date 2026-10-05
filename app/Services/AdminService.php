@@ -332,9 +332,13 @@ final class AdminService
     public function settings(): array
     {
         $settings = $this->configuration->load();
+        $production = SecurityConfiguration::isProduction();
         return [
-            'hostingMode' => SecurityConfiguration::isProduction() ? 'production' : 'development',
-            'server' => $settings['server'],
+            'hostingMode' => $production ? 'production' : 'development',
+            // Port ranges configure only the development launcher's managed
+            // processes. Production listeners belong to the web server.
+            'server' => $production ? null : $settings['server'],
+            'hosting' => $this->hostingInformation($production),
             'cors' => $settings['cors'],
             'authentication' => [
                 'mode' => $settings['authentication']['mode'],
@@ -355,24 +359,35 @@ final class AdminService
 
     public function saveServer(array $server): array
     {
+        if (SecurityConfiguration::isProduction()) {
+            // Saving development ranges cannot change IIS/Nginx bindings, so
+            // reject instead of reporting a change that was never applied.
+            $this->logger->audit('configuration.changed', 'failure', 'WARNING', [
+                'configurationCategory' => 'server', 'reason' => 'deployment_managed', 'component' => 'admin',
+            ]);
+            throw new ApiRequestException(
+                'Server listeners are managed by the production web server deployment.',
+                'SERVER_CONFIGURATION_DEPLOYMENT_MANAGED',
+                [],
+                409
+            );
+        }
         $currentServer = $this->configuration->load()['server'];
-        if (!SecurityConfiguration::isProduction()) {
-            $runtime = $this->processManager->status();
-            $parserRuntime = $this->parserProcessManager->status();
-            if (($runtime['running'] ?? false) === true && ($runtime['port'] ?? null) === $server['adminPort']) {
-                throw new ApiRequestException(
-                    'Invalid admin request.',
-                    'INVALID_ADMIN_REQUEST',
-                    [['path' => 'server.adminPort', 'message' => 'Admin port conflicts with the running API port.']]
-                );
-            }
-            if (($parserRuntime['running'] ?? false) === true && ($parserRuntime['port'] ?? null) === $server['adminPort']) {
-                throw new ApiRequestException(
-                    'Invalid admin request.',
-                    'INVALID_ADMIN_REQUEST',
-                    [['path' => 'server.adminPort', 'message' => 'Admin port conflicts with the running SQL Parser port.']]
-                );
-            }
+        $runtime = $this->processManager->status();
+        $parserRuntime = $this->parserProcessManager->status();
+        if (($runtime['running'] ?? false) === true && ($runtime['port'] ?? null) === $server['adminPort']) {
+            throw new ApiRequestException(
+                'Invalid admin request.',
+                'INVALID_ADMIN_REQUEST',
+                [['path' => 'server.adminPort', 'message' => 'Admin port conflicts with the running API port.']]
+            );
+        }
+        if (($parserRuntime['running'] ?? false) === true && ($parserRuntime['port'] ?? null) === $server['adminPort']) {
+            throw new ApiRequestException(
+                'Invalid admin request.',
+                'INVALID_ADMIN_REQUEST',
+                [['path' => 'server.adminPort', 'message' => 'Admin port conflicts with the running SQL Parser port.']]
+            );
         }
         $apiRestartRequired = $server['apiPortMinimum'] !== $currentServer['apiPortMinimum']
             || $server['apiPortMaximum'] !== $currentServer['apiPortMaximum'];
@@ -567,6 +582,27 @@ final class AdminService
             'port' => is_int($result['port'] ?? null) ? $result['port'] : null,
             'reason' => $reason,
         ]);
+    }
+
+    private function hostingInformation(bool $production): array
+    {
+        if (!$production) {
+            return [
+                'mode' => 'development',
+                'webServer' => 'php-built-in',
+                'listenerManagement' => 'development-launcher',
+            ];
+        }
+        return [
+            'mode' => 'production',
+            'webServer' => $this->runtimeDetector->productionWebServer(),
+            'listenerManagement' => 'web-server',
+            'services' => [
+                'adminConsole' => 'web-server-managed',
+                'api' => 'web-server-managed',
+                'sqlParser' => 'web-server-managed',
+            ],
+        ];
     }
 
     private function controlApplicationRuntime(string $service, string $operation, string $errorCode): array

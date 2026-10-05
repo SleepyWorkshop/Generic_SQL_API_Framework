@@ -29,7 +29,9 @@
          scriptProcessor below, so API and SQL Parser workers never inherit it:
          appcmd.exe set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=admin']" /commit:apphost
          appcmd.exe set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=admin'].environmentVariables.[name='GENERIC_ADMIN_ENABLED',value='1']" /commit:apphost
-         Add PHPRC and GENERIC_APP_ENV=production to the same registration. -->
+         Production mode must be explicit for this boundary as well:
+         appcmd.exe set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=admin'].environmentVariables.[name='GENERIC_APP_ENV',value='production']" /commit:apphost
+         appcmd.exe set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=admin'].environmentVariables.[name='PHPRC',value='C:\PHP']" /commit:apphost -->
     <handlers>
       <remove name="GenericSqlAdminPhpFastCgi" />
       <add name="GenericSqlAdminPhpFastCgi" path="*.php" verb="*" modules="FastCgiModule"

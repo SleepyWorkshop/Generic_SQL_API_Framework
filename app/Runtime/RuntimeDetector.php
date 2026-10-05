@@ -26,6 +26,23 @@ final class RuntimeDetector
         ];
     }
 
+    /**
+     * Identify the production web server that owns listeners and PHP workers.
+     * The supported models are IIS + FastCGI on Windows and Nginx + PHP-FPM on
+     * Linux, so the operating system is the fallback when the server does not
+     * identify itself.
+     */
+    public function productionWebServer(?string $serverSoftware = null, ?string $family = null): string
+    {
+        $software = strtolower($serverSoftware ?? (string)($_SERVER['SERVER_SOFTWARE'] ?? ''));
+        if (str_contains($software, 'microsoft-iis')) return 'iis';
+        if (str_contains($software, 'nginx')) return 'nginx';
+        $family ??= PHP_OS_FAMILY;
+        if ($family === 'Windows') return 'iis';
+        if ($family === 'Linux') return 'nginx';
+        return 'web-server';
+    }
+
     public function runtimeBinary(?string $family = null): string
     {
         $family ??= PHP_OS_FAMILY;

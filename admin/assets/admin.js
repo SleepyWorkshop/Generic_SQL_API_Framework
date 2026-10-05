@@ -662,23 +662,41 @@
       );
     const target = document.querySelector("#config-section");
     if (activeConfigTab === "server")
-      serverSection(target, settings.server, settings.hostingMode);
+      settings.hostingMode === "production"
+        ? productionServerSection(target, settings.hosting)
+        : serverSection(target, settings.server);
     else if (activeConfigTab === "database") await databaseSection(target);
     else if (activeConfigTab === "security") securitySection(target, settings);
     else if (activeConfigTab === "runtime")
       runtimeSection(target, settings.runtime);
     else advancedSection(target, settings.advanced);
   }
-  function serverSection(target, server, hostingMode) {
-    const production = hostingMode === "production",
-      lifecycleLabel = production ? "Reload" : "Restart",
-      serverHelp = production
-        ? "Production listener ports and worker processes are managed by IIS/Nginx and PHP FastCGI/FPM."
-        : "API and SQL Parser each use the first available loopback port in their range. The Admin Console port is always reserved.",
-      restartNote = production
-        ? "● These ranges are development settings. Production listeners are deployment-managed; Reload records an application reload without restarting infrastructure."
-        : "● API and SQL Parser restarts are required after changing their ranges. Admin port changes apply on the next launcher start.";
-    target.innerHTML = `<form id="server-form" class="stack"><p class="help">${serverHelp}</p><div class="row"><label>API Port Minimum<input name="apiPortMinimum" type="number" min="1" max="65535" value="${server.apiPortMinimum}" required></label><label>API Port Maximum<input name="apiPortMaximum" type="number" min="1" max="65535" value="${server.apiPortMaximum}" required></label></div><div class="row"><label>Parser Port Minimum<input name="parserPortMinimum" type="number" min="1" max="65535" value="${server.parserPortMinimum}" required></label><label>Parser Port Maximum<input name="parserPortMaximum" type="number" min="1" max="65535" value="${server.parserPortMaximum}" required></label></div><div class="row"><label>Admin Port<input name="adminPort" type="number" min="1" max="65535" value="${server.adminPort}" required></label><label>Bind Address<input name="bindAddress" value="127.0.0.1" readonly></label></div><p class="restart-note">${restartNote}</p><div class="actions"><button>Save Server Configuration</button><button type="button" class="secondary" data-server-restart="api">${lifecycleLabel} API</button><button type="button" class="secondary" data-server-restart="sqlParser">${lifecycleLabel} SQL Parser</button></div></form>`;
+  const productionWebServers = {
+    iis: { label: "IIS + PHP FastCGI", managed: "IIS Managed" },
+    nginx: { label: "Nginx + PHP-FPM", managed: "Nginx Managed" },
+  };
+  function productionServerMarkup(hosting) {
+    const webServer = productionWebServers[hosting?.webServer] || {
+        label: "Web server + PHP FastCGI",
+        managed: "Web Server Managed",
+      },
+      rows = [
+        ["Hosting Mode", "Production"],
+        ["Web Server", webServer.label],
+        ["Admin Console", webServer.managed],
+        ["API", webServer.managed],
+        ["SQL Parser", webServer.managed],
+      ];
+    return `<div id="server-hosting" class="stack"><p class="help">Production listener ports and PHP worker processes are managed by the web server deployment configuration.</p><dl class="detail-list">${rows.map(([term, value]) => `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(value)}</dd>`).join("")}</dl><p class="restart-note">● Change bindings, ports, and worker settings in the web server configuration. Application availability is controlled from System Health.</p></div>`;
+  }
+  function productionServerSection(target, hosting) {
+    target.innerHTML = productionServerMarkup(hosting);
+  }
+  function developmentServerMarkup(server) {
+    return `<form id="server-form" class="stack"><p class="help">API and SQL Parser each use the first available loopback port in their range. The Admin Console port is always reserved.</p><div class="row"><label>API Port Minimum<input name="apiPortMinimum" type="number" min="1" max="65535" value="${server.apiPortMinimum}" required></label><label>API Port Maximum<input name="apiPortMaximum" type="number" min="1" max="65535" value="${server.apiPortMaximum}" required></label></div><div class="row"><label>Parser Port Minimum<input name="parserPortMinimum" type="number" min="1" max="65535" value="${server.parserPortMinimum}" required></label><label>Parser Port Maximum<input name="parserPortMaximum" type="number" min="1" max="65535" value="${server.parserPortMaximum}" required></label></div><div class="row"><label>Admin Port<input name="adminPort" type="number" min="1" max="65535" value="${server.adminPort}" required></label><label>Bind Address<input name="bindAddress" value="127.0.0.1" readonly></label></div><p class="restart-note">● API and SQL Parser restarts are required after changing their ranges. Admin port changes apply on the next launcher start.</p><div class="actions"><button>Save Server Configuration</button><button type="button" class="secondary" data-server-restart="api">Restart API</button><button type="button" class="secondary" data-server-restart="sqlParser">Restart SQL Parser</button></div></form>`;
+  }
+  function serverSection(target, server) {
+    target.innerHTML = developmentServerMarkup(server);
     target.querySelector("form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const button = event.currentTarget.querySelector(
@@ -708,11 +726,9 @@
         if (result.parserRestartRequired) restarts.push("SQL Parser");
         if (result.adminRestartRequired) restarts.push("Admin launcher");
         notify(
-          production
-            ? "Configuration saved. Production listeners remain infrastructure-managed."
-            : restarts.length
-              ? `Configuration saved. Restart required: ${restarts.join(", ")}.`
-              : "Configuration saved.",
+          restarts.length
+            ? `Configuration saved. Restart required: ${restarts.join(", ")}.`
+            : "Configuration saved.",
         );
       } catch (error) {
         notify(error.message, true);
@@ -724,13 +740,13 @@
       button.addEventListener("click", async () => {
         const service = button.dataset.serverRestart,
           label = service === "api" ? "API" : "SQL Parser",
-          done = setButtonBusy(button, `${lifecycleLabel}ing…`);
+          done = setButtonBusy(button, "Restarting…");
         try {
           const result = row(
             await call({ action: `admin.${service}.restart` }, true),
           );
           notify(
-            `${label} ${production ? "reloaded" : "restarted"}${result.port ? ` on port ${result.port}` : ""}.`,
+            `${label} restarted${result.port ? ` on port ${result.port}` : ""}.`,
           );
         } catch (error) {
           notify(error.message, true);

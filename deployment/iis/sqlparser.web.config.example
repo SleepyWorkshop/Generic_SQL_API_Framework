@@ -25,10 +25,18 @@
         <add name="Content-Security-Policy" value="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" />
       </customHeaders>
     </httpProtocol>
+    <!-- Production mode must be explicit for the SQL Parser boundary; it is never
+         inherited from a global default. Register a dedicated FastCGI application
+         whose arguments match the scriptProcessor below and set its environment:
+         appcmd.exe set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=sqlparser']" /commit:apphost
+         appcmd.exe set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=sqlparser'].environmentVariables.[name='GENERIC_APP_ENV',value='production']" /commit:apphost
+         appcmd.exe set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=sqlparser'].environmentVariables.[name='PHPRC',value='C:\PHP']" /commit:apphost
+         The parser needs no database credentials; never add GENERIC_ADMIN_ENABLED here. -->
     <handlers>
       <remove name="GenericSqlParserPhpFastCgi" />
       <add name="GenericSqlParserPhpFastCgi" path="*.php" verb="*" modules="FastCgiModule"
-           scriptProcessor="C:\PHP\php-cgi.exe" resourceType="File" requireAccess="Script" />
+           scriptProcessor="C:\PHP\php-cgi.exe|-d generic_sql_api.boundary=sqlparser" resourceType="File"
+           requireAccess="Script" />
     </handlers>
     <rewrite>
       <rules>

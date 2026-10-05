@@ -10,13 +10,15 @@ The Admin Console uses dedicated System Administrator actions on its loopback-on
 | `admin.api.start/stop/restart` | Development process lifecycle; production application Enable/Disable/Reload | yes |
 | `admin.sqlParser.start/stop/restart` | Development process lifecycle; production application Enable/Disable/Reload | yes |
 | `admin.settings.get` | Read redacted configuration | no |
-| `admin.server.save` | Save loopback ports and ranges | yes |
+| `admin.server.save` | Development only: save launcher loopback ports and ranges. Production rejects it with `409 SERVER_CONFIGURATION_DEPLOYMENT_MANAGED` because IIS/Nginx own listeners | yes |
 | `admin.database.get/test/save` | Read, test submitted values, or save SQL Server configuration | mutations/tests |
 | `admin.database.connect/disconnect/restart` | Control the request-availability gate | yes |
 | `admin.cors.save` | Save exact CORS origins | yes |
 | `admin.authentication.save` | Save `none`, `session`, `api_key`, or `session+api_key` | yes |
 
 The general API rejects `admin.*`. Runtime controls accept fixed operations only and cannot execute user-supplied commands. In development, the launchers start API and SQL Parser through the existing process managers and validate/enable application database availability; their Admin actions continue delegating to those same managers and gates. Failed startup is reported while Admin remains available for recovery. In production, infrastructure is already hosted externally and the same compatible actions change application availability: Start means Enable, Stop means Disable, and Restart means Reload. No action invokes IIS, Nginx, FastCGI, PHP-FPM, systemd, a Windows service, or SQL Server. The Admin control plane remains available when either runtime is disabled or the database is disconnected.
+
+Configuration → Server is environment-specific. In development it edits the launcher's API and SQL Parser port ranges, Admin port, and loopback bind address, with Restart API and Restart SQL Parser. In production `admin.settings.get` returns `server: null` and a read-only `hosting` summary (mode, detected web server, and web-server-managed Admin Console, API, and SQL Parser); the page renders that summary without listener inputs or save controls.
 
 System Health is the runtime control plane. Diagnostic cards contain status and
 runtime information only; their controls are collected in the separate Service
