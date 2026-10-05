@@ -50,6 +50,11 @@ final class ApplicationBackupManager
         } catch (Throwable $exception) { return false; }
     }
 
+    public function signingKeyAvailable(): bool
+    {
+        return $this->signingKey->available();
+    }
+
     public function hasCompleteSourceSet(): bool
     {
         foreach ($this->sources as $path) if (!is_file($path)) return false;

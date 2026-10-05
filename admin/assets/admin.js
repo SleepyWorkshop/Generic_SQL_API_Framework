@@ -1163,16 +1163,55 @@
   };
   const databaseReasonLabel = (reason) =>
     reason ? databaseReasons[reason] || "Database connection failed" : null;
+  const encryptionReasons = {
+    configured: "Encrypted configuration readable",
+    missing: "Encryption key missing",
+    key_invalid: "Encryption key invalid",
+    invalid: "Invalid encrypted database configuration",
+    configuration_missing: "Database configuration missing",
+  };
+  const backupReasons = {
+    verified: "Latest backup verified",
+    no_backups: "No backup has been created yet",
+    storage_unavailable: "Backup storage unavailable",
+    configuration_invalid: "Backup configuration invalid",
+    verification_failed: "Latest backup failed verification",
+    signing_key_unavailable: "Backup signing key unavailable",
+    backup_failed: "Last scheduled backup failed",
+    backup_overdue: "Scheduled backup overdue",
+  };
+  function backupHealthCard(backup) {
+    const attempt = backup.lastScheduledAttempt;
+    return healthCard(
+      "Backup",
+      {
+        status: backup.status === "not_configured" ? "not configured" : backup.status,
+        healthy: backup.status === "healthy" || backup.status === "not_configured",
+      },
+      [
+        ["Reason", backupReasons[backup.category] || backup.category],
+        ["Latest backup", backup.latestBackupAt ? formatAdminDate(backup.latestBackupAt) : null],
+        ["Verification", backup.verification],
+        ["Recovery points", backup.recoveryPoints],
+        ["Schedule", backup.scheduleEnabled === undefined ? null : backup.scheduleEnabled ? backup.frequency : "disabled"],
+        ["Last scheduled attempt", attempt ? `${formatAdminDate(attempt.attemptedAt)} — ${attempt.status}` : null],
+      ],
+    );
+  }
   async function healthView() {
     loading();
     const health = row(await call({ action: "admin.health" })),
       checks = health.monitoring?.checks || {};
     title.textContent = "System Health";
     content.className = "panel stack";
+    const production = health.hosting?.mode === "production",
+      infrastructureLabel = production
+        ? (productionWebServers[health.hosting?.webServer] || { managed: "Web Server Managed" }).managed
+        : null;
     const serviceDetails = (service) =>
       service.controlMode === "application"
         ? [
-            ["Infrastructure", service.infrastructure?.status],
+            ["Infrastructure", infrastructureLabel || service.infrastructure?.status],
             ["Application Runtime", service.applicationRuntime?.status],
             ["Updated", service.applicationRuntime?.updatedAt],
             ["Reloaded", service.applicationRuntime?.reloadedAt],
@@ -1182,14 +1221,21 @@
             ["Port", service.port],
             ["Started", service.startedAt],
           ];
+    const databaseHealth = {
+      ...health.database,
+      status:
+        health.database.state === "unhealthy" ? "unhealthy" : health.database.status,
+    };
     content.innerHTML = `<div class="grid">${healthCard(
       "Admin Console",
       health.adminConsole,
-      [
-        ["PID", health.adminConsole.pid],
-        ["Port", health.adminConsole.port],
-        ["Started", health.adminConsole.startedAt],
-      ],
+      production
+        ? [["Infrastructure", infrastructureLabel]]
+        : [
+            ["PID", health.adminConsole.pid],
+            ["Port", health.adminConsole.port],
+            ["Started", health.adminConsole.startedAt],
+          ],
     )}${healthCard(
       "API Server",
       health.api,
@@ -1200,7 +1246,7 @@
       serviceDetails(health.sqlParser),
     )}${healthCard(
       "Database",
-      health.database,
+      databaseHealth,
       [
         ["Server", health.database.server],
         ["Port", health.database.port],
@@ -1219,11 +1265,15 @@
     ]
       .filter((name) => checks[name])
       .map((name) =>
-        healthCard(name[0].toUpperCase() + name.slice(1), checks[name], [
-          ["Category", checks[name].category],
-        ]),
+        healthCard(
+          name[0].toUpperCase() + name.slice(1),
+          checks[name],
+          name === "encryption"
+            ? [["Reason", encryptionReasons[checks[name].category] || checks[name].category]]
+            : [["Category", checks[name].category]],
+        ),
       )
-      .join("")}</div><section class="service-actions" aria-labelledby="service-actions-title"><div class="service-actions__heading"><h2 id="service-actions-title">Service Actions</h2><p class="help">Control application services without mixing lifecycle actions into health diagnostics.</p></div><div class="table-wrap"><table class="service-actions__table"><thead><tr><th>Service</th><th>Status</th><th>Actions</th></tr></thead><tbody>${serviceActionRow(
+      .join("")}${checks.backup ? backupHealthCard(checks.backup) : ""}</div><section class="service-actions" aria-labelledby="service-actions-title"><div class="service-actions__heading"><h2 id="service-actions-title">Service Actions</h2><p class="help">Control application services without mixing lifecycle actions into health diagnostics.</p></div><div class="table-wrap"><table class="service-actions__table"><thead><tr><th>Service</th><th>Status</th><th>Actions</th></tr></thead><tbody>${serviceActionRow(
       "Admin Console",
       health.adminConsole,
       '<button type="button" class="secondary" data-admin-console-restart>Restart</button>',

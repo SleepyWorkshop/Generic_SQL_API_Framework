@@ -336,6 +336,86 @@ public function create(string $trigger = 'manual', string $createdBy = 'user'): 
         throw new ApiRequestException('Recovery point was not found.', 'BACKUP_NOT_FOUND', [], 404);
     }
 
+    /**
+     * Safe backup summary for System Health. Unlike history(), only the newest
+     * recovery point is verified, so the check stays cheap on every view. It
+     * never creates storage, backups, or signing keys.
+     */
+    public function health(): array
+    {
+        try {
+            $schedule = $this->schedule();
+        } catch (Throwable $exception) {
+            return ['status' => 'unhealthy', 'category' => 'configuration_invalid'];
+        }
+        $summary = [
+            'scheduleEnabled' => $schedule['enabled'],
+            'frequency' => $schedule['frequency'],
+            'retention' => $schedule['retention'],
+            'nextBackupAt' => $schedule['enabled'] ? $this->nextRunAt($schedule) : null,
+            'recoveryPoints' => 0,
+            'latestBackupAt' => null,
+            'latestRecoveryPointId' => null,
+            'verification' => null,
+            'lastScheduledAttempt' => null,
+        ];
+        if (!is_dir($this->directory)) {
+            // Storage is created with the first backup; only an unwritable parent is a failure.
+            $parent = dirname($this->directory);
+            return is_dir($parent) && is_writable($parent)
+                ? ['status' => 'not_configured', 'category' => 'no_backups'] + $summary
+                : ['status' => 'unhealthy', 'category' => 'storage_unavailable'] + $summary;
+        }
+        if (!is_readable($this->directory) || !is_writable($this->directory)) {
+            return ['status' => 'unhealthy', 'category' => 'storage_unavailable'] + $summary;
+        }
+        $attempt = $this->readScheduleStatus();
+        if ($attempt !== null) {
+            $summary['lastScheduledAttempt'] = [
+                'attemptedAt' => $attempt['attemptedAt'] ?? null,
+                'status' => $attempt['status'],
+                'errorCode' => $attempt['errorCode'] ?? null,
+            ];
+        }
+        $archives = [];
+        foreach (glob($this->directory . DIRECTORY_SEPARATOR . 'backup-*.zip') ?: [] as $path) {
+            if (is_file($path) && preg_match('/([0-9]{8}T[0-9]{6}Z)-[a-f0-9]{12}\.zip$/', $path, $match) === 1) {
+                $archives[$path] = $match[1];
+            }
+        }
+        $summary['recoveryPoints'] = count($archives);
+        if ($archives === []) {
+            return ($attempt['status'] ?? null) === 'failed'
+                ? ['status' => 'unhealthy', 'category' => 'backup_failed'] + $summary
+                : ['status' => 'not_configured', 'category' => 'no_backups'] + $summary;
+        }
+        arsort($archives);
+        if (!$this->manager->signingKeyAvailable()) {
+            return ['status' => 'unhealthy', 'category' => 'signing_key_unavailable'] + $summary;
+        }
+        try {
+            // Signature, integrity, and schema only: database key problems are
+            // reported by the encryption check rather than as a corrupt backup.
+            $manifest = $this->manager->verify((string)array_key_first($archives), false);
+            $summary['verification'] = 'valid';
+            $summary['latestBackupAt'] = $manifest['createdAt'];
+            $summary['latestRecoveryPointId'] = $manifest['recoveryPointId'];
+        } catch (Throwable $exception) {
+            $summary['verification'] = 'invalid';
+            return ['status' => 'unhealthy', 'category' => 'verification_failed'] + $summary;
+        }
+        $latest = strtotime((string)$summary['latestBackupAt']);
+        if (($attempt['status'] ?? null) === 'failed'
+            && ($latest === false || strtotime((string)($attempt['attemptedAt'] ?? '')) > $latest)) {
+            return ['status' => 'degraded', 'category' => 'backup_failed'] + $summary;
+        }
+        $interval = ['hourly' => 3600, 'daily' => 86400, 'weekly' => 604800][$schedule['frequency']];
+        if ($schedule['enabled'] && $latest !== false && time() - $latest > 2 * $interval) {
+            return ['status' => 'degraded', 'category' => 'backup_overdue'] + $summary;
+        }
+        return ['status' => 'healthy', 'category' => 'verified'] + $summary;
+    }
+
     public function scheduleInformation(): array
     {
         $schedule = $this->schedule();

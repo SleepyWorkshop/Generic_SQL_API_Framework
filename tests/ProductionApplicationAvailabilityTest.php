@@ -163,6 +163,11 @@ try {
         availabilityHttp($apiPort, 'GET', '/health/live')['status'] === 200,
         'API liveness failed while only the application runtime was disabled.'
     );
+    $notReady = availabilityHttp($apiPort, 'GET', '/health/ready');
+    availabilityAssert(
+        $notReady['status'] === 503 && ($notReady['json']['checks']['application']['category'] ?? null) === 'api_disabled',
+        'A disabled production API was reported ready to receive traffic.'
+    );
 
     // The disabled API does not disable the independent SQL Parser.
     availabilityAssert(
@@ -190,6 +195,13 @@ try {
 
     // Re-enabling restores the unchanged API request path.
     $runtime->control('api', 'start');
+    $ready = availabilityHttp($apiPort, 'GET', '/health/ready');
+    availabilityAssert(
+        ($ready['json']['checks']['application']['category'] ?? null) === 'api_enabled'
+            && ($ready['json']['checks']['database']['category'] ?? null) === 'database_disconnected'
+            && $ready['status'] === 503,
+        'Readiness did not report enabled API and the closed database gate separately.'
+    );
     availabilityAssert(
         availabilityHttp($apiPort, 'POST', '/', $setupStatus)['status'] === 200,
         'Re-enabled production API did not serve requests.'

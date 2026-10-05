@@ -263,7 +263,7 @@ try {
             && str_contains($adminJavaScript, '>Enable</button>')
             && str_contains($adminJavaScript, '>Disable</button>')
             && str_contains($adminJavaScript, '>Reload</button>')
-            && str_contains($adminJavaScript, '["Infrastructure", service.infrastructure?.status]')
+            && str_contains($adminJavaScript, '["Infrastructure", infrastructureLabel || service.infrastructure?.status]')
             && str_contains($adminJavaScript, '["Application Runtime", service.applicationRuntime?.status]'),
         'Admin Console does not expose production application runtime controls and layered health.'
     );

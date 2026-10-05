@@ -10,11 +10,11 @@ storage, tracing, process supervision, or an external monitoring platform.
 |---|---|---|---|---|
 | API liveness | `GET /health/live` | Public | `200` when PHP can respond | Constant-time; no configuration, filesystem, encryption, or SQL checks |
 | Managed-process compatibility | `GET /health` | Loopback built-in API/parser lifecycle | Existing `200` response including managed port/start metadata | Same lightweight liveness path |
-| API readiness | `GET /health/ready` | Public | `200` when ready, otherwise `503` | Local configuration/runtime checks; no SQL connection |
+| API readiness | `GET /health/ready` | Public | `200` when ready, otherwise `503` | Local configuration/runtime/application checks plus any cached connectivity result; no SQL connection |
 | Detailed health | Admin action `admin.health` | Authenticated System Administrator (`admin.manage`) | Existing Admin JSON envelope | Local checks, managed-process probes, and a short-cached database test |
 
 The public responses contain only a status, safe category, service/version, and
-the three readiness check results. They never return paths, credentials, keys,
+the four readiness check results. They never return paths, credentials, keys,
 connection strings, exception messages, SQL, environment values, sessions,
 headers, or process command lines. Safe GET probes do not require CSRF tokens;
 the authenticated Admin action continues to use the existing session,
@@ -27,14 +27,21 @@ does not imply that IIS, Nginx, every PHP worker, SQL Server, or the complete
 host is healthy.
 
 Readiness validates the supported runtime configuration file set and versions,
-the writable runtime directory, the explicit database availability gate, and
-the ability to decrypt and validate database configuration. It deliberately
-does not open SQL connections. SQL Parser state is independent and cannot make
-the API unready. Logging capability is a diagnostic/degraded state, not a
-readiness blocker. Backup scheduling and recovery-point status are reported
-only on Admin → Backup & Recovery and do not affect System Health.
+the writable runtime directory, the API application runtime, the explicit
+database availability gate, and the ability to decrypt and validate database
+configuration. It deliberately does not open SQL connections, so proxy probes
+cannot generate SQL Server load. When the detailed check has already cached a
+connectivity failure for the current configuration (15 seconds), readiness
+reports that cached category; it never runs the test itself. In production a
+disabled API application runtime (`api_disabled`) is not ready, because every
+API request would return `503 SERVICE_UNAVAILABLE`; in development the check is
+`process_managed`. SQL Parser state is independent and cannot make the API
+unready. Logging capability is a diagnostic/degraded state, and backup state is
+never a readiness blocker.
 
-The database readiness categories are `database_available`,
+The application readiness categories are `api_enabled`, `api_disabled`,
+`process_managed`, and `configuration_invalid`. The database readiness
+categories are `database_available`,
 `database_disconnected`, `configuration_missing`, `configuration_invalid`, and
 `encryption_key_missing`. Detailed checks can additionally report `connected`,
 `authentication_failure`, or `database_unavailable`. Raw driver diagnostics are
@@ -43,11 +50,15 @@ never returned.
 ## Detailed health
 
 System Health preserves Admin, API, SQL Parser, database, and PHP lifecycle
-cards. In development, API and Parser cards show the managed PID, selected port,
-start time, and process state. In production, those cards instead show external
-infrastructure ownership plus Enabled/Disabled application runtime state and
-update/reload timestamps; PID, port, and start time remain null because the
-application does not own the web-server workers. The detailed response also adds
+cards. In development, Admin, API, and Parser cards show the managed PID,
+selected port, start time, and process state. In production, `admin.health`
+includes `hosting` (mode and detected web server), and the Admin Console, API,
+and Parser cards instead show web-server ownership (for example IIS Managed)
+plus, for API and Parser, Enabled/Disabled application runtime state and
+update/reload timestamps. PID, port, and start time are null for all three
+because the answering FastCGI/FPM worker is not owned by the application. The
+database card reports `state` as `disabled` (Disconnected, reason
+`application_access_disabled`), `connected`, or `unhealthy` with a safe reason. The detailed response also adds
 safe checks for:
 
 - required configuration presence, JSON readability, and format versions;
@@ -55,7 +66,10 @@ safe checks for:
 - configuration, runtime, and temporary-directory availability;
 - fail-open logging capability;
 - PHP session-directory availability;
-- encryption-key presence and usability, without exposing key material;
+- encryption-key presence and usability, without exposing key material
+  (`configured`, `missing`, `key_invalid`, `invalid` for a wrong key or
+  tampered envelope, or `configuration_missing`);
+- backup state from `BackupRecoveryService::health()` (see below);
 - Admin/API/SQL Parser running, stopped, stale, crashed, or unresponsive state
   as determined by the existing process managers.
 
@@ -74,9 +88,22 @@ directory is degraded because audit logging is intentionally fail-open. A
 required runtime, configuration, session, or database dependency can be
 unhealthy.
 
-Removing backup scheduling from System Health does not affect restore safety.
-Every activation still runs `ApplicationHealthMonitor::restoreSafety()` after
-staging and validation; a failure triggers rollback to the previous
+Backup health is reported as a separate `backup` check that never changes the
+overall System Health status or readiness, because backups are not part of
+request serving. It reuses the existing backup service: storage availability,
+the validated schedule, the recovery-point count, the newest recovery point's
+signature/integrity verification (only that archive, without requiring the
+database key), the last scheduled attempt, and the next scheduled run. Statuses
+are `healthy` (`verified`), `not_configured` (`no_backups`; a fresh installation
+is not a failure), `degraded` (`backup_failed`, `backup_overdue`), and
+`unhealthy` (`storage_unavailable`, `configuration_invalid`,
+`verification_failed`, `signing_key_unavailable`). It never creates storage,
+backups, or signing keys and never returns paths or key material. Database
+Connect, Disconnect, Restart, and backup restore clear the cached connectivity
+result; any database configuration change invalidates it through its checksum.
+
+Every restore activation still runs `ApplicationHealthMonitor::restoreSafety()`
+after staging and validation; a failure triggers rollback to the previous
 configuration.
 
 ## Hosting layers

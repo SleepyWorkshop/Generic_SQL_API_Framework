@@ -9,6 +9,7 @@ require_once __DIR__ . '/../Repositories/InstallationRepository.php';
 require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../Repositories/AuthorizationRepository.php';
 require_once __DIR__ . '/../Repositories/ApiKeyRepository.php';
+require_once __DIR__ . '/../Security/SecurityConfiguration.php';
 
 final class ApplicationHealthMonitor
 {
@@ -25,6 +26,7 @@ final class ApplicationHealthMonitor
     private $databaseTester;
     private $databaseAvailable;
     private $diskSpace;
+    private ?bool $production;
 
     public function __construct(array $options = [])
     {
@@ -47,6 +49,7 @@ final class ApplicationHealthMonitor
         $this->databaseTester = $options['databaseTester'] ?? null;
         $this->databaseAvailable = $options['databaseAvailable'] ?? null;
         $this->diskSpace = $options['diskSpace'] ?? static fn (string $path) => @disk_free_space($path);
+        $this->production = isset($options['production']) ? (bool)$options['production'] : null;
     }
 
     public function liveness(string $service = 'api', ?int $port = null, ?string $startedAt = null): array
@@ -62,25 +65,37 @@ final class ApplicationHealthMonitor
         ];
     }
 
+    /**
+     * API readiness never opens a SQL connection: proxy probes must not create
+     * SQL Server load. A recent detailed connectivity failure that is already
+     * cached is honoured, and in production a disabled API runtime is not ready.
+     */
     public function readiness(): array
     {
         $configuration = $this->configurationHealth();
         $runtime = $this->directoryHealth($this->runtimeDirectory, true);
+        $application = $this->applicationReadiness();
         $database = $this->databaseReadiness();
         $ready = $configuration['status'] === 'healthy'
             && $runtime['status'] === 'healthy'
+            && $application['status'] === 'healthy'
             && $database['status'] === 'healthy';
         return [
             'status' => $ready ? 'healthy' : 'unhealthy',
             'checks' => [
                 'configuration' => $this->publicCheck($configuration),
                 'runtime' => $this->publicCheck($runtime),
+                'application' => $this->publicCheck($application),
                 'database' => $this->publicCheck($database),
             ],
         ];
     }
 
-    public function detailed(array $processes): array
+    /**
+     * Backup state is reported for operators but, as before, never changes the
+     * overall System Health status or readiness: backups are not request serving.
+     */
+    public function detailed(array $processes, ?array $backup = null): array
     {
         $checks = [
             'application' => ['status' => 'healthy', 'category' => 'responding', 'version' => $this->applicationVersion()],
@@ -95,6 +110,7 @@ final class ApplicationHealthMonitor
         $statuses = array_column($checks, 'status');
         $status = in_array('unhealthy', $statuses, true) ? 'unhealthy'
             : (in_array('degraded', $statuses, true) ? 'degraded' : 'healthy');
+        if ($backup !== null) $checks['backup'] = $backup;
         return ['status' => $status, 'checks' => $checks];
     }
 
@@ -199,10 +215,33 @@ final class ApplicationHealthMonitor
                 return ['status' => 'unhealthy', 'category' => 'database_disconnected'];
             }
             DatabaseConfigurationResolver::load($this->databasePath);
-            return ['status' => 'healthy', 'category' => 'database_available'];
         } catch (Throwable $exception) {
             return ['status' => 'unhealthy', 'category' => $this->databaseConfigurationCategory()];
         }
+        $fingerprint = hash_file('sha256', $this->databasePath);
+        $cached = is_string($fingerprint) ? $this->readDatabaseCache($fingerprint) : null;
+        if ($cached !== null && $cached['status'] !== 'healthy') {
+            return ['status' => 'unhealthy', 'category' => $cached['category']];
+        }
+        return ['status' => 'healthy', 'category' => 'database_available'];
+    }
+
+    private function applicationReadiness(): array
+    {
+        if (!($this->production ?? SecurityConfiguration::isProduction())) {
+            return ['status' => 'healthy', 'category' => 'process_managed'];
+        }
+        try {
+            $state = JsonFileStore::load($this->configurationDirectory . '/application-runtime-state.json');
+            if (($state['version'] ?? null) !== 1 || !$this->applicationRuntimeShapeIsValid($state)) {
+                return ['status' => 'unhealthy', 'category' => 'configuration_invalid'];
+            }
+        } catch (Throwable $exception) {
+            return ['status' => 'unhealthy', 'category' => 'configuration_invalid'];
+        }
+        return $state['services']['api']['enabled']
+            ? ['status' => 'healthy', 'category' => 'api_enabled']
+            : ['status' => 'unhealthy', 'category' => 'api_disabled'];
     }
 
     private function storedDatabaseAvailability(): bool
@@ -252,6 +291,12 @@ final class ApplicationHealthMonitor
         if (!DatabaseConfigurationResolver::encryptionKeyIsAvailable()) {
             return ['status' => 'unhealthy', 'category' => 'missing'];
         }
+        try { new DatabaseCredentialEncryption(); }
+        catch (Throwable $exception) { return ['status' => 'unhealthy', 'category' => 'key_invalid']; }
+        if (!is_file($this->databasePath)) {
+            return ['status' => 'unhealthy', 'category' => 'configuration_missing'];
+        }
+        // A wrong key and a tampered envelope both fail AES-GCM authentication.
         try { DatabaseConfigurationResolver::load($this->databasePath); }
         catch (Throwable $exception) { return ['status' => 'unhealthy', 'category' => 'invalid']; }
         return ['status' => 'healthy', 'category' => 'configured'];

@@ -72,7 +72,10 @@ try {
     $live = $monitor->liveness('api', 8000, gmdate(DATE_ATOM, time() - 5));
     healthAssert($live['status'] === 'healthy' && $live['port'] === 8000, 'Liveness did not report a lightweight success response.');
     $ready = $monitor->readiness();
-    healthAssert($ready['status'] === 'healthy' && array_keys($ready['checks']) === ['configuration', 'runtime', 'database'], 'Readiness schema or success state is invalid.');
+    healthAssert($ready['status'] === 'healthy'
+        && array_keys($ready['checks']) === ['configuration', 'runtime', 'application', 'database']
+        && $ready['checks']['application']['category'] === 'process_managed', 'Readiness schema or success state is invalid.');
+    healthAssert($tests === 0, 'Readiness opened a database connection.');
     $restoreSafety = $monitor->restoreSafety();
     healthAssert($restoreSafety['healthy'] === true
         && $restoreSafety['check'] === 'configuration_and_encryption', 'Valid schema-version 6 configuration failed restore safety validation.');
@@ -85,6 +88,7 @@ try {
     $detail = $monitor->detailed($processes);
     healthAssert(isset($detail['status'], $detail['checks']['database'], $detail['checks']['filesystem'])
         && !isset($detail['checks']['backup']) && $detail['status'] === 'healthy'
+        && $detail['checks']['encryption']['category'] === 'configured'
         && $tests === 1, 'Detailed health schema, aggregation, or database test is invalid.');
     $monitor->detailed($processes);
     healthAssert($tests === 1, 'Database health cache did not prevent repeated expensive connectivity work.');
@@ -139,6 +143,31 @@ try {
     $withoutBackupDirectory = $monitor->detailed($processes);
     healthAssert(!isset($withoutBackupDirectory['checks']['backup'])
         && $withoutBackupDirectory['status'] === 'healthy', 'Backup availability still affects System Health.');
+    // Supplied backup health is reported but never changes the overall status.
+    foreach ([['status' => 'unhealthy', 'category' => 'storage_unavailable'], ['status' => 'not_configured', 'category' => 'no_backups']] as $backup) {
+        $withBackup = $monitor->detailed($processes, $backup);
+        healthAssert($withBackup['checks']['backup'] === $backup && $withBackup['status'] === 'healthy',
+            'Backup health was omitted or changed overall System Health.');
+    }
+
+    // Encryption health distinguishes key and configuration failures without secrets.
+    $encryptionCategory = static fn (): string => (new ApplicationHealthMonitor([
+        'configurationDirectory' => $configuration, 'databasePath' => $database, 'runtimeDirectory' => $runtime,
+        'logDirectory' => $logs, 'sessionDirectory' => $sessions, 'databaseAvailable' => static fn (): bool => false,
+    ]))->detailed($processes)['checks']['encryption']['category'];
+    putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=not-a-valid-key');
+    healthAssert($encryptionCategory() === 'key_invalid', 'A malformed encryption key was not detected.');
+    putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . base64_encode(random_bytes(32)));
+    healthAssert($encryptionCategory() === 'invalid', 'A wrong encryption key was not detected.');
+    putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . $key);
+    $tampered = $encrypted;
+    $tampered['ciphertext'] = base64_encode(random_bytes(64));
+    healthWrite($database, $tampered);
+    healthAssert($encryptionCategory() === 'invalid', 'A tampered encrypted configuration was not detected.');
+    @unlink($database);
+    healthAssert($encryptionCategory() === 'configuration_missing', 'A missing database configuration was not detected.');
+    healthWrite($database, $encrypted);
+    healthAssert($encryptionCategory() === 'configured', 'A valid encrypted configuration was not healthy.');
 
     $authFailure = new ApplicationHealthMonitor([
         'configurationDirectory' => $configuration, 'databasePath' => $database,

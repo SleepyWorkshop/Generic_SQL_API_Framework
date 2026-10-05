@@ -80,12 +80,30 @@ final class AdminService
 
     public function status(): array
     {
+        $production = SecurityConfiguration::isProduction();
         $databaseAvailable = $this->databaseAvailability->available();
-        $api = SecurityConfiguration::isProduction()
+        $api = $production
             ? $this->applicationRuntime->status('api') : $this->processManager->status();
-        $parser = SecurityConfiguration::isProduction()
+        $parser = $production
             ? $this->applicationRuntime->status('sqlParser') : $this->parserProcessManager->status();
-        $admin = [
+        // In production the Admin Console is a web-server application: the
+        // answering FastCGI/FPM worker's PID and listener port are not its own.
+        $admin = $production
+            ? [
+                'running' => true,
+                'healthy' => true,
+                'status' => 'running',
+                'controlMode' => 'application',
+                'infrastructure' => [
+                    'managedExternally' => true,
+                    'status' => 'externally managed',
+                    'healthy' => null,
+                ],
+                'pid' => null,
+                'port' => null,
+                'startedAt' => null,
+            ]
+            : [
                 'running' => true,
                 'healthy' => true,
                 'status' => 'running',
@@ -99,7 +117,7 @@ final class AdminService
             'adminConsole' => $admin,
             'api' => $api,
             'sqlParser' => $parser,
-        ]);
+        ], $this->backupHealth());
         $databaseCheck = $monitoring['checks']['database'];
         $databaseConnected = $databaseAvailable && $databaseCheck['status'] === 'healthy';
         $database = [...$this->databaseStatus(),
@@ -115,6 +133,7 @@ final class AdminService
                 : ($databaseConnected ? null : $databaseCheck['category']),
         ];
         return [
+            'hosting' => $this->hostingInformation($production),
             'adminConsole' => $admin,
             'api' => $api,
             'sqlParser' => $parser,
@@ -577,7 +596,9 @@ final class AdminService
 
     public function restoreBackup(string $uploadToken, bool $confirmed): array
     {
-        return $this->backupRecovery->restore($uploadToken, $confirmed);
+        $result = $this->backupRecovery->restore($uploadToken, $confirmed);
+        $this->healthMonitor->forgetDatabaseHealth();
+        return $result;
     }
 
     public function recordFrontendOperationalEvent(array $event): array
@@ -608,6 +629,15 @@ final class AdminService
             'port' => is_int($result['port'] ?? null) ? $result['port'] : null,
             'reason' => $reason,
         ]);
+    }
+
+    private function backupHealth(): array
+    {
+        try {
+            return $this->backupRecovery->health();
+        } catch (Throwable $exception) {
+            return ['status' => 'unhealthy', 'category' => 'storage_unavailable'];
+        }
     }
 
     private function hostingInformation(bool $production): array
