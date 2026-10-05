@@ -57,6 +57,7 @@ web root or `/index.php` when `api/` itself is the document root.
 - [Managed API keys](API-Keys.md)
 - [Database configuration](Database-Configuration.md)
 - [Hosting](Hosting.md)
+- [Windows Server IIS deployment](Windows-IIS-Deployment.md) — step-by-step procedure from a fresh server
 - [Production web-server hosting](Production-Security-and-Deployment.md)
 - [AI development guide](AI-Development-Guide.md)
 - [Roadmap](Roadmap.md)

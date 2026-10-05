@@ -116,7 +116,9 @@ starts or stops SQL Server.
 
 The built-in server handles each managed API/Parser process serially and must not be used to infer production concurrency. IIS FastCGI and PHP-FPM run independent PHP workers with request-scoped ODBC connections and shared local file-backed configuration, rate-limit, session, and runtime state. Those workers must use one reliable local filesystem; the framework does not provide distributed locks or multi-host state coordination. Production application availability survives worker requests and host reboot because bootstrap never overwrites its state file. Same-session PHP requests can serialize on the session-file lock as expected.
 
-IIS `web.config` examples, an Nginx HTTPS server-block example, PHP production/OPcache settings, route boundaries, TLS, security headers, permissions, logging, and deployment steps are documented in [Production web-server hosting](Production-Security-and-Deployment.md).
+IIS `web.config` examples, an Nginx HTTPS server-block example, PHP production/OPcache settings, route boundaries, TLS, security headers, permissions, and logging are documented in [Production web-server hosting](Production-Security-and-Deployment.md). The step-by-step Windows procedure, from a fresh Windows Server through IIS, PHP, ODBC, SQL Server permissions, HTTPS, verification, updates, and rollback, is [Windows Server IIS deployment](Windows-IIS-Deployment.md).
+
+In production the Admin Console has no Server configuration tab and no process controls: listeners and workers belong to IIS/Nginx and FastCGI/PHP-FPM, and Admin manages only application-level availability, configuration, and diagnostics.
 
 Before exposing a production deployment, install a hostname-valid trusted certificate, validate the HTTP-to-HTTPS redirect and TLS policy, review the exact HTTPS origins in `config/admin.json` (or the explicit environment override), and configure a dedicated PHP session directory outside every web root with worker-only access and cleanup retention compatible with the absolute session timeout. Protect private keys, database JSON, encryption keys, session files, and logs; use a least-privilege SQL identity; and manage PHP/OpenSSL/ODBC updates. Keep the Admin Console on its loopback-only HTTPS application boundary.
 
@@ -139,7 +141,7 @@ for password and encryption-key rotation procedures.
 - database encryption key errors: restore the matching local key/environment value; the launcher intentionally refuses to replace a missing key for an already-encrypted file.
 - database configuration decryption failure: verify that the encrypted configuration envelope and environment key are the matching pair and have not been altered.
 - `No compatible SQL Server ODBC driver`: install a supported driver or configure the exact available driver and verify server/authentication settings.
-- no API port available: change the validated range in Configuration → Server, then start or restart the API.
+- no API port available (development launcher): change the validated range in Configuration → Server, then start or restart the API. Production has no Server tab; IIS/Nginx own listener ports.
 - no SQL Parser port available: change the parser range, then start or restart the parser.
 - configured Admin port occupied: stop the conflicting service or update the Admin port and relaunch.
 - runtime configuration bootstrap failure: use the reported safe reason code. The launcher pins `GENERIC_RUNTIME_CONFIG_DIR` to its repository `config/` directory so stale inherited overrides cannot redirect startup.

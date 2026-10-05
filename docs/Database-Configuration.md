@@ -1,6 +1,14 @@
 # Database Configuration
 
-System Health manages a runtime availability gate, not a permanent SQL connection. **Connect** temporarily validates encrypted configuration and enables new requests. **Disconnect** denies new database requests. **Restart** disables, retests, and re-enables only on success. Configuration → Database's **Test Connection** tests the currently submitted form values through a temporary request-scoped connection without changing availability. There is no separate saved-configuration test action.
+System Health manages a runtime availability gate, not a permanent SQL connection, and never starts or stops SQL Server. There is no connection pool: every database request opens and closes its own ODBC connection.
+
+- **Connect** decrypts the saved configuration, opens one test connection, closes it, and only then enables new database requests.
+- **Disconnect** denies new database requests (`503 DATABASE_UNAVAILABLE`) without opening a connection and without changing `database.json`, its encrypted credentials, or API/SQL Parser availability.
+- **Restart** disables, retests, and re-enables only on success.
+- A failed Connect or Restart leaves access disabled and returns `DATABASE_CONNECTION_FAILED`, or `DATABASE_CONFIGURATION_UNAVAILABLE` with a safe `reason` of `configuration_missing`, `encryption_key_missing`, or `configuration_invalid`.
+- Configuration → Database's **Test Connection** tests the currently submitted form values through a temporary request-scoped connection without saving them or changing availability. There is no separate saved-configuration test action.
+
+System Health reports the resulting state as `disabled`, `connected`, or `unhealthy` (enabled but failing its check); see [Monitoring and Health](Monitoring-and-Health.md).
 
 ## Configuration file
 
@@ -56,7 +64,10 @@ The ciphertext is the serialized complete configuration. Provider, driver, serve
 The key is a random 32-byte value represented in Base64 and supplied separately through `GENERIC_SQL_API_ENCRYPTION_KEY`. It must never be stored in `database.json`, source control, logs, or command output retained as an ordinary file.
 
 On production hosts, inject the key into the IIS FastCGI application-pool or
-PHP-FPM pool/service environment. Do not add it to `web.config`, an Nginx server
+PHP-FPM pool/service environment. On IIS it belongs on the API and Admin FastCGI
+registrations; [Windows Server IIS deployment](Windows-IIS-Deployment.md#113-create-and-install-the-database-encryption-key)
+shows how to generate it without displaying it and install it through IIS
+Manager. Do not add it to `web.config`, an Nginx server
 block, a launcher command line, a repository `.env`, or a file below a served
 document root. Environment access is not a complete secret boundary: an
 administrator or process with permission to inspect the PHP worker can recover
@@ -100,7 +111,10 @@ web roots and source control and delete them securely according to local policy.
 
 The decrypted configuration may use `authentication: "windows"` only on
 Windows. In that mode the driver adds `Trusted_Connection=yes` and supplies empty
-ODBC credentials; the PHP process account must have SQL Server access. Linux
+ODBC credentials; the PHP process account must have SQL Server access. Under IIS
+that is the application-pool identity (`IIS APPPOOL\<pool>` for a local SQL
+Server, or the web server's computer account `DOMAIN\HOST$` for a remote one);
+see [Windows Server IIS deployment](Windows-IIS-Deployment.md#16-prepare-sql-server). Linux
 Admin responses expose only SQL authentication, crafted Admin requests selecting
 Windows authentication are rejected, and the driver enforces the same boundary.
 
@@ -113,10 +127,13 @@ driver is attempted. Windows retains the ODBC cursor library used by the bundled
 runtime; unixODBC platforms use the SQL Server driver's cursor implementation so
 statement execution is not rejected with capability error `IM001`.
 
-Use **Test Connection** in Admin Console for the supported workflow. It loads the
-current encrypted configuration, validates platform compatibility, opens one
-temporary connection, and closes it in `finally`. `scripts/check-database.php`
-remains a developer/deployment diagnostic, not a setup requirement.
+Use **Test Connection** in Admin Console for the supported workflow. It tests
+the submitted form values (reusing the stored password when the password field
+is left blank), validates platform compatibility, opens one temporary
+connection, and closes it in `finally`. **Connect** performs the same check
+against the saved encrypted configuration. `scripts/check-database.php`
+remains a developer/deployment diagnostic, not a setup requirement; run from a
+shell it uses that shell's identity and environment, not the IIS worker's.
 
 ## Security and troubleshooting
 

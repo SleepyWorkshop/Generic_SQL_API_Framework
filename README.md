@@ -204,9 +204,14 @@ Production hosting uses IIS with PHP FastCGI on Windows or Nginx with PHP-FPM on
 Linux. The production web server owns TLS, redirects, security headers, process
 lifecycle, worker concurrency, and sensitive-path denial. Do not expose the Admin
 Console or SQL parser publicly, and do not use either development launcher as a
-production process manager.
+production process manager. In production the Admin Console controls only
+application availability (API, SQL Parser, and database access gates),
+configuration, and diagnostics; it never starts or stops IIS, PHP workers, or
+SQL Server.
 
-Read [Hosting](docs/Hosting.md),
+For a complete Windows installation from a fresh server, follow
+[Windows Server IIS deployment](docs/Windows-IIS-Deployment.md). Read
+[Hosting](docs/Hosting.md),
 [Production Security and Deployment](docs/Production-Security-and-Deployment.md),
 [Monitoring and Health](docs/Monitoring-and-Health.md), and
 [Backup and Recovery](docs/Backup-and-Recovery.md) before deployment.

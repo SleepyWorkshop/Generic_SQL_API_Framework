@@ -120,7 +120,8 @@ configuration.
 Under IIS/FastCGI, IIS application-pool and FastCGI worker availability are
 separate from application readiness. Apply the example rewrite rules, secure
 the application pool identity, and monitor both the HTTP signals and SQL Server
-using platform tooling.
+using platform tooling. [Windows Server IIS deployment](Windows-IIS-Deployment.md#19-verify-the-deployment)
+lists the expected production health results.
 
 Under Nginx/PHP-FPM, Nginx, the PHP-FPM pool, application readiness, and SQL
 Server are four separate health layers. The production example maps only

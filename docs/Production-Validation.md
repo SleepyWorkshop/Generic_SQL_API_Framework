@@ -11,6 +11,11 @@ status terms are deliberately strict:
 - **REQUIRES OPERATOR VALIDATION** — must be checked on the target host using
   its real identities, hostnames, certificates, configuration, and database.
 
+This file is a dated validation record and operator checklist. The deployment
+procedure itself is [Windows Server IIS deployment](Windows-IIS-Deployment.md)
+for Windows and [Production Security and Deployment](Production-Security-and-Deployment.md#linux-nginx-and-php-fpm)
+for Linux.
+
 Run `php scripts/validate-production.php` for a machine-readable discovery and
 static-validation report. It never installs services, changes configuration,
 connects to SQL Server, or prints secrets.

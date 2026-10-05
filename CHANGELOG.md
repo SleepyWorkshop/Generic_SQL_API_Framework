@@ -8,7 +8,8 @@ All notable changes are recorded here. The project follows semantic versioning.
 
 - A unified loopback Admin Console for first-run setup, encrypted database
   configuration, users, fixed roles, managed API keys, CORS, runtime settings,
-  health, and local service/database lifecycle controls.
+  health, and service/database availability controls (real processes in
+  development, application availability in production).
 - Session and managed API-key authentication with four normal API modes:
   `none`, `session`, `api_key`, and `session+api_key`.
 - Separate backend and frontend authorization domains, deny-by-default resource
@@ -33,11 +34,11 @@ All notable changes are recorded here. The project follows semantic versioning.
 - Application configuration backup creation, checksum/encryption verification,
   and safe external restore staging.
 - Public liveness/readiness plus authenticated detailed health checks for
-  configuration, database, processes, filesystem, logging, sessions,
-  encryption, and backups.
+  application, configuration, database, processes, logging, encryption, and
+  backups.
 - IIS/FastCGI and Nginx/PHP-FPM deployment templates, TLS/security-header
-  examples, production PHP settings, validation tooling, and Windows/Linux
-  operator checklists.
+  examples, production PHP settings, validation tooling, Windows/Linux
+  operator checklists, and a complete Windows Server IIS deployment guide.
 - Database-independent regression coverage for API contracts, query/write SQL,
   authentication, authorization, sessions, API keys, security boundaries,
   concurrency, backup/recovery, monitoring, errors, and production templates.
@@ -49,12 +50,20 @@ All notable changes are recorded here. The project follows semantic versioning.
   authorization assignments.
 - Database configuration can be stored as a complete AES-256-GCM authenticated
   envelope whose key is supplied outside the repository.
-- Local launchers start only the loopback Admin Console. API, SQL Parser, and
-  database availability are controlled independently from System Health.
+- Local launchers start the managed API and SQL Parser, connect database
+  availability, verify all three, and keep the loopback Admin Console in the
+  foreground; each component is then controlled independently from System
+  Health.
 - Query construction is split into focused builders while `QueryRepository`
   remains the execution facade.
 - Production process ownership belongs to IIS/FastCGI or Nginx/PHP-FPM; local
-  process managers remain development-only.
+  process managers remain development-only. Each IIS boundary has its own
+  FastCGI registration that sets production mode explicitly; production Admin
+  Enable/Disable/Reload changes only application availability; database
+  Connect verifies one closed test connection before enabling access; System
+  Health reports web-server ownership, explicit database/encryption state, and
+  non-fatal backup health; readiness never opens a SQL connection; and the
+  production Admin Console has no Server configuration tab.
 - Production errors use a stable client-safe envelope and correlation ID while
   internal diagnostics remain in redacted logs.
 - Documentation is organized by current product behavior, release history,

@@ -1,6 +1,6 @@
 # Backup and recovery
 
-Phase 4.14 provides one application-configuration backup system shared by the
+The framework provides one application-configuration backup system shared by the
 Admin Console and CLI. It extends `ApplicationBackupManager`; it is not a SQL
 Server backup engine, scheduler, cloud-sync client, or arbitrary file archiver.
 
@@ -160,6 +160,21 @@ application service identity, set the Backend directory as **Start in**, and
 provide the same signing/encryption-key environment available to the hosted
 application. Align the OS trigger with the saved frequency/time; the saved
 configuration validates and reports intent but does not wake or install a task.
+
+## System Health
+
+System Health shows a **Backup** card built from this same service. It verifies
+only the newest recovery point (signature, checksums, and schema, without
+requiring the database key) and reports the recovery-point count, latest backup
+time, schedule, next run, and last scheduled attempt. Its states are `healthy`
+(`verified`), `not_configured` (`no_backups`: no recovery point yet, which is not
+a failure), `degraded` (`backup_failed`, `backup_overdue`), and `unhealthy`
+(`storage_unavailable`, `configuration_invalid`, `verification_failed`,
+`signing_key_unavailable`). Backup state never changes the overall System Health
+status or readiness, never creates storage, backups, or keys, and never returns
+paths or key material. See [Monitoring and Health](Monitoring-and-Health.md).
+For the IIS identity, NTFS permissions, and Task Scheduler notes, see
+[Windows Server IIS deployment](Windows-IIS-Deployment.md#21-backups-and-restore).
 
 ## Audit events
 

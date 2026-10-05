@@ -21,13 +21,13 @@ Production web-server services are started, stopped, monitored, and restarted by
 
 ## Application boundaries and routes
 
-Keep the applications as separate web-server sites, applications, or listeners:
+Keep the applications as separate web-server sites, applications, or listeners. On Windows the documented layout is one HTTPS site whose root is the built frontend with `/api`, `/admin`, and `/sqlparser` IIS applications ([Windows Server IIS deployment](Windows-IIS-Deployment.md)); separate loopback sites for Admin and the parser, as in the Nginx example, are equally supported:
 
 | Boundary | Production route | PHP entry point | Static files |
 | --- | --- | --- | --- |
 | Reporting/API | `/api` and `/api/index.php` | `Backend/api/index.php` | built frontend `dist/` only |
-| Admin Console | loopback site at its mount path, e.g. `/admin/`, `/admin/<page>`, `/admin/api.php` | `Backend/admin/index.php`, `Backend/admin/api.php` | `Backend/admin/assets/` |
-| SQL Parser | separate internal site: `/` and `/index.php` | `Backend/sqlparser/index.php` | `Backend/sqlparser/assets/` |
+| Admin Console | loopback-only at its mount path, e.g. `/admin/`, `/admin/<page>`, `/admin/api.php` | `Backend/admin/index.php`, `Backend/admin/api.php` | `Backend/admin/assets/` |
+| SQL Parser | loopback/internal only: an application path such as `/sqlparser/` or a separate internal site at `/` | `Backend/sqlparser/index.php` | `Backend/sqlparser/assets/` |
 
 The development-only `router.php` files express the same route boundaries for `php -S`, but IIS and Nginx use their own fixed routing rules. They must not send arbitrary `.php` paths to FastCGI. SQL Parser remains database-free and does not inherit Admin or API authentication.
 
@@ -112,28 +112,44 @@ The template uses `opcache.validate_timestamps=0`. After an atomic code deployme
 
 ## Windows: IIS and PHP FastCGI
 
-### Prerequisites
+The complete installation procedure (IIS role services, URL Rewrite, PHP NTS
+x64, `php.ini`, ODBC driver, application pool, NTFS permissions, FastCGI
+registrations, site and applications, `web.config` files, HTTPS, firewall, SQL
+Server permissions, first-run Admin setup, verification, updates, and rollback)
+is [Windows Server IIS deployment](Windows-IIS-Deployment.md). The principles it
+implements are:
 
-1. Install IIS with CGI/FastCGI, URL Rewrite, and IP and Domain Restrictions.
-2. Install a supported 64-bit Non-Thread-Safe PHP runtime and the matching Visual C++ runtime.
-3. Install the SQL Server ODBC driver and enable `odbc`, `openssl`, `session`, and OPcache in the selected `php.ini`.
-4. Register one dedicated `C:\PHP\php-cgi.exe` FastCGI application per boundary, distinguished by the `-d generic_sql_api.boundary=api|admin|sqlparser` arguments used in the matching `deployment/iis/*.web.config.example` handler. Set `PHPRC` to the production PHP directory and `GENERIC_APP_ENV=production` explicitly on every registration; production mode is never assumed to be inherited from a machine-wide or application-pool default. Add server-side application variables only to the registration that needs them, and add `GENERIC_ADMIN_ENABLED=1` only to the Admin registration. The template comments contain the `appcmd.exe` commands.
-5. Use a dedicated, non-administrator application-pool identity and grant only the filesystem permissions listed above.
+- Use a supported 64-bit **Non-Thread-Safe** PHP runtime with its Visual C++
+  runtime; the bundled `runtime/windows/php` build is for the development
+  launcher only. Enable `odbc`, `openssl`, `session`, and OPcache, and merge
+  `deployment/php-production-security.ini` into the production `php.ini`.
+- Register one dedicated `C:\PHP\php-cgi.exe` FastCGI application per boundary,
+  distinguished by the `-d generic_sql_api.boundary=api|admin|sqlparser`
+  arguments used in the matching `deployment/iis/*.web.config.example` handler.
+  Set `PHPRC` and `GENERIC_APP_ENV=production` explicitly on every registration;
+  production mode is never assumed to be inherited from a machine-wide or
+  application-pool default. Add `GENERIC_ADMIN_ENABLED=1` only to the Admin
+  registration and the database encryption key only to the API and Admin
+  registrations. The template comments contain the `appcmd.exe` commands.
+- The templates declare their FastCGI handler and (Admin) IP restrictions, so
+  the `system.webServer/handlers` and `system.webServer/security/ipSecurity`
+  sections must be delegated, and IIS URL Rewrite must be installed.
+- Use a dedicated, non-administrator application-pool identity and grant only
+  the filesystem permissions listed above.
+- Bind HTTPS with an exact hostname and certificate; never use a catch-all
+  production certificate binding. HTTP, if accepted at all, is a separate
+  fixed-host redirect site using `deployment/iis/http-redirect.web.config.example`;
+  its `{HTTPS}=OFF` condition prevents redirect loops.
+- Keep Admin loopback-only and restrict or omit the SQL Parser on any site with
+  a public binding.
+- Build the frontend with `VITE_API_URL=/api`. `VITE_*` values are public; never
+  place secrets in them.
 
-Do not use the bundled development `php.ini` without reviewing it. The IIS handler examples use `C:\PHP\php-cgi.exe`; replace that path consistently if PHP is installed elsewhere.
-
-### IIS sites and applications
-
-1. Obtain a certificate whose subject alternative names exactly cover each deployed hostname. Install the certificate and protected private key in the appropriate machine certificate store, granting private-key read access only to the required IIS identity/system components.
-2. Build the reporting frontend and create the main IIS site with its physical path set to `Frontend\Generic-Reporting-Framework\dist`.
-3. Add an HTTPS binding with the exact hostname and selected certificate. Require an intentional host binding; do not use a catch-all production certificate binding.
-4. Copy `deployment/iis/frontend.web.config.example` to the deployed frontend as `web.config`.
-5. Add `/api` as an IIS application whose physical path is `Backend\api`, then copy `deployment/iis/api.web.config.example` there as `web.config`.
-6. Create separate HTTPS Admin and SQL Parser sites on intentionally selected loopback/internal bindings and certificate hostnames. Copy their respective `web.config.example` files to the deployed roots.
-7. Create separate HTTP-only redirect bindings/sites. Copy `deployment/iis/http-redirect.web.config.example`, replace its example hostname, and create equivalent fixed-host redirect configurations for the Admin and Parser ports. The `{HTTPS}=OFF` condition prevents redirect loops.
-8. Set `VITE_API_URL=/api` when building the frontend. `VITE_*` values are public; never place secrets in them.
-
-The templates require the IIS URL Rewrite module. They disable directory listing, allow only the intended entry points/assets, cap request size, prevent access to parser source/common sensitive extensions, and install boundary-specific security headers. Keep detailed IIS errors local and let PHP application responses pass through unchanged.
+The templates disable directory listing, allow only the intended entry
+points/assets, cap request size, prevent access to parser source/common
+sensitive extensions, and install boundary-specific security headers. Keep
+detailed IIS errors local and let PHP application responses pass through
+unchanged.
 
 IIS TLS protocol/cipher policy is controlled by Windows Schannel, not these application `web.config` files. Enable TLS 1.2 and TLS 1.3 where the installed Windows/IIS version supports them, disable SSL and obsolete TLS versions through the approved operating-system policy, then reboot/restart as required by that policy. Do not copy registry values without validating the target Windows release.
 
@@ -235,7 +251,7 @@ Idle and absolute expiration are checked against server-side timestamps. Success
 
 Production sessions use a host-only cookie with path `/`, no `Domain` attribute, no persistent lifetime, `Secure`, `HttpOnly`, and `SameSite=Lax`. Root path is intentional because the SPA, `/api`, and Admin entry points share the session architecture; the host-only scope prevents exposure to sibling subdomains. Local HTTP development omits `Secure` but retains every other protection. Keep frontend and API on the same `localhost` or `127.0.0.1` hostname—the frontend client normalizes those two development aliases because cookies are hostname-scoped and ports do not create separate cookie scopes.
 
-CSRF tokens are generated from 256 bits of randomness, stored only in the PHP session, and compared in constant time. Login rotates the token after session-ID regeneration; logout and expiration destroy it with the session. The frontend and Admin clients reject stale response-token updates so an older concurrent response cannot replace a newer token. Session-authenticated mutations require the token, while API-key requests remain independent and do not create browser-session authorization. Exact-origin CORS remains application-owned; configure the production HTTPS origin exactly and never replace it with `*`.
+CSRF tokens are generated from 256 bits of randomness, stored only in the PHP session, and compared in constant time. Login rotates the token after session-ID regeneration; logout and expiration destroy it with the session. The frontend and Admin clients reject stale response-token updates so an older concurrent response cannot replace a newer token. Session-authenticated mutations require the token, while API-key requests remain independent and do not create browser-session authorization. Exact-origin CORS remains application-owned; configure the production HTTPS origin exactly and never replace it with `*`. Browsers send an `Origin` header on same-origin `fetch` POSTs too, and the API rejects any origin that is not listed with `403 CORS_ORIGIN_DENIED`, so the production origin (for example `https://reports.example.internal`) must be added under Admin → Configuration → Security → CORS, or supplied through `GENERIC_API_ALLOWED_ORIGINS`, even when the frontend and API share a host.
 
 The supplied templates terminate TLS directly at IIS/Nginx and pass the authoritative server HTTPS state to FastCGI (`HTTPS=on` in Nginx). The PHP application does not trust `X-Forwarded-Proto`, `X-Forwarded-Host`, or `Forwarded` from arbitrary clients. This prevents spoofed forwarded headers from changing cookie or redirect behavior.
 
@@ -252,7 +268,6 @@ Keep separate logs with separate rotation policy:
 - `Backend/logs/{api,admin,database,sqlparser}/YYYY-MM-DD.txt` for human-readable
   operational diagnostics and request IDs;
 - `Backend/logs/audit/YYYY-MM-DD.jsonl` for structured security audit events.
-- `Backend/logs/{api,admin,database,sqlparser}/YYYY-MM-DD.txt` for human-readable operational diagnostics.
 
 Grant the PHP identity write access to application/PHP log targets and deny browser access. Rotate and retain logs according to volume and organizational policy. Existing application logging records parameter counts/types rather than values; operators must also avoid adding passwords, encryption keys, API keys, cookies, authorization headers, session identifiers, or raw credentials to web-server log formats.
 
@@ -288,7 +303,7 @@ display disabled and configure IIS/Nginx to pass through application JSON errors
 3. Validate IIS bindings/Schannel policy on Windows or run `nginx -t` and `php-fpm -t` on Linux.
 4. Start/recycle the web-server and worker services through the operating system.
 5. Verify every HTTP binding permanently redirects once to its fixed HTTPS hostname without a loop.
-6. Verify frontend history fallback, `POST /api`, Admin loopback pages, assets, and `api.php` under the Admin mount path (`/admin/` in the examples), and the independent SQL Parser listener over HTTPS.
+6. Verify frontend history fallback, `POST /api`, Admin loopback pages, assets, and `api.php` under the Admin mount path (`/admin/` in the examples), and the loopback-restricted SQL Parser and its assets over HTTPS.
 7. Verify non-entry-point PHP files, `config/`, `database/config/`, `logs/`, `runtime/`, `storage/`, `.git/`, `.env`, backups, and temporary files are unreachable.
 8. Inspect frontend, API, Admin, Parser, static-asset, error, and redirect responses for the intended headers; HSTS must occur only over HTTPS.
 9. Exercise authentication, session-ID regeneration, logout/replay rejection, idle/absolute expiration, Secure/HttpOnly/SameSite host-only cookies, CSRF rotation, exact-origin CORS, authorization, API-key separation, database availability, SQL resource reads, and an allowed CRUD operation in staging.
