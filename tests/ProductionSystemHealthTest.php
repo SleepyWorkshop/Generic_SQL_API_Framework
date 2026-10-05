@@ -47,7 +47,6 @@ $directory = sys_get_temp_dir() . '/generic-system-health-' . bin2hex(random_byt
 $configurationDirectory = $directory . '/config';
 $runtimeDirectory = $directory . '/runtime';
 $logs = $directory . '/logs';
-$sessions = $directory . '/sessions';
 $backupDirectory = $directory . '/backups';
 $databasePath = $directory . '/database/database.json';
 $cachePath = $runtimeDirectory . '/health/database-health.json';
@@ -63,7 +62,7 @@ $environment = [
 ];
 
 try {
-    foreach ([$configurationDirectory, $runtimeDirectory, $logs, $sessions, dirname($databasePath)] as $path) mkdir($path, 0700, true);
+    foreach ([$configurationDirectory, $runtimeDirectory, $logs, dirname($databasePath)] as $path) mkdir($path, 0700, true);
     putenv('GENERIC_APP_ENV=production');
     putenv('GENERIC_RUNTIME_CONFIG_DIR=' . $configurationDirectory);
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . $databaseKey);
@@ -88,7 +87,7 @@ try {
     };
     $monitorOptions = [
         'root' => $root, 'configurationDirectory' => $configurationDirectory, 'databasePath' => $databasePath,
-        'runtimeDirectory' => $runtimeDirectory, 'logDirectory' => $logs, 'sessionDirectory' => $sessions,
+        'runtimeDirectory' => $runtimeDirectory, 'logDirectory' => $logs,
         'databaseCachePath' => $cachePath, 'databaseTester' => $tester,
         'databaseAvailable' => fn (): bool => $availability->available(),
         'diskSpace' => static fn (): int => PHP_INT_MAX,
@@ -133,6 +132,10 @@ try {
             "Production {$name} health fabricated process metadata or misreported availability."
         );
     }
+    systemHealthAssert(
+        array_keys($health['monitoring']['checks']) === ['application', 'configuration', 'database', 'logging', 'encryption', 'processes', 'backup'],
+        'Production System Health does not contain exactly the operational checks.'
+    );
     $services = $health['monitoring']['checks']['processes']['services'];
     systemHealthAssert(
         $services['adminConsole']['pid'] === null && $services['api']['port'] === null && $services['sqlParser']['pid'] === null,

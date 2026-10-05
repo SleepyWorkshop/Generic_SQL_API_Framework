@@ -18,7 +18,6 @@ final class ApplicationHealthMonitor
     private string $databasePath;
     private string $runtimeDirectory;
     private string $logDirectory;
-    private string $sessionDirectory;
     private string $databaseCachePath;
     private int $databaseCacheTtl;
     private int $diskWarningBytes;
@@ -35,12 +34,6 @@ final class ApplicationHealthMonitor
         $this->databasePath = $options['databasePath'] ?? $this->root . '/database/config/database.json';
         $this->runtimeDirectory = $options['runtimeDirectory'] ?? $this->root . '/runtime';
         $this->logDirectory = $options['logDirectory'] ?? $this->root . '/logs';
-        $savePath = $options['sessionDirectory'] ?? session_save_path();
-        if (is_string($savePath) && str_contains($savePath, ';')) {
-            $parts = explode(';', $savePath);
-            $savePath = (string)end($parts);
-        }
-        $this->sessionDirectory = $savePath !== '' ? $savePath : sys_get_temp_dir();
         $this->databaseCachePath = $options['databaseCachePath']
             ?? $this->runtimeDirectory . '/health/database-health.json';
         $this->databaseCacheTtl = max(1, (int)($options['databaseCacheTtl'] ?? 15));
@@ -101,9 +94,7 @@ final class ApplicationHealthMonitor
             'application' => ['status' => 'healthy', 'category' => 'responding', 'version' => $this->applicationVersion()],
             'configuration' => $this->configurationHealth(),
             'database' => $this->databaseHealth(),
-            'filesystem' => $this->filesystemHealth(),
             'logging' => $this->loggingHealth(),
-            'sessions' => $this->sessionHealth(),
             'encryption' => $this->encryptionHealth(),
             'processes' => ['status' => $this->processAggregate($processes), 'services' => $processes],
         ];
@@ -302,30 +293,11 @@ final class ApplicationHealthMonitor
         return ['status' => 'healthy', 'category' => 'configured'];
     }
 
-    private function filesystemHealth(): array
-    {
-        $directories = [
-            'configuration' => $this->directoryHealth($this->configurationDirectory, true),
-            'runtime' => $this->directoryHealth($this->runtimeDirectory, true),
-            'temporary' => $this->directoryHealth(sys_get_temp_dir(), true),
-        ];
-        $statuses = array_column($directories, 'status');
-        return ['status' => in_array('unhealthy', $statuses, true) ? 'unhealthy'
-            : (in_array('degraded', $statuses, true) ? 'degraded' : 'healthy'), 'directories' => $directories];
-    }
-
     private function loggingHealth(): array
     {
         $check = $this->directoryHealth($this->logDirectory, true);
         return ['status' => $check['status'] === 'healthy' ? 'healthy' : 'degraded',
             'category' => $check['status'] === 'healthy' ? 'operational' : 'unavailable'];
-    }
-
-    private function sessionHealth(): array
-    {
-        $check = $this->directoryHealth($this->sessionDirectory, true);
-        return ['status' => $check['status'], 'category' => $check['status'] === 'healthy'
-            ? 'operational' : 'unavailable'];
     }
 
     private function directoryHealth(string $path, bool $writable): array

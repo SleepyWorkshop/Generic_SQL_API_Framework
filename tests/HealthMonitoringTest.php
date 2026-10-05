@@ -61,7 +61,7 @@ try {
     $monitor = new ApplicationHealthMonitor([
         'configurationDirectory' => $configuration, 'databasePath' => $database,
         'runtimeDirectory' => $runtime, 'logDirectory' => $logs,
-        'sessionDirectory' => $sessions, 'backupDirectory' => $backups,
+        'backupDirectory' => $backups,
         'databaseCachePath' => $runtime . '/health/database.json',
         'databaseAvailable' => static fn (): bool => true,
         'databaseTester' => static function () use (&$tests): void { $tests++; },
@@ -86,8 +86,9 @@ try {
         'sqlParser' => ['running' => false, 'healthy' => false, 'status' => 'stopped', 'pid' => null, 'port' => null],
     ];
     $detail = $monitor->detailed($processes);
-    healthAssert(isset($detail['status'], $detail['checks']['database'], $detail['checks']['filesystem'])
-        && !isset($detail['checks']['backup']) && $detail['status'] === 'healthy'
+    healthAssert(isset($detail['status'])
+        && array_keys($detail['checks']) === ['application', 'configuration', 'database', 'logging', 'encryption', 'processes']
+        && $detail['status'] === 'healthy'
         && $detail['checks']['encryption']['category'] === 'configured'
         && $tests === 1, 'Detailed health schema, aggregation, or database test is invalid.');
     $monitor->detailed($processes);
@@ -124,21 +125,27 @@ try {
     healthAssert($monitor->readiness()['checks']['configuration']['category'] === 'configuration_missing', 'Missing configuration was not detected.');
     healthWrite($configuration . '/admin.json', RuntimeConfiguration::adminDefaults());
 
+    // Filesystem and session-directory diagnostics are not System Health checks.
     @rmdir($sessions);
-    $sessionFailure = $monitor->detailed($processes);
-    healthAssert($sessionFailure['checks']['sessions']['category'] === 'unavailable', 'Missing session directory was not detected.');
+    $withoutSessions = $monitor->detailed($processes);
+    healthAssert(!isset($withoutSessions['checks']['sessions']) && !isset($withoutSessions['checks']['filesystem'])
+        && $withoutSessions['status'] === 'healthy', 'Session or filesystem diagnostics still affect System Health.');
     mkdir($sessions, 0700);
     @rmdir($logs);
     healthAssert($monitor->detailed($processes)['checks']['logging']['status'] === 'degraded', 'Logging failure did not remain fail-open/degraded.');
     mkdir($logs, 0700);
 
-    $lowDisk = new ApplicationHealthMonitor([
+    $diskMonitor = static fn (int $free): ApplicationHealthMonitor => new ApplicationHealthMonitor([
         'configurationDirectory' => $configuration, 'databasePath' => $database,
-        'runtimeDirectory' => $runtime, 'logDirectory' => $logs, 'sessionDirectory' => $sessions,
+        'runtimeDirectory' => $runtime, 'logDirectory' => $logs,
         'databaseAvailable' => static fn (): bool => true,
-        'diskWarningBytes' => 100, 'diskCriticalBytes' => 10, 'diskSpace' => static fn (): int => 50,
+        'diskWarningBytes' => 100, 'diskCriticalBytes' => 10, 'diskSpace' => static fn (): int => $free,
     ]);
-    healthAssert($lowDisk->detailed($processes)['checks']['filesystem']['status'] === 'degraded', 'Low disk space was not classified as warning.');
+    healthAssert($diskMonitor(50)->detailed($processes)['checks']['logging']['status'] === 'degraded',
+        'Low disk space for logs was not classified as degraded.');
+    $criticalDisk = $diskMonitor(5)->readiness();
+    healthAssert($criticalDisk['status'] === 'unhealthy' && $criticalDisk['checks']['runtime']['category'] === 'disk_critical',
+        'Critically low runtime disk space did not fail readiness.');
     @rmdir($backups);
     $withoutBackupDirectory = $monitor->detailed($processes);
     healthAssert(!isset($withoutBackupDirectory['checks']['backup'])
@@ -153,7 +160,7 @@ try {
     // Encryption health distinguishes key and configuration failures without secrets.
     $encryptionCategory = static fn (): string => (new ApplicationHealthMonitor([
         'configurationDirectory' => $configuration, 'databasePath' => $database, 'runtimeDirectory' => $runtime,
-        'logDirectory' => $logs, 'sessionDirectory' => $sessions, 'databaseAvailable' => static fn (): bool => false,
+        'logDirectory' => $logs, 'databaseAvailable' => static fn (): bool => false,
     ]))->detailed($processes)['checks']['encryption']['category'];
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=not-a-valid-key');
     healthAssert($encryptionCategory() === 'key_invalid', 'A malformed encryption key was not detected.');

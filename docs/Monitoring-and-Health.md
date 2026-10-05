@@ -58,20 +58,28 @@ plus, for API and Parser, Enabled/Disabled application runtime state and
 update/reload timestamps. PID, port, and start time are null for all three
 because the answering FastCGI/FPM worker is not owned by the application. The
 database card reports `state` as `disabled` (Disconnected, reason
-`application_access_disabled`), `connected`, or `unhealthy` with a safe reason. The detailed response also adds
-safe checks for:
+`application_access_disabled`), `connected`, or `unhealthy` with a safe reason.
 
-- required configuration presence, JSON readability, and format versions;
-- database availability and sanitized connectivity category;
-- configuration, runtime, and temporary-directory availability;
-- fail-open logging capability;
-- PHP session-directory availability;
-- encryption-key presence and usability, without exposing key material
+The System Health page shows only operational cards: Admin Console, API Server,
+SQL Parser, Database, PHP Runtime, Configuration, Logging, Encryption, and
+Backup. Implementation-level filesystem and PHP session-directory diagnostics
+are not part of System Health; sessions, configuration files, logs, and backups
+keep working exactly as before, and a missing configuration file or runtime
+directory is still reported through the Configuration check and readiness. The
+detailed response contains these checks:
+
+- `application`: the responding application version;
+- `configuration`: required configuration presence, JSON readability, and
+  format versions;
+- `database`: database availability and sanitized connectivity category;
+- `logging`: fail-open logging capability;
+- `encryption`: encryption-key presence and usability, without exposing key material
   (`configured`, `missing`, `key_invalid`, `invalid` for a wrong key or
   tampered envelope, or `configuration_missing`);
-- backup state from `BackupRecoveryService::health()` (see below);
-- Admin/API/SQL Parser running, stopped, stale, crashed, or unresponsive state
-  as determined by the existing process managers.
+- `backup`: backup state from `BackupRecoveryService::health()` (see below);
+- `processes`: Admin/API/SQL Parser running, stopped, stale, crashed, or
+  unresponsive state as determined by the existing process managers in
+  development, or application availability in production.
 
 When database access is enabled, detailed health may perform the existing
 minimal connection test. Its safe result is cached locally for 15 seconds in
@@ -81,12 +89,13 @@ contains no credentials, and cannot survive a database configuration change.
 Readiness never invokes this test, so frequent proxy probes cannot generate SQL
 Server connection load.
 
-Directory checks are shallow: exists/readable/writable plus `disk_free_space`.
-They do not traverse files. Default warning and critical free-space thresholds
-are 1 GiB and 256 MiB; these classify diagnostics only. A missing logging
-directory is degraded because audit logging is intentionally fail-open. A
-required runtime, configuration, session, or database dependency can be
-unhealthy.
+The logging check and the readiness runtime check are shallow directory checks:
+exists/readable/writable plus `disk_free_space`. They do not traverse files.
+Default warning and critical free-space thresholds are 1 GiB and 256 MiB. A
+missing or low-space logging directory is degraded because audit logging is
+intentionally fail-open; a missing, unwritable, or critically full runtime
+directory makes the API unready. A required configuration or database
+dependency can be unhealthy.
 
 Backup health is reported as a separate `backup` check that never changes the
 overall System Health status or readiness, because backups are not part of

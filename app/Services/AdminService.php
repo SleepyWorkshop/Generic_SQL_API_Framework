@@ -360,7 +360,6 @@ final class AdminService
             // Port ranges configure only the development launcher's managed
             // processes. Production listeners belong to the web server.
             'server' => $production ? null : $settings['server'],
-            'hosting' => $this->hostingInformation($production),
             'cors' => $settings['cors'],
             'authentication' => [
                 'mode' => $settings['authentication']['mode'],

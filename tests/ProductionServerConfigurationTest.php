@@ -29,10 +29,10 @@ final class ServerConfigurationProcessProbe extends ApiProcessManager
 }
 
 /**
- * Render the Admin Console Server tab markup with the shipped admin.js
- * functions, so the assertions inspect the DOM an operator actually receives.
+ * Run shipped admin.js Configuration functions in Node with a stubbed DOM and
+ * Admin API, so assertions inspect what an operator actually receives.
  */
-function serverConfigurationRender(string $function, array $argument): string
+function serverConfigurationNode(string $script, array $argument = []): array
 {
     $source = (string)file_get_contents(__DIR__ . '/../admin/assets/admin.js');
     $slice = static function (string $start, string $end) use ($source): string {
@@ -41,22 +41,42 @@ function serverConfigurationRender(string $function, array $argument): string
         serverConfigurationAssert($from !== false && $to !== false, "admin.js no longer contains {$start}.");
         return substr($source, $from, $to - $from);
     };
-    $program = $slice('const escapeHtml =', 'const row =')
-        . $slice('const productionWebServers =', 'function productionServerSection(')
-        . $slice('function developmentServerMarkup(', 'function serverSection(')
-        . 'process.stdout.write(' . $function . '(JSON.parse(process.argv[1])));';
+    $program = <<<'JS'
+const input = JSON.parse(process.argv[1]);
+const rendered = { sections: [], target: { innerHTML: "", querySelector: () => ({ addEventListener() {} }), querySelectorAll: () => [] } };
+let activeConfigTab = "server";
+const title = { textContent: "" };
+const content = { className: "", innerHTML: "", querySelectorAll: () => [] };
+const document = { querySelector: () => rendered.target };
+const loading = () => {};
+const row = (response) => response.data[0];
+const call = async () => ({ data: [input.settings] });
+const setButtonBusy = () => () => {};
+const notify = () => {};
+const databaseSection = async () => rendered.sections.push("database");
+const securitySection = () => rendered.sections.push("security");
+const runtimeSection = () => rendered.sections.push("runtime");
+const advancedSection = () => rendered.sections.push("advanced");
+JS;
+    $program .= $slice('const escapeHtml =', 'const row =')
+        . $slice('function configurationTabs(', 'const productionWebServers =')
+        . $slice('function developmentServerMarkup(', 'async function databaseSection(')
+        . '(async () => { const result = await (async () => { ' . $script . ' })();'
+        . ' process.stdout.write(JSON.stringify({ result, activeConfigTab, tabs: content.innerHTML,'
+        . ' sections: rendered.sections, section: rendered.target.innerHTML })); })()'
+        . '.catch((error) => { process.stderr.write(String(error && error.message)); process.exit(1); });';
     $process = proc_open(
         ['node', '-e', $program, json_encode($argument, JSON_THROW_ON_ERROR)],
         [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
         $pipes
     );
-    serverConfigurationAssert(is_resource($process), 'Node.js is required to render the Admin Server tab.');
+    serverConfigurationAssert(is_resource($process), 'Node.js is required to render the Admin Configuration page.');
     $output = stream_get_contents($pipes[1]);
     $error = stream_get_contents($pipes[2]);
     fclose($pipes[1]);
     fclose($pipes[2]);
-    serverConfigurationAssert(proc_close($process) === 0, "Admin Server tab rendering failed: {$error}");
-    return (string)$output;
+    serverConfigurationAssert(proc_close($process) === 0, "Admin Configuration rendering failed: {$error}");
+    return json_decode((string)$output, true, 512, JSON_THROW_ON_ERROR);
 }
 
 $root = dirname(__DIR__);
@@ -94,12 +114,23 @@ try {
     $development = $service->settings();
     serverConfigurationAssert(
         $development['hostingMode'] === 'development'
-            && $development['hosting']['mode'] === 'development'
-            && $development['hosting']['listenerManagement'] === 'development-launcher'
+            && !array_key_exists('hosting', $development)
             && $development['server'] === RuntimeConfiguration::adminDefaults()['server'],
         'Development settings no longer expose the launcher server configuration.'
     );
-    $developmentMarkup = serverConfigurationRender('developmentServerMarkup', $development['server']);
+    $developmentPage = serverConfigurationNode('await configurationView("server");', ['settings' => $development]);
+    $developmentMarkup = $developmentPage['section'];
+    serverConfigurationAssert(
+        $developmentPage['activeConfigTab'] === 'server' && $developmentPage['sections'] === []
+            && preg_match_all('/data-tab="([a-z]+)"/', $developmentPage['tabs'], $tabs) === 5
+            && $tabs[1] === ['server', 'database', 'security', 'runtime', 'advanced'],
+        'Development Configuration no longer offers the Server tab first.'
+    );
+    serverConfigurationAssert(
+        serverConfigurationNode('return configurationTabs("development");')['result'] === ['server', 'database', 'security', 'runtime', 'advanced']
+            && serverConfigurationNode('return resolveConfigurationTab("features", "development");')['result'] === 'server',
+        'Development Configuration tabs changed.'
+    );
     foreach ([
         'name="apiPortMinimum"', 'name="apiPortMaximum"', 'name="parserPortMinimum"',
         'name="parserPortMaximum"', 'name="adminPort"', 'name="bindAddress"',
@@ -131,19 +162,9 @@ try {
     serverConfigurationAssert(
         $production['hostingMode'] === 'production'
             && $production['server'] === null
-            && $production['hosting']['mode'] === 'production'
-            && $production['hosting']['listenerManagement'] === 'web-server'
-            && in_array($production['hosting']['webServer'], ['iis', 'nginx', 'web-server'], true)
-            && $production['hosting']['services'] === [
-                'adminConsole' => 'web-server-managed',
-                'api' => 'web-server-managed',
-                'sqlParser' => 'web-server-managed',
-            ],
-        'Production settings expose development listener configuration or misstate ownership.'
-    );
-    serverConfigurationAssert(
-        !preg_match('/port|bindAddress/i', json_encode($production['hosting'], JSON_THROW_ON_ERROR)),
-        'Production hosting summary exposes listener port settings.'
+            && !array_key_exists('hosting', $production)
+            && !preg_match('/PortMinimum|PortMaximum|adminPort|bindAddress/', json_encode($production, JSON_THROW_ON_ERROR)),
+        'Production settings expose development listener configuration.'
     );
     $detector = new RuntimeDetector();
     serverConfigurationAssert(
@@ -155,28 +176,37 @@ try {
         'Production web server ownership was not detected from the hosting environment.'
     );
 
-    $productionMarkup = serverConfigurationRender('productionServerMarkup', ['webServer' => 'iis'] + $production['hosting']);
-    foreach (['<input', '<form', '<button', '<select', 'Port Minimum', 'Port Maximum', 'Admin Port', 'Bind Address', 'Save Server Configuration', '>Restart', '>Reload'] as $forbidden) {
+    // Production has no Server tab; requests for it, including the default
+    // tab and the legacy "features" alias, fall back to Database without
+    // touching the null server configuration.
+    serverConfigurationAssert(
+        serverConfigurationNode('return configurationTabs("production");')['result'] === ['database', 'security', 'runtime', 'advanced'],
+        'Production Configuration still offers the Server tab.'
+    );
+    foreach (['await configurationView("server");', 'await configurationView();', 'await configurationView("features");', 'await configurationView("unknown");'] as $request) {
+        $page = serverConfigurationNode($request, ['settings' => $production]);
+        preg_match_all('/data-tab="([a-z]+)"/', $page['tabs'], $tabs);
         serverConfigurationAssert(
-            stripos($productionMarkup, $forbidden) === false,
-            "Production Server tab contains development control {$forbidden}."
+            $page['activeConfigTab'] === 'database' && $page['sections'] === ['database'] && $page['section'] === ''
+                && $tabs[1] === ['database', 'security', 'runtime', 'advanced']
+                && !preg_match('/Server|apiPortMinimum|Save Server Configuration|Restart API|Restart SQL Parser/', $page['tabs'] . $page['section']),
+            "Production Configuration rendered Server content for {$request}."
         );
     }
-    foreach ([
-        '<dt>Hosting Mode</dt><dd>Production</dd>',
-        '<dt>Web Server</dt><dd>IIS + PHP FastCGI</dd>',
-        '<dt>Admin Console</dt><dd>IIS Managed</dd>',
-        '<dt>API</dt><dd>IIS Managed</dd>',
-        '<dt>SQL Parser</dt><dd>IIS Managed</dd>',
-        'managed by the web server deployment configuration',
-    ] as $marker) {
-        serverConfigurationAssert(str_contains($productionMarkup, $marker), "Production Server tab is missing {$marker}.");
+    foreach (['security', 'runtime', 'advanced'] as $tab) {
+        $page = serverConfigurationNode("await configurationView(\"{$tab}\");", ['settings' => $production]);
+        serverConfigurationAssert(
+            $page['activeConfigTab'] === $tab && $page['sections'] === [$tab],
+            "Production Configuration did not render the {$tab} tab."
+        );
     }
-    $nginxMarkup = serverConfigurationRender('productionServerMarkup', ['webServer' => 'nginx'] + $production['hosting']);
+    $adminSource = (string)file_get_contents($root . '/admin/assets/admin.js');
     serverConfigurationAssert(
-        str_contains($nginxMarkup, '<dd>Nginx + PHP-FPM</dd>') && str_contains($nginxMarkup, '<dd>Nginx Managed</dd>')
-            && !str_contains($nginxMarkup, 'IIS'),
-        'Production Server tab does not describe Nginx ownership.'
+        !str_contains($adminSource, 'productionServerMarkup') && !preg_match('/settings\.hosting(?!Mode)/', $adminSource)
+            && substr_count($adminSource, 'serverSection(target, settings.server)') === 1
+            && strpos($adminSource, 'activeConfigTab = resolveConfigurationTab(tab, settings.hostingMode)')
+                < strpos($adminSource, 'serverSection(target, settings.server)'),
+        'Production can still reach the development Server section.'
     );
 
     // 5. Production save is rejected and changes nothing.

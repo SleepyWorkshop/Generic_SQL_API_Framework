@@ -194,7 +194,7 @@ CI runs PHP 8.2 syntax checks and the database-independent suite.
 ## Operations and deployment
 
 System Health exposes local API/parser lifecycle and database availability plus
-safe configuration, filesystem, logging, session, encryption, and backup checks.
+safe configuration, logging, encryption, and backup checks.
 The public health route exposes only liveness/readiness fields. The Super Admin
 Backup & Recovery page and CLI create, sign, verify, preview, and safely restore
 ZIP application-configuration recovery points. They do not back up SQL Server;
