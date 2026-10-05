@@ -28,13 +28,20 @@ if (strtolower((string)(getenv('GENERIC_APP_ENV') ?: 'development')) !== 'produc
     header("Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
     header('X-Content-Type-Options: nosniff');
 }
+// Asset URLs are absolute from the mount path the web server reports in
+// SCRIPT_NAME (e.g. /sqlparser/index.php under IIS), so they resolve with or
+// without a trailing slash. Only plain path segments are accepted.
+$scriptName = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+$parserBase = str_ends_with($scriptName, '/index.php') ? substr($scriptName, 0, -strlen('/index.php')) : '';
+if (preg_match('#^(?:/(?!\.\.?(?:/|$))[A-Za-z0-9._~-]+)*$#', $parserBase) !== 1) $parserBase = '';
+$assetUrl = static fn (string $path): string => htmlspecialchars($parserBase . '/' . $path, ENT_QUOTES, 'UTF-8');
 ?>
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SQL → API JSON Generator</title><link rel="stylesheet" href="assets/css/app.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SQL → API JSON Generator</title><link rel="stylesheet" href="<?= $assetUrl('assets/css/app.css') ?>"></head>
 <body><main>
 <header><p class="eyebrow">Generic SQL API Framework · Developer Tool</p><h1>SQL → API JSON Generator</h1><p>Parse SQL into the existing Universal API contract. SQL is analyzed only and never executed.</p></header>
 <section class="grid"><article><label for="sql">SQL Input</label><textarea id="sql" spellcheck="false" placeholder="SELECT Item_Code, Item_Desc FROM ItemMasterTable"></textarea><div class="actions"><button id="parse">Parse SQL</button><button id="clear" class="secondary">Clear</button></div></article>
 <article><label for="json">Generated API JSON</label><textarea id="json" spellcheck="false" readonly></textarea><div class="actions"><button id="copy">Copy JSON</button><button id="format" class="secondary">Format JSON</button></div></article></section>
 <section class="analysis"><h2>Analysis / Result</h2><div id="status" class="status idle">Ready</div><dl id="analysis"></dl><ul id="messages"></ul></section>
-</main><script src="assets/js/app.js"></script></body></html>
+</main><script src="<?= $assetUrl('assets/js/app.js') ?>"></script></body></html>
