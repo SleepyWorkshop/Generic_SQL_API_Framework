@@ -1153,6 +1153,16 @@
     };
   };
 
+  const databaseReasons = {
+    application_access_disabled: "Application database access disabled",
+    database_unavailable: "Database connection failed",
+    authentication_failure: "Database authentication failed",
+    encryption_key_missing: "Database encryption key unavailable",
+    configuration_invalid: "Database configuration invalid",
+    configuration_missing: "Database configuration missing",
+  };
+  const databaseReasonLabel = (reason) =>
+    reason ? databaseReasons[reason] || "Database connection failed" : null;
   async function healthView() {
     loading();
     const health = row(await call({ action: "admin.health" })),
@@ -1195,6 +1205,7 @@
         ["Server", health.database.server],
         ["Port", health.database.port],
         ["Database", health.database.database],
+        ["Reason", databaseReasonLabel(health.database.reason)],
       ],
     )}${healthCard("PHP Runtime", health.phpRuntime, [
       ["PHP", health.phpRuntime.phpVersion],

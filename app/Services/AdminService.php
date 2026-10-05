@@ -108,6 +108,11 @@ final class AdminService
             'status' => $databaseConnected ? 'connected'
                 : ($databaseAvailable ? $databaseCheck['category'] : 'disconnected'),
             'available' => $databaseAvailable,
+            // disabled: access turned off by an administrator; unhealthy:
+            // access enabled but the configured database cannot be used.
+            'state' => !$databaseAvailable ? 'disabled' : ($databaseConnected ? 'connected' : 'unhealthy'),
+            'reason' => !$databaseAvailable ? 'application_access_disabled'
+                : ($databaseConnected ? null : $databaseCheck['category']),
         ];
         return [
             'adminConsole' => $admin,
@@ -238,6 +243,9 @@ final class AdminService
             (new OperationalLogger())->error('database', 'Database connection test failed', [
                 'error_code' => 'DATABASE_CONNECTION_FAILED',
             ]);
+            $this->logger->audit('database.connection_test', 'failure', 'WARNING', [
+                'reason' => 'connection_failed', 'component' => 'database',
+            ]);
             throw new ApiRequestException(
                 'Database connection failed.',
                 'DATABASE_CONNECTION_FAILED',
@@ -256,19 +264,14 @@ final class AdminService
         try {
             $database = DatabaseConfigurationResolver::load($this->databasePath);
         } catch (Throwable $exception) {
-            (new OperationalLogger())->error('database', 'Database configuration load failed', [
-                'error_code' => 'DATABASE_CONFIGURATION_UNAVAILABLE',
-            ]);
-            throw new ApiRequestException(
-                'Database configuration is unavailable.',
-                'DATABASE_CONFIGURATION_UNAVAILABLE',
-                [],
-                503
-            );
+            throw $this->databaseConfigurationFailure();
         }
         $this->validateDatabaseAuthentication($database);
         try {
             ($this->connectionTester)($database);
+        } catch (DatabaseCredentialException $exception) {
+            // A legacy encrypted password is decrypted only when the driver connects.
+            throw $this->databaseConfigurationFailure();
         } catch (Throwable $exception) {
             (new OperationalLogger())->error('database', 'Database connection test failed', [
                 'error_code' => 'DATABASE_CONNECTION_FAILED',
@@ -510,18 +513,41 @@ final class AdminService
         }
     }
 
+    /**
+     * Database Connect/Disconnect/Restart control only the application's
+     * request-availability gate. Connect enables access after one verified,
+     * immediately closed test connection; requests still open their own
+     * connections. SQL Server itself is never started or stopped.
+     */
     public function controlDatabase(string $operation): array
     {
         (new OperationalLogger())->info('database', 'Database runtime operation started', ['operation' => $operation]);
         if ($operation === 'disconnect') {
             $result = $this->databaseAvailability->setAvailable(false);
+            $this->healthMonitor->forgetDatabaseHealth();
             $this->runtimeAudit('database', $operation, 'success', $result);
             (new OperationalLogger())->info('database', 'Database disconnect successful');
-            return $result;
+            return [...$result, 'connected' => false, 'state' => 'disabled'];
         }
         if ($operation === 'restart') $this->databaseAvailability->setAvailable(false);
-        try { $this->testCurrentDatabase(); $result = $this->databaseAvailability->setAvailable(true); $this->runtimeAudit('database', $operation, 'success', $result); (new OperationalLogger())->info('database', 'Database runtime operation successful', ['operation' => $operation]); return $result; }
-        catch (Throwable $exception) { $this->databaseAvailability->setAvailable(false); $this->runtimeAudit('database', $operation, 'failure', [], 'connection_failed'); (new OperationalLogger())->error('database', 'Database runtime operation failed', ['operation' => $operation, 'error_code' => 'DATABASE_UNAVAILABLE']); throw $exception; }
+        try {
+            $this->testCurrentDatabase();
+        } catch (Throwable $exception) {
+            $this->databaseAvailability->setAvailable(false);
+            $this->healthMonitor->forgetDatabaseHealth();
+            $reason = $this->databaseFailureReason($exception);
+            $this->runtimeAudit('database', $operation, 'failure', [], $reason);
+            (new OperationalLogger())->error('database', 'Database runtime operation failed', [
+                'operation' => $operation,
+                'error_code' => $exception instanceof ApiRequestException ? $exception->getErrorCode() : 'DATABASE_UNAVAILABLE',
+            ]);
+            throw $exception;
+        }
+        $result = $this->databaseAvailability->setAvailable(true);
+        $this->healthMonitor->forgetDatabaseHealth();
+        $this->runtimeAudit('database', $operation, 'success', $result);
+        (new OperationalLogger())->info('database', 'Database runtime operation successful', ['operation' => $operation]);
+        return [...$result, 'connected' => true, 'state' => 'connected'];
     }
 
     public function backupHistory(): array
@@ -661,6 +687,51 @@ final class AdminService
         } catch (Throwable $exception) {
             return [...$status, 'connected' => false, 'healthy' => false, 'status' => 'connection failed'];
         }
+    }
+
+    private function databaseConfigurationFailure(): ApiRequestException
+    {
+        $reason = $this->databaseConfigurationReason();
+        (new OperationalLogger())->error('database', 'Database configuration load failed', [
+            'error_code' => 'DATABASE_CONFIGURATION_UNAVAILABLE',
+        ]);
+        $this->logger->audit('database.connection_test', 'failure', 'WARNING', [
+            'reason' => $reason, 'component' => 'database',
+        ]);
+        $messages = [
+            'configuration_missing' => 'Database configuration has not been saved.',
+            'encryption_key_missing' => 'The database encryption key is not available to this process.',
+            'configuration_invalid' => 'Database configuration could not be decrypted or validated.',
+        ];
+        return new ApiRequestException(
+            'Database configuration is unavailable.',
+            'DATABASE_CONFIGURATION_UNAVAILABLE',
+            [['path' => 'database', 'reason' => $reason, 'message' => $messages[$reason]]],
+            503
+        );
+    }
+
+    private function databaseConfigurationReason(): string
+    {
+        if (!is_file($this->databasePath)) return 'configuration_missing';
+        try {
+            $stored = DatabaseConfigurationResolver::readStored($this->databasePath);
+        } catch (Throwable $exception) {
+            return 'configuration_invalid';
+        }
+        $encrypted = DatabaseConfigurationResolver::usesEncryption($stored)
+            || DatabaseCredentialResolver::usesEncryption($stored['password'] ?? null);
+        return $encrypted && !DatabaseConfigurationResolver::encryptionKeyIsAvailable()
+            ? 'encryption_key_missing' : 'configuration_invalid';
+    }
+
+    private function databaseFailureReason(Throwable $exception): string
+    {
+        if (!$exception instanceof ApiRequestException) return 'connection_failed';
+        if ($exception->getErrorCode() === 'DATABASE_CONFIGURATION_UNAVAILABLE') {
+            return (string)($exception->getDetails()[0]['reason'] ?? 'configuration_invalid');
+        }
+        return $exception->getErrorCode() === 'INVALID_ADMIN_REQUEST' ? 'configuration_invalid' : 'connection_failed';
     }
 
     private function withExistingPassword(array $database): array

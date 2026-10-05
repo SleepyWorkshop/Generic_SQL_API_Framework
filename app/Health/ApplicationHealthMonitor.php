@@ -180,6 +180,15 @@ final class ApplicationHealthMonitor
         return true;
     }
 
+    /**
+     * Discard the short-lived connection-check cache after an availability
+     * change so the next detailed check reflects the new state.
+     */
+    public function forgetDatabaseHealth(): void
+    {
+        if (is_file($this->databaseCachePath)) @unlink($this->databaseCachePath);
+    }
+
     private function databaseReadiness(): array
     {
         try {

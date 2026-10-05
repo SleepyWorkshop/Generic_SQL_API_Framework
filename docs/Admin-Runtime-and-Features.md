@@ -12,13 +12,15 @@ The Admin Console uses dedicated System Administrator actions on its loopback-on
 | `admin.settings.get` | Read redacted configuration | no |
 | `admin.server.save` | Development only: save launcher loopback ports and ranges. Production rejects it with `409 SERVER_CONFIGURATION_DEPLOYMENT_MANAGED` because IIS/Nginx own listeners | yes |
 | `admin.database.get/test/save` | Read, test submitted values, or save SQL Server configuration | mutations/tests |
-| `admin.database.connect/disconnect/restart` | Control the request-availability gate | yes |
+| `admin.database.connect/disconnect/restart` | Control the application database-availability gate; never SQL Server itself | yes |
 | `admin.cors.save` | Save exact CORS origins | yes |
 | `admin.authentication.save` | Save `none`, `session`, `api_key`, or `session+api_key` | yes |
 
 The general API rejects `admin.*`. Runtime controls accept fixed operations only and cannot execute user-supplied commands. In development, the launchers start API and SQL Parser through the existing process managers and validate/enable application database availability; their Admin actions continue delegating to those same managers and gates. Failed startup is reported while Admin remains available for recovery. In production, infrastructure is already hosted externally and the same compatible actions change application availability: Start means Enable, Stop means Disable, and Restart means Reload. No action invokes IIS, Nginx, FastCGI, PHP-FPM, systemd, a Windows service, or SQL Server. The Admin control plane remains available when either runtime is disabled or the database is disconnected.
 
 Configuration → Server is environment-specific. In development it edits the launcher's API and SQL Parser port ranges, Admin port, and loopback bind address, with Restart API and Restart SQL Parser. In production `admin.settings.get` returns `server: null` and a read-only `hosting` summary (mode, detected web server, and web-server-managed Admin Console, API, and SQL Parser); the page renders that summary without listener inputs or save controls.
+
+Database Connect resolves the saved (encrypted) configuration, opens one test connection through `SqlServerDriver`, closes it, and only then enables application database access; requests continue to open their own request-scoped connections. A failed Connect or Restart leaves access disabled and returns a safe error: `DATABASE_CONNECTION_FAILED`, or `DATABASE_CONFIGURATION_UNAVAILABLE` with a `reason` of `configuration_missing`, `encryption_key_missing`, or `configuration_invalid`. Disconnect only disables access: it opens no connection and leaves `database.json`, its encrypted credentials, and API/SQL Parser availability unchanged, so database-dependent API requests return `503 DATABASE_UNAVAILABLE` while the SQL Parser is unaffected. Test Connection checks submitted values without saving them or changing availability. System Health reports the database `state` as `disabled` (reason `application_access_disabled`), `connected`, or `unhealthy` (access enabled but the configured database failed its check, with a safe `reason`).
 
 System Health is the runtime control plane. Diagnostic cards contain status and
 runtime information only; their controls are collected in the separate Service
