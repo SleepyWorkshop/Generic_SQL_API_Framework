@@ -62,9 +62,15 @@ try {
         'options' => ['encrypt' => true, 'trustServerCertificate' => false],
     ]);
     $apiProcessProbe = new ProductionRuntimeProcessProbe();
+    // Every development port probe is counted: production lifecycle must never allocate one.
+    $portProbes = 0;
+    $countingPorts = new PortSelector(static function () use (&$portProbes): bool {
+        $portProbes++;
+        return false;
+    });
     $parserProcessManager = new SqlParserProcessManager(
         $configuration,
-        null,
+        $countingPorts,
         null,
         $parserProcessPath,
         dirname(__DIR__)
@@ -163,9 +169,18 @@ try {
     );
 
     productionRuntimeAssert(
-        $apiProcessProbe->operations === 0 && !is_file($parserProcessPath),
-        'Production application controls invoked a development process manager.'
+        $apiProcessProbe->operations === 0 && !is_file($parserProcessPath) && $portProbes === 0,
+        'Production application controls invoked a development process manager or allocated a port.'
     );
+    foreach ([$apiStopped, $apiStarted, $apiReloaded, $parserStopped, $parserStarted, $parserReloaded] as $result) {
+        productionRuntimeAssert(
+            $result['controlMode'] === 'application'
+                && $result['infrastructure']['managedExternally'] === true
+                && $result['pid'] === null && $result['port'] === null
+                && $result['startedAt'] === null && $result['uptimeSeconds'] === null,
+            'Production lifecycle result fabricated process metadata.'
+        );
+    }
     $managerSource = (string)file_get_contents(__DIR__ . '/../app/Runtime/ApplicationRuntimeManager.php');
     foreach (['proc_open', 'shell_exec', 'system(', 'exec(', 'passthru', 'popen'] as $processApi) {
         productionRuntimeAssert(
@@ -188,6 +203,7 @@ try {
         'Production System Health fabricated process details or merged runtime and infrastructure state.'
     );
 
+    $runtimeBeforeDatabase = JsonFileStore::load($applicationStatePath);
     $disconnected = $service->controlDatabase('disconnect');
     productionRuntimeAssert(
         $disconnected['available'] === false && !array_key_exists('pid', $disconnected),
@@ -198,6 +214,16 @@ try {
         $connected['available'] === true && $connectionTests === 1,
         'Production database Connect no longer validates and enables application availability.'
     );
+    productionRuntimeAssert(
+        JsonFileStore::load($applicationStatePath) === $runtimeBeforeDatabase,
+        'Database availability changes altered API or SQL Parser application availability.'
+    );
+    $service->controlApi('start');
+    productionRuntimeAssert(
+        $databaseAvailability->available() === true,
+        'API availability changes altered database availability.'
+    );
+    $service->controlApi('stop');
 
     $persisted = JsonFileStore::load($applicationStatePath);
     $generation = $persisted['generation'];
@@ -205,7 +231,7 @@ try {
     productionRuntimeAssert(
         $secondManager->status('api')['applicationRuntime']['enabled'] === false
             && $secondManager->status('sqlParser')['applicationRuntime']['enabled'] === false
-            && $generation === 8,
+            && $generation === 10,
         'Production application runtime state did not persist across manager instances.'
     );
 
@@ -214,11 +240,29 @@ try {
         glob($logs . '/*.log')
     ) : []);
     productionRuntimeAssert(
-        substr_count($logSource, '"event":"runtime.lifecycle"') >= 8
+        substr_count($logSource, '"event":"runtime.lifecycle"') >= 10
             && str_contains($logSource, '"component":"api"')
             && str_contains($logSource, '"component":"sql_parser"'),
         'Production application runtime mutations were not security-audited.'
     );
+    $lifecycleAudits = [];
+    foreach (preg_split('/\R/', $logSource) ?: [] as $line) {
+        $record = json_decode($line, true);
+        if (is_array($record) && ($record['event'] ?? null) === 'runtime.lifecycle') $lifecycleAudits[] = $record;
+    }
+    foreach (['api', 'sql_parser'] as $component) {
+        foreach (['start', 'stop', 'restart'] as $operation) {
+            $matching = array_filter($lifecycleAudits, static fn (array $record): bool =>
+                ($record['component'] ?? null) === $component
+                    && ($record['action'] ?? null) === $operation
+                    && ($record['outcome'] ?? null) === 'success');
+            productionRuntimeAssert(
+                $matching !== [] && array_filter($matching, static fn (array $record): bool =>
+                    ($record['pid'] ?? null) !== null || ($record['port'] ?? null) !== null) === [],
+                "Production {$component} {$operation} audit is missing or records process metadata."
+            );
+        }
+    }
 
     $apiEntry = (string)file_get_contents(__DIR__ . '/../api/index.php');
     $apiRouter = (string)file_get_contents(__DIR__ . '/../api/router.php');
@@ -246,6 +290,32 @@ try {
     productionRuntimeAssert(
         $service->settings()['hostingMode'] === 'development',
         'Development mode did not continue using the existing server-controlled environment.'
+    );
+
+    // Development lifecycle still delegates to the real process managers and
+    // never writes production application availability.
+    $productionState = JsonFileStore::load($applicationStatePath);
+    foreach (['start', 'stop', 'restart'] as $operation) {
+        $before = $apiProcessProbe->operations;
+        $service->controlApi($operation);
+        productionRuntimeAssert(
+            $apiProcessProbe->operations === $before + 1,
+            "Development API {$operation} did not use ApiProcessManager."
+        );
+    }
+    try {
+        $service->controlSqlParser('start');
+        productionRuntimeAssert(false, 'Development SQL Parser start bypassed its port range.');
+    } catch (ApiRequestException $exception) {
+        productionRuntimeAssert(
+            $exception->getErrorCode() === 'SQL_PARSER_PROCESS_OPERATION_FAILED'
+                && $portProbes > 0 && !is_file($parserProcessPath),
+            'Development SQL Parser start did not use SqlParserProcessManager dynamic port selection.'
+        );
+    }
+    productionRuntimeAssert(
+        JsonFileStore::load($applicationStatePath) === $productionState,
+        'Development lifecycle changed production application availability state.'
     );
 
     echo "Production runtime control tests passed.\n";
