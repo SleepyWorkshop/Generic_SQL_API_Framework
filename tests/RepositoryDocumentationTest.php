@@ -50,13 +50,72 @@ repositoryDocumentationAssert(
         && preg_match('/Phase [1-4](?:\.[0-9]+)?\s+[—-].*implemented/i', $readme) !== 1,
     'README contains an incorrect release status or phase diary.'
 );
-foreach (['Phase 5', 'Phase 6', 'Phase 7'] as $futurePhase) {
-    repositoryDocumentationAssert(str_contains($roadmap, $futurePhase), "Roadmap is missing {$futurePhase}.");
+// Planned work stays explicitly planned under the versioned roadmap structure.
+foreach ([
+    'v2.1 — Security Verification & Operational Hardening',
+    'v3.0 — Multi-Database Support',
+    'v3.1 — Developer Experience & API Integration',
+] as $plannedMilestone) {
+    repositoryDocumentationAssert(
+        preg_match('/^# ' . preg_quote($plannedMilestone, '/') . '\R+Status: Planned$/mu', $roadmap) === 1,
+        "Roadmap does not list {$plannedMilestone} as planned."
+    );
+}
+
+// The completed production hardening phases are recorded with their scope.
+repositoryDocumentationAssert(
+    preg_match('/^## Production Hardening\R+Status: Completed$/m', $roadmap) === 1,
+    'Roadmap does not record the completed production hardening milestone.'
+);
+foreach ([
+    1 => 'Production configuration and IIS ownership',
+    2 => 'API and SQL Parser application availability',
+    3 => 'Application database availability',
+    4 => 'Production System Health',
+    5 => 'Admin Console cleanup',
+] as $phase => $scope) {
+    repositoryDocumentationAssert(
+        str_contains($roadmap, "| Phase {$phase} | {$scope} | Completed |")
+            && preg_match('/^- \*\*Phase ' . $phase . ' — [^*]+:\*\* \S/m', $roadmap) === 1,
+        "Roadmap does not describe completed Phase {$phase} ({$scope})."
+    );
 }
 repositoryDocumentationAssert(
-    str_contains($roadmap, 'Phase 4.13') && str_contains($roadmap, 'are complete'),
-    'Roadmap does not record completion of the documentation milestone.'
+    str_contains($roadmap, 'production documentation and validation milestone')
+        && str_contains($roadmap, '](Windows-IIS-Deployment.md)')
+        && str_contains($roadmap, 'is also complete')
+        && is_file($root . '/docs/Windows-IIS-Deployment.md'),
+    'Roadmap does not record completion of the production documentation milestone.'
 );
+foreach (['Filesystem health', 'Session health'] as $removedCheck) {
+    repositoryDocumentationAssert(
+        !str_contains($roadmap, $removedCheck),
+        "Roadmap still lists the removed System Health check: {$removedCheck}."
+    );
+}
+
+// Relative Markdown links and their heading anchors must resolve.
+$markdownSlug = static fn (string $heading): string => str_replace(' ', '-',
+    (string)preg_replace('/[^\p{L}\p{N} _-]/u', '', strtolower(trim($heading))));
+$markdownAnchors = static function (string $path) use ($markdownSlug): array {
+    preg_match_all('/^#{1,6}\s+(.+?)\s*#*$/m', (string)file_get_contents($path), $headings);
+    return array_map($markdownSlug, $headings[1]);
+};
+foreach (array_merge([$root . '/README.md', $root . '/CHANGELOG.md'], glob($root . '/docs/*.md') ?: []) as $document) {
+    preg_match_all('/\]\(([^)\s]*)\)/', (string)file_get_contents($document), $links);
+    foreach ($links[1] as $link) {
+        if ($link === '' || preg_match('#^[a-z][a-z0-9+.-]*:#i', $link) === 1) continue;
+        [$target, $anchor] = array_pad(explode('#', $link, 2), 2, null);
+        $targetPath = $target === '' ? $document : dirname($document) . '/' . rawurldecode($target);
+        repositoryDocumentationAssert(file_exists($targetPath), basename($document) . " links to a missing file: {$link}");
+        if ($anchor !== null && $anchor !== '' && str_ends_with($targetPath, '.md')) {
+            repositoryDocumentationAssert(
+                in_array($anchor, $markdownAnchors($targetPath), true),
+                basename($document) . " links to a missing heading: {$link}"
+            );
+        }
+    }
+}
 foreach (['request flow', 'X-API-Key', 'queries/system/', 'php -n tests/run.php'] as $guideMarker) {
     repositoryDocumentationAssert(
         str_contains(strtolower($aiGuide), strtolower($guideMarker)),
