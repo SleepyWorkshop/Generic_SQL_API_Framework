@@ -87,7 +87,8 @@ testing.
 - CORS configuration
 - Runtime configuration
 - System health
-- Local service and database lifecycle controls
+- Development process controls and production application availability controls
+- Hosting-mode-aware configuration (no Server tab in production)
 - Deployment-path-independent Admin Console
 
 ## Authentication
@@ -215,13 +216,12 @@ testing.
 - Public readiness checks
 - Authenticated detailed health checks
 - Configuration health
-- Database health
-- Process health
-- Filesystem health
+- Database health with disabled, connected, and unhealthy states
+- Process health (managed processes in development, web-server-owned
+  application availability in production)
 - Logging health
-- Session health
 - Encryption health
-- Backup health
+- Backup health (reported separately; never affects overall status or readiness)
 - Cross-platform lifecycle management
 - Stale-process recovery
 - Duplicate-process recovery
@@ -261,6 +261,51 @@ testing.
 - Production process ownership through IIS/FastCGI or Nginx/PHP-FPM
 - Development-only local process management
 - Deployment-independent Admin Console base paths
+
+## Production Hardening
+
+Status: Completed
+
+Five production phases aligned the Admin Console, health model, and
+deployment templates with IIS/FastCGI and Nginx/PHP-FPM ownership of listeners
+and workers. Each phase was delivered with regression tests.
+
+| Phase | Scope | Status |
+|---|---|---|
+| Phase 1 | Production configuration and IIS ownership | Completed |
+| Phase 2 | API and SQL Parser application availability | Completed |
+| Phase 3 | Application database availability | Completed |
+| Phase 4 | Production System Health | Completed |
+| Phase 5 | Admin Console cleanup | Completed |
+
+- **Phase 1 — Production configuration and IIS ownership:** development port
+  settings are no longer presented as production listener settings;
+  `admin.server.save` is rejected in production; every IIS boundary
+  (`/api`, `/admin`, `/sqlparser`) has its own FastCGI registration that sets
+  `GENERIC_APP_ENV=production` explicitly.
+- **Phase 2 — API and SQL Parser availability:** production Start/Stop/Reload
+  change only application availability, enforced at each entry point with a
+  safe `503 SERVICE_UNAVAILABLE`; no process, port, or PID is created, while
+  development keeps its real process managers.
+- **Phase 3 — Database availability:** Connect verifies the saved encrypted
+  configuration with one closed test connection before enabling access;
+  Disconnect only disables access; failures return safe configuration or
+  connection reasons; connections remain request-scoped with no pool.
+- **Phase 4 — System Health:** production services report web-server
+  ownership with no fabricated PID/port; database and encryption health use
+  explicit states; readiness adds the API availability check and honours cached
+  connectivity failures without opening SQL connections; backup health reuses
+  the existing backup service.
+- **Phase 5 — Admin Console cleanup:** filesystem and session-directory
+  diagnostics were removed from System Health; production configuration has no
+  Server tab and safely falls back to Database.
+
+The production documentation and validation milestone that followed these
+phases (the [Windows Server IIS deployment](Windows-IIS-Deployment.md) guide,
+consolidated hosting/security/database/health/backup documentation, and an
+updated roadmap and documentation tests) is also complete. Remaining
+verification work, such as live IIS and SQL Server validation on target hosts
+and security scanning, is planned under v2.1.
 
 ## Testing
 
@@ -361,6 +406,8 @@ work.
 - Log rotation and cleanup improvements
 - Additional production diagnostics
 - Additional operational validation
+- Live IIS/FastCGI, Nginx/PHP-FPM, TLS, and SQL Server validation on target
+  hosts (template and application behavior are already covered by tests)
 
 ---
 
@@ -513,6 +560,7 @@ consume this API.
 |---|---|---|
 | v1.0.0 | Core Generic SQL API Framework | Completed |
 | v2.0.0 | Platform Expansion & Security | Implemented / Current |
+| v2.0.0 Production Hardening | Production Phases 1–5 and production documentation | Completed |
 | v2.1 | Security Verification & Operational Hardening | Planned |
 | v3.0 | Multi-Database Support | Planned |
 | v3.1 | Developer Experience & API Integration | Planned |
