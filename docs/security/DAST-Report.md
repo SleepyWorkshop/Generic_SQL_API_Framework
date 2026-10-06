@@ -11,6 +11,23 @@ whose results are not reopened. Scope for the external penetration test is in
 [Penetration-test preparation](Penetration-Test-Preparation.md). No password,
 hash, API key, session identifier, token, or other secret is reproduced here.
 
+## Summary
+
+- **Resolved:** DAST-01 (SQL Parser PHP version disclosure) and DAST-02 (SQL
+  Parser development router executed arbitrary PHP files).
+- **Accepted:** DAST-03, DAST-04, and DAST-05 remain accepted Informational
+  observations that affect development only.
+- **Not performed:** authenticated, session, rate-limit, and injection dynamic
+  testing was not performed in this phase (see
+  [Section 5](#5-not-performed)).
+- **Existing regression coverage:** the v2.1.3 and earlier automated regression
+  suites exercise portions of those security controls (see
+  [Section 6](#6-existing-regression-coverage-of-deferred-areas)). That
+  coverage is not DAST and does not replace the deferred external DAST and
+  penetration-test activity.
+- **Handoff:** [Penetration-test preparation](Penetration-Test-Preparation.md)
+  is the handoff for the external penetration test.
+
 ## 1. Scope and method
 
 - **Targets:** the local development deployment only. The public API ran on
@@ -152,7 +169,254 @@ is already covered by the v2.1.3 suites against isolated, temporary
 deployments (see the
 [Authorization & API security inventory](Authorization-API-Security-Inventory.md#coverage-verification)).
 
-## 6. Regression coverage
+## 6. Existing regression coverage of deferred areas
+
+This section maps the existing automated regression suites to the deferred
+areas. It is **not** DAST: no new dynamic testing was performed to produce it.
+It was compiled by reading the test code. The suites run against isolated,
+temporary state with synthetic accounts, and the database is left unavailable,
+so any request that reaches the database ends at `503 DATABASE_UNAVAILABLE`.
+"Over HTTP" means the suite sends real requests to the PHP built-in server.
+"In-process" means it calls the application classes directly.
+
+Classification:
+
+- **Covered:** the control is asserted by existing regression tests, including
+  over HTTP.
+- **Partially covered:** some aspects are asserted, but others are untested,
+  untested over HTTP, or depend on infrastructure the suites do not run.
+- **Not covered:** deferred to the external penetration test.
+
+| # | Area | Classification | Not covered by the suites (external pentest scope) |
+|---|---|---|---|
+| 1 | Authentication | Partially covered | Unicode, long, and duplicate-field credentials; disabled- and deleted-account login over HTTP; production hosting |
+| 2 | Session management | Partially covered | Secure cookie over real TLS; session fixation and timeouts observed over HTTP |
+| 3 | Authorization | Covered | Behavior with a live SQL Server database |
+| 4 | CSRF | Covered | Browser-based cross-site requests |
+| 5 | API-key security | Covered | Behavior behind a production reverse proxy |
+| 6 | Rate limiting | Partially covered | Per-client isolation over HTTP; multi-worker or multi-host deployments |
+| 7 | Input validation / injection | Partially covered | Injection against a live SQL Server database; HTML or script content round-tripped through stored data |
+| 8 | Error and information disclosure | Partially covered | Production-mode responses through IIS or Nginx and FastCGI; real database errors |
+| 9 | SQL Parser | Partially covered | SQL comments; non-JSON content types; broader malformed-input testing |
+| 10 | Admin API | Covered | Loopback boundary behind a production reverse proxy |
+| 11 | Path / file access | Partially covered | Public API and Admin routing over HTTP; IIS and Nginx routing in a deployed environment |
+| 12 | Security headers / transport | Partially covered | Live TLS configuration; headers emitted by a deployed IIS or Nginx; `TRACE` in production |
+
+### Supporting tests
+
+**1. Authentication** — Partially covered
+
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`):
+  - valid login and wrong-password `401 INVALID_CREDENTIALS`;
+  - login CSRF, and an unknown login property rejected with
+    `INVALID_AUTH_REQUEST`;
+  - malformed JSON, empty and NUL bodies, scalar bodies, and wrong content
+    types refused before dispatch on both APIs.
+- **In-process** (`tests/SecurityTestingTest.php`):
+  - empty username, CR/LF username, empty password, and a client-supplied role
+    are rejected by validation;
+  - missing and disabled accounts receive identical generic failures;
+  - a deleted account's session is invalidated.
+- **In-process** (`tests/AuthenticationFlowTest.php`):
+  - a rejected login creates no session, and login regenerates the session
+    identifier;
+  - usernames are normalized, passwords are not trimmed, and logout destroys
+    the session.
+- **In-process** (`tests/FirstTimeSetupTest.php`): passwords are stored hashed
+  only.
+
+**2. Session management** — Partially covered
+
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`):
+  - a logged-out cookie cannot be replayed;
+  - existing sessions are revoked after a frontend-access change, profile
+    rename, disable and re-enable, or role change;
+  - non-POST and OPTIONS requests never touch the session.
+- **In-process** (`tests/SecurityHardeningTest.php`, `tests/SecurityTestingTest.php`):
+  - login regenerates the session identifier, and strict mode rejects the old
+    and destroyed identifiers;
+  - URL session identifiers are refused;
+  - the cookie is session-only, `HttpOnly`, `SameSite=Lax`, host-only, has
+    path `/`, and is `Secure` in production;
+  - idle and absolute timeouts are enforced;
+  - logout deletes server-side state;
+  - password changes and deletion invalidate sessions;
+  - concurrent same-session requests serialize.
+- **In-process** (`tests/HttpsSecurityTest.php`): cookies are `Secure` in
+  production and on direct HTTPS, and not because of a forwarded protocol
+  header.
+
+**3. Authorization** — Covered
+
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`):
+  - anonymous callers are refused on every data action;
+  - read-only, data-operator, and frontend-only sessions are refused on every
+    frontend-user action;
+  - an Application Administrator cannot create privileged users, promote
+    accounts, change its own lifecycle, or reach System Administrators through
+    username case variants;
+  - client-supplied identity fields are ignored;
+  - SQL Resource and write-resource scopes are enforced.
+- **Over HTTP** (`tests/AuthorizationBoundaryTest.php`): Application
+  Administrators cannot manage backend-only accounts (AAPI-01), and System
+  Administrator accounts cannot be managed through the public API (AAPI-02).
+- **Over HTTP** (`tests/ApiSecurityHardeningTest.php`): backend identity
+  profiles are minimized in frontend lists, and refused probes create no
+  accounts.
+- **In-process** (`tests/SecurityTestingTest.php`,
+  `tests/FrontendUserMutationAuthorizationTest.php`): the role and permission
+  matrix and resource scopes are enforced.
+
+**4. CSRF** — Covered
+
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`):
+  - all 13 protected public actions and all 36 protected Admin actions refuse
+    missing, invalid, and foreign-session tokens, with no persisted state
+    change;
+  - the token rotates at login, and the pre-login token is rejected afterwards;
+  - API-key writes are CSRF-exempt.
+- **In-process** (`tests/ApiSecurityHardeningTest.php`): registered write
+  routines require CSRF (AAPI-03).
+- **In-process** (`tests/SecurityHardeningTest.php`,
+  `tests/SecurityTestingTest.php`): the token rotates on login and is
+  invalidated on logout.
+
+**5. API-key security** — Covered
+
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`):
+  - malformed, unknown, wrong-secret, and empty keys are rejected;
+  - disabled and revoked keys, including a revoked key left enabled in
+    storage, and keys whose owner is disabled are rejected;
+  - a revoked key cannot be re-enabled;
+  - keys cannot be created with privileged or mixed roles;
+  - keys are confined to their resource scopes;
+  - keys never reach Admin or frontend-user management;
+  - API-key mode fails closed without keys;
+  - legacy shared-key behavior;
+  - `session+api_key` precedence.
+- **In-process** (`tests/SecurityTestingTest.php`,
+  `tests/UnifiedAdminConsoleTest.php`): the raw key is shown once and never
+  stored or listed, and client fields cannot raise a key's role.
+
+**6. Rate limiting** — Partially covered
+
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`):
+  - the login lockout triggers after the configured failures, and username
+    case variants do not bypass it;
+  - the API rate limit applies to sessions and to anonymous callers
+    (`429 RATE_LIMIT_EXCEEDED`).
+- **In-process** (`tests/SecurityTestingTest.php`):
+  - lockout feedback contains only the server-side retry duration;
+  - invalid API keys are throttled, and changing the user agent or request ID
+    does not reset the count.
+- The HTTP suite gives each run its own client address so that stored counters
+  do not affect other runs, but it does not assert per-client isolation.
+
+**7. Input validation / injection** — Partially covered
+
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`):
+  - non-string actions (`[]`, number, `null`, boolean, object) return
+    `400 INVALID_REQUEST`;
+  - padded and case-changed actions are not normalized;
+  - unknown properties are rejected by every validator;
+  - method, content-type, and body-size limits are enforced;
+  - no request in the suite logs a PHP warning or notice.
+- **In-process** (`tests/SecurityTestingTest.php`):
+  - filter and write values are bound as prepared parameters, including a
+    quote and `UNION` payload;
+  - table, sort, direction, column, filter-expression, and resource
+    identifiers containing SQL metacharacters are rejected;
+  - SQL Resources reject `INTO`, multiple statements, and `DELETE`;
+  - write resources and connection-string fields reject injection.
+- **In-process** (`tests/StaticSecurityRemediationTest.php`): inlined
+  literals use quote doubling, including Unicode quote lookalikes and NUL.
+
+**8. Error and information disclosure** — Partially covered
+
+- **In-process** (`tests/ProductionErrorHandlingTest.php`,
+  `tests/SecurityTestingTest.php`):
+  - unexpected, database, credential, and timeout errors map to safe codes
+    without paths, SQL, ODBC diagnostics, environment variable names,
+    credentials, or stack traces;
+  - accidental buffered output cannot corrupt error responses;
+  - logs redact passwords, keys, session identifiers, CSRF tokens, bearer
+    tokens, and cookies.
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`): no request in the
+  suite logs a PHP warning, notice, or deprecation.
+- **In-process** (`tests/UnifiedAdminConsoleTest.php`): Admin status and
+  configuration responses do not return the database password, encryption
+  key, or API key secret.
+
+**9. SQL Parser** — Partially covered
+
+- **In-process** (`tests/SqlParserGeneratorTest.php`):
+  - the handler returns `INVALID_JSON`, 405, and 413 as expected;
+  - parse errors report stage, line, and column without the SQL fragment;
+  - multiple statements and unsupported features are rejected;
+  - no database execution classes are loaded.
+- **Over HTTP** (`tests/DastRegressionTest.php`):
+  - page rendering, a valid parse, and a malformed-JSON error;
+  - no `X-Powered-By` header;
+  - development security headers;
+  - only the two assets are served, and `router.php`, `src/*.php`, traversal
+    variants, directories, and dotfiles return 404.
+- **In-process** (`tests/SqlParserAssetUrlTest.php`): asset URLs reject
+  traversal and script injection through `SCRIPT_NAME`.
+
+**10. Admin API** — Covered
+
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`):
+  - every gated action returns 404 with `GENERIC_ADMIN_ENABLED` set to `0` or
+    unset;
+  - a non-loopback client is refused even with a valid System Administrator
+    session and CSRF token, and with `X-Forwarded-For`, `X-Real-IP`,
+    `Forwarded`, or `Client-IP` claiming loopback;
+  - requests without a session are refused;
+  - read-only, data-operator, and Application Administrator sessions are
+    refused;
+  - unknown actions are refused, and CSRF is enforced;
+  - the last enabled System Administrator is protected;
+  - backup identifiers are validated, and the body limit is enforced;
+  - authorized actions succeed.
+- **Over HTTP** (`tests/AuthorizationBoundaryTest.php`,
+  `tests/StaticSecurityRemediationTest.php`): Admin identity management works
+  only through the enabled loopback Admin API, and setup runs once.
+
+**11. Path / file access** — Partially covered
+
+- **Over HTTP** (`tests/DastRegressionTest.php`): SQL Parser traversal,
+  encoded traversal, source, router, directory, and dotfile requests return 404.
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`): Admin backup
+  identifiers with traversal or a `.php` name are refused, and nothing is
+  written outside the backup directory.
+- **In-process** (`tests/SecurityTestingTest.php`):
+  - SQL Resource IDs reject `../`, `..\`, absolute, Windows, encoded,
+    NUL-byte, and URL forms;
+  - write-resource IDs reject traversal;
+  - backups cannot be written outside their directory.
+- Production IIS and Nginx routing was reviewed manually (see
+  [Section 3](#3-results)). The suites do not check it.
+
+**12. Security headers / transport** — Partially covered
+
+- **Template checks** (`tests/HttpsSecurityTest.php`):
+  - the Nginx and IIS templates define HSTS (without `preload` or
+    `includeSubDomains`), nosniff, `Referrer-Policy`, CSP with
+    `frame-ancestors 'none'`, `X-Frame-Options`, and `Permissions-Policy`;
+  - TLS 1.2 and 1.3, and the HTTP redirect behavior;
+  - applications do not emit HSTS;
+  - no key material is present.
+- **Over HTTP** (`tests/AuthorizationApiCoverageTest.php`):
+  - CORS refuses disallowed origins on POST and on preflight, reflects only
+    allowed origins, and sends no CORS headers without an `Origin`;
+  - public OPTIONS returns 204, Admin OPTIONS returns 405, and other methods
+    return 405.
+- **Over HTTP** (`tests/DastRegressionTest.php`): SQL Parser development
+  headers.
+- These suites do not assert TLS behavior or the headers sent by a deployed
+  IIS or Nginx server.
+
+## 7. DAST regression tests
 
 `tests/DastRegressionTest.php` runs the SQL Parser on the PHP built-in server
 with `expose_php` forced on, both through the development router and with
@@ -195,9 +459,10 @@ The test servers now run with `display_errors=0` and
 configuration do. No application code or assertion changed, and v2.1.3 results
 are unaffected.
 
-## 7. Files changed
+## 8. Files changed
 
 - `sqlparser/index.php`, `sqlparser/router.php` (DAST-01, DAST-02)
 - `runtime/linux/php/php.ini` (DAST-01)
 - `tests/DastRegressionTest.php`, `tests/run.php`
 - `tests/AuthorizationApiCoverageTest.php` (test-server settings only)
+- `docs/security/DAST-Report.md` (this report; Section 6 adds the existing regression coverage map)
