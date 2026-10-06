@@ -110,6 +110,11 @@ final class AuthorizationRepository
             if (!is_string($role) || !in_array($role, RoleModel::backendRoles(), true)) {
                 throw new RuntimeException('Unknown authorization role.');
             }
+            // Anonymous (mode "none") and legacy shared-key principals never
+            // carry the System Administrator identity.
+            if ($role === RoleModel::SYSTEM_ADMINISTRATOR) {
+                throw new RuntimeException('Unsafe authorization role assignment.');
+            }
         }
         $apiAdministrator = $value['roles'][RoleModel::API_ADMINISTRATOR] ?? null;
         if (array_diff(RoleModel::backendRoles(), array_keys($value['roles'])) !== []

@@ -1,14 +1,14 @@
 # Authorization & API Security Inventory
 
-Review status: **Remediation in progress — AAPI-01 and AAPI-02 resolved; AAPI-03 – AAPI-08 open; v2.1.3 not complete** — 2026-10-06
+Review status: **All findings dispositioned (AAPI-01 – AAPI-08); v2.1.3 test plan not yet complete** — 2026-10-06
 
 This document records the read-only first step of roadmap phase v2.1.3
 (Authorization & API Security Testing) of
 [v2.1 — Security Verification & Operational Hardening](../Roadmap.md#v21--security-verification--operational-hardening).
 It maps the backend authorization and API boundary as implemented at commit
 `2436a8f` and proposes the v2.1.3 test plan. AAPI-01 and AAPI-02 have since
-been resolved (see [Remediation status](#remediation-status)); AAPI-03 –
-AAPI-08 remain open. No code, configuration, test, or
+been resolved, and AAPI-03 – AAPI-08 have received final dispositions (see
+[Remediation status](#remediation-status)). No code, configuration, test, or
 authentication state was changed. No password, hash, API key, session
 identifier, token, or other secret is reproduced here.
 
@@ -68,7 +68,7 @@ disabled (`ApplicationRuntimeMiddleware`).
 | `auth.frontendUsers.update`, `.enable`, `.disable`, `.delete`, `.changePassword`, `.assignRole` | POST | Public | Session only | `frontend.users.manage` + persisted actor/target policy (§12) | **Yes** | Runtime enabled |
 | `select`, `union`, `unionAll` | POST | Public | API mode (below) | `data.read` or `frontend.read`; query-source registry | No | Runtime + database |
 | `sql` | POST | Public | API mode | `sql.execute` with `sqlResources` scope, or `frontend.read` (no scope, SSA-06) | No | Runtime + database |
-| `procedure`, `function`, `tableFunction` | POST | Public | API mode | Routine registry + `routine.execute` + listed role; `data.write` for write routines | **No** (AAPI-03) | Runtime + database |
+| `procedure`, `function`, `tableFunction` | POST | Public | API mode | Routine registry + `routine.execute` + listed role; `data.write` for write routines | **Write routines only** (session; AAPI-03) | Runtime + database |
 | `insert`, `update`, `delete`, `upsert` | POST | Public | API mode | `data.write` with `writeResources` scope | **Yes** (session only) | Runtime + database |
 | `metadata.tables`, `.columns`, `.views`, `.procedures`, `.schema` | POST | Public | API mode | `metadata.read` or `frontend.read`; source filtering | No | Runtime + database |
 
@@ -121,7 +121,7 @@ availability gate. `GENERIC_ADMIN_ENABLED` affects only the gated actions.
 | Authenticated with no further permission check | 0 |
 | Permission-protected actions | 67 (16 public data, 8 frontend user, 43 Admin) |
 | Actions with role checks beyond permissions | 10: 3 routine actions (registry roles) and 7 frontend user mutations (persisted SA/AA policy) |
-| CSRF-protected action names | 47 (13 reachable publicly, 36 on Admin; `auth.login` and `auth.logout` on both) |
+| CSRF-protected action names | 47 (13 reachable publicly, 36 on Admin; `auth.login` and `auth.logout` on both), plus the 3 routine actions when the resolved routine is registered with `access: write` (AAPI-03) |
 
 ## 3. Authentication Flow
 
@@ -251,7 +251,7 @@ from storage rather than trusting the principal.
 | Admin actions (`admin.*`) | `404` | Intentionally unavailable |
 | Backend identity, API key and role management (`auth.users.*`, `auth.apiKeys.*`, `auth.roles.list`) | `404` | Intentionally unavailable (SSA-04); `auth.frontendUsers.*` no longer reaches backend identities (AAPI-01, AAPI-02 resolved) |
 | `setup.createAdmin` | `404` | Intentionally unavailable (SSA-02) |
-| Routine execution | Registry + `routine.execute` (shipped registry is empty) | Intentionally protected; no CSRF (AAPI-03) |
+| Routine execution | Registry + `routine.execute` (shipped registry is empty) | Intentionally protected; CSRF for registered write routines (AAPI-03 resolved) |
 | SQL Resources (`sql`) | `sql.execute` + scope, or `frontend.read` | Intentionally protected |
 | JSON queries and metadata | `data.read` / `metadata.read` / `frontend.read` + query-source registry | Intentionally protected |
 | Writes | `data.write` + `writeResources` + CSRF for sessions | Intentionally protected |
@@ -318,7 +318,7 @@ api-administrator, and `[]` otherwise.
 - SA must hold `admin.manage`;
 - api-administrator never holds `frontend.users.manage`.
 
-`publicRoles` and `legacyApiKeyRoles` accept any backend role (AAPI-08).
+`publicRoles` and `legacyApiKeyRoles` accept `read-only` or `data-operator`; `system-administrator` is rejected (AAPI-08).
 
 **Minimum privilege per action:**
 
@@ -362,9 +362,9 @@ the existing suites. No real account is modified.
 | Identifier | Accepted by | Object-level check | Assessment |
 |---|---|---|---|
 | `username` | `auth.users.*` (Admin) | `admin.manage` covers all users; self-authorization change denied; last-SA guard | Adequate for a single admin tier |
-| `username` | `auth.frontendUsers.*` (public) | Actor re-read from storage; target protected only if SA; AA peers protected from role change | **Gap:** backend-only users are not protected (AAPI-01); `404` vs `403` reveals existence (AAPI-04) |
+| `username` | `auth.frontendUsers.*` (public) | Actor re-read from storage; backend identities refused for every actor; AA peers protected from role change; missing targets refused like protected ones | Adequate (AAPI-01, AAPI-02, AAPI-04 resolved); uniqueness `409` on create/rename accepted (AAPI-04) |
 | API key `id` (16 hex, random) | `auth.apiKeys.enable/disable/revoke` | `admin.manage`; no per-owner scoping (single admin tier) | Adequate |
-| API key `ownerUsername` | `auth.apiKeys.create` | Owner must exist and be enabled; key role is independent of the owner's role | AAPI-06 |
+| API key `ownerUsername` | `auth.apiKeys.create` | Owner must exist and be enabled; key role is independent of the owner's role | Accepted design (AAPI-06) |
 | Role IDs | `auth.users.create/assignAuthorization`, `auth.apiKeys.create`, `auth.frontendUsers.create/assignRole` | Enumerated against `RoleModel` per domain | Adequate |
 | SQL Resource `resource` | `sql` | `sqlResources` scope; discovery allowlist; bypassed by `frontend.read` (SSA-06) | Accepted limitation |
 | Write `resource` | `insert`/`update`/`delete`/`upsert` | `writeResources` scope + write registry | Adequate |
@@ -391,7 +391,8 @@ owned). IDOR risk is therefore concentrated in identity management.
   - The size limit is enforced while reading (`413`).
   - Malformed JSON → `400 INVALID_JSON`; a scalar → `400 INVALID_REQUEST`.
   - The Admin API also rejects a JSON list. The public API accepts a list
-    such as `[]`: it then fails action validation (AAPI-07).
+    such as `[]`: it is never dispatched to an action and fails
+    authentication or authorization (AAPI-07, informational).
 - **Unexpected parameters:** auth, setup, frontend user, user management,
   API key, role and Admin validators reject unknown properties. Query
   validators allowlist keys per action.
@@ -420,7 +421,7 @@ owned). IDOR risk is therefore concentrated in identity management.
 | Resource, routine or query-source scope | 403 | `RESOURCE_ACCESS_DENIED` | |
 | CSRF missing or invalid | 403 | `CSRF_VALIDATION_FAILED` | Public: after frontend-user authorization, before data authorization. Admin: after authorization |
 | Last enabled SA | 403 | `LAST_ENABLED_ADMIN` | |
-| Target user missing | 404 | `USER_NOT_FOUND` | Checked before the frontend target policy (AAPI-04) |
+| Target user missing | 404 / 403 | `USER_NOT_FOUND` / `AUTHORIZATION_DENIED` | `404` on the Admin API; the public frontend path refuses a missing target like a protected one (AAPI-04) |
 | Setup after initialization | 409 | `INSTALLATION_ALREADY_INITIALIZED` | |
 | Database unavailable | 503 | `DATABASE_UNAVAILABLE` | Only after authorization (public data actions) |
 
@@ -436,7 +437,7 @@ The intended convention is:
 | Path | Controls | Result |
 |---|---|---|
 | Public → any user | Registration does not exist; `setup.createAdmin` needs the gate and pre-initialization | No path |
-| Public (mode `none`) → write | Anonymous principal gets `publicRoles` (default read-only) | No path by default; config-dependent (AAPI-08) |
+| Public (mode `none`) → write | Anonymous principal gets `publicRoles` (default read-only) | No path by default; anonymous write requires an explicit operator configuration; anonymous SA rejected (AAPI-08) |
 | Frontend user (no role) → AA | `assignRole` to AA denied to AA actors; only SA can grant | No path |
 | AA → SA | SA targets protected; `createFrontendUser` limited to AA and read-only roles; `system-administrator` assignment denied | No path |
 | AA → data-operator / read-only backend account | Public path refuses backend identities (`isFrontendManagedIdentity`) | **Closed** (AAPI-01 resolved). Before the fix, AA could reset a backend-only data-operator password and log in as that user |
@@ -444,7 +445,7 @@ The intended convention is:
 | SA (remote, public API) → other SA identities | Backend-identity check runs before the SA actor shortcut | **Closed** (AAPI-02 resolved); SA accounts are managed only through the loopback Admin API |
 | Self → higher role | `assignAuthorization` self-change denied; AA self lifecycle/authorization denied | No path |
 | API key → admin | Key roles exclude SA and AA; Admin never accepts keys; `auth.*` needs a session | No path |
-| API key → broader than owner | Key role is chosen by the SA and is not bounded by the owner's role | Design choice (AAPI-06) |
+| API key → broader than owner | Key role is chosen by the SA and is not bounded by the owner's role | Accepted design (AAPI-06) |
 | Admin → unrestricted backend | SA is the top role. Bounded by the query-source registry, routine registry, write registry and read-only SQL Resources | Intended |
 | Configuration → privilege | `authorization.json` is file-only (no API writes it); validation enforces role invariants | No API path |
 
@@ -468,9 +469,9 @@ The intended convention is:
   identity and Admin actions.
 - **GET:** cannot trigger anything (`405`).
 - **Gaps:**
-  - The routine actions (`procedure`, `function`, `tableFunction`) are not
-    CSRF-protected, although registered write routines change data
-    (AAPI-03).
+  - Resolved (AAPI-03): registered write routines (`access: write`) now
+    require CSRF for session callers. Read routines stay unprotected, like
+    `select`.
   - Read-only Admin actions (`admin.database.get`, `admin.settings.get`, etc.)
     are unprotected by design; they return data only to a same-origin caller.
 - **Additional browser defenses:** SameSite=Lax cookies, the
@@ -508,8 +509,10 @@ The intended convention is:
 
 **Authorization implications:**
 - Password changes through `auth.frontendUsers.changePassword` (own or
-  others') do not require the current password. A hijacked AA or SA session
-  can therefore lock out the account owner (AAPI-05).
+  others') do not require the current password. Every change revokes all of
+  the account's sessions, including the session that made it. The residual
+  owner-lockout risk from a hijacked administrator session is accepted
+  (AAPI-05).
 - Admin and public sessions share a cookie name. They are separated only when
   Admin is served on a different host (as in the deployment templates).
 
@@ -530,10 +533,10 @@ The intended convention is:
 | `admin.manage` enforcement | `AdminUserManagementTest`, `SecurityTestingTest` | Role checks at service and middleware level | HTTP matrix for every Admin action and non-admin role |
 | Login, generic failures, regeneration | `SecurityTestingTest`, `AuthenticationFlowTest` | Good | — |
 | Session expiry, logout replay, `authVersion` | `SecurityTestingTest`, `ApiProtectionTest`, `SecurityHardeningTest` | Good | Rename and frontend-access changes as invalidation triggers |
-| CSRF | `SecurityTestingTest`, `SecurityHardeningTest`, `AuthorizationAndApiKeyTest` | Rotation, API-key independence, samples | Every one of the 47 protected actions; routine actions (AAPI-03) |
+| CSRF | `SecurityTestingTest`, `SecurityHardeningTest`, `AuthorizationAndApiKeyTest` | Rotation, API-key independence, samples; write routines (`ApiSecurityHardeningTest`) | Every one of the 47 protected actions over HTTP |
 | API keys | `SecurityTestingTest`, `AuthorizationAndApiKeyTest`, `SecurityAuditLoggingTest` | Secret handling, owner state, revoke, role confinement | Mode matrix (`api_key`, `session+api_key`, legacy key) over HTTP |
 | Role and resource scopes | `SecurityTestingTest`, `SqlResourceFilteringTest`, `StaticSecurityRemediationTest` | `sql`/`write` scopes, query sources, routines | — |
-| Frontend user policy | `FrontendUserMutationAuthorizationTest`, `AuthorizationBoundaryTest` (HTTP), `SecurityTestingTest` | AA self/peer/normal/SA targets; backend-only targets and SA → SA refused publicly (AAPI-01/02) | Enumeration (AAPI-04) |
+| Frontend user policy | `FrontendUserMutationAuthorizationTest`, `AuthorizationBoundaryTest` (HTTP), `SecurityTestingTest` | AA self/peer/normal/SA targets; backend-only targets and SA → SA refused publicly (AAPI-01/02); profile minimization and uniform refusals (`ApiSecurityHardeningTest`, AAPI-04) | — |
 | Client-supplied identity fields | `SecurityTestingTest` | Server identity wins | — |
 | Method / content type / JSON | `ProductionErrorHandlingTest`, `SecurityTestingTest` | Error mapping, safe methods | HTTP `405`/`415`/`INVALID_JSON` on both APIs; public JSON list |
 | CORS | `SecurityTestingTest`, `ProductionValidationTest` | Configuration validation | HTTP preflight and disallowed-origin `403` |
@@ -575,7 +578,7 @@ or accepted.
 | P1-07 | No self-authorization change; last SA protected | `auth.users.assignAuthorization`, `.disable`, `.delete` | SA session | `admin.manage` | Self target; last enabled SA | `403` / `403 LAST_ENABLED_ADMIN` | Lockout and escalation guard |
 | P1-08 | API key role confinement | `auth.apiKeys.create` | SA session | `admin.manage` | Roles SA, AA, two roles, empty | `400` | Key privilege ceiling |
 | P1-09 | No API key reaches Admin | `/api` `admin.*`; Admin API actions | api-administrator key | n/a | Header only | `404` (public), `401` (Admin) | Key/Admin separation |
-| P1-10 | Authorization invariants | `AuthorizationRepository::validate` | n/a | n/a | `admin.manage` added to non-SA roles; `data.write` to read-only/AA; `publicRoles` = SA | Rejected; `publicRoles` per AAPI-08 decision | Configuration integrity |
+| P1-10 | Authorization invariants | `AuthorizationRepository::validate` | n/a | n/a | `admin.manage` added to non-SA roles; `data.write` to read-only/AA; `publicRoles` = SA | Rejected; SA in `publicRoles`/`legacyApiKeyRoles` rejected (AAPI-08, implemented) | Configuration integrity |
 
 ### P1 — Admin API protection
 
@@ -606,7 +609,7 @@ or accepted.
 |---|---|---|---|---|---|---|---|
 | P2-01 | Public CSRF on all 13 protected actions | Login, logout, 7 frontend user mutations, 4 writes | Session | Per action | No / invalid token | `403 CSRF_VALIDATION_FAILED`; no state change | CSRF |
 | P2-02 | API-key requests are exempt from CSRF | `insert` | data-operator key | `data.write` | No CSRF header | Allowed (documented exception) | Intended exception |
-| P2-03 | Write routines require CSRF for sessions **(finding AAPI-03)** | `procedure` (registered write routine fixture) | data-operator session | `routine.execute` + `data.write` | No CSRF header | `403 CSRF_VALIDATION_FAILED` | CSRF completeness |
+| P2-03 | Write routines require CSRF for sessions (AAPI-03, implemented) | `procedure` (registered write routine fixture) | data-operator session | `routine.execute` + `data.write` | No CSRF header | `403 CSRF_VALIDATION_FAILED` | CSRF completeness |
 | P2-04 | Login CSRF and rotation | `auth.login` | Anonymous | n/a | No token; then token reused after login | `403`; old token rejected after rotation | Login CSRF |
 | P2-05 | Session fixation | `auth.login` | Anonymous with attacker-chosen cookie | n/a | Strict mode | New session ID; unknown IDs not adopted | Fixation |
 | P2-06 | Expiry | Data action | Session | n/a | Idle and absolute limits exceeded | `401`; session destroyed | Expiration |
@@ -626,7 +629,7 @@ or accepted.
 | P2-15 | API key identifiers | `auth.apiKeys.enable/disable/revoke` | SA | `admin.manage` | Unknown id; malformed id | `404 API_KEY_NOT_FOUND` / `400` | Object lookup |
 | P2-16 | Backup identifiers | `admin.backup.download/preview/restore` | SA | `admin.manage` | Traversal, wrong format, unknown token | `400` / `404`; no file outside the backup directory | Path and object safety |
 | P2-17 | Username case variants | `auth.frontendUsers.*` | AA | Policy | SA username in different case | `403` | Case-insensitive protection |
-| P2-18 | Username enumeration **(finding AAPI-04)** | `auth.frontendUsers.changePassword` | AA | Policy | Unknown vs existing backend-only username | Indistinguishable response (per remediation) | Enumeration resistance |
+| P2-18 | Username enumeration (AAPI-04, implemented) | `auth.frontendUsers.changePassword` | AA | Policy | Unknown vs existing backend-only username | Identical `403 AUTHORIZATION_DENIED` | Enumeration resistance |
 
 ### P2 — HTTP method/content validation
 
@@ -634,7 +637,7 @@ or accepted.
 |---|---|---|---|---|---|---|---|
 | P2-19 | Methods | Both APIs | Any | n/a | `GET`, `PUT`, `PATCH`, `DELETE`; Admin `OPTIONS` | `405` | Method enforcement |
 | P2-20 | Content type | Both APIs | Any | n/a | Missing, `text/plain`, form, multipart; JSON with `charset` | `415`; JSON with charset accepted | Content-type enforcement |
-| P2-21 | JSON body | Both APIs | Any | n/a | Malformed, empty, scalar, list | `400`; public list behavior per AAPI-07 | Input validation |
+| P2-21 | JSON body | Both APIs | Any | n/a | Malformed, empty, scalar, list | `400`; public list body never dispatched (AAPI-07, implemented) | Input validation |
 | P2-22 | Unknown properties | Auth, frontend user, Admin validators | Authorized | Per action | Extra property | `400` | Strict schemas |
 | P2-23 | Action type confusion | Both APIs | Any | n/a | `action` as array, number, null, padded string | `400`/`404`; no PHP warning | Robust dispatch |
 | P2-24 | CORS | Public API | Any | n/a | Disallowed `Origin` on `POST` and `OPTIONS` | `403 CORS_ORIGIN_DENIED` | Origin allowlist |
@@ -661,7 +664,12 @@ Total proposed tests: **64** (P0: 10, P1: 23, P2: 25, P3: 6).
 |---|---|---|
 | AAPI-01 | High | **Resolved** (2026-10-06) |
 | AAPI-02 | Medium | **Resolved** (2026-10-06) |
-| AAPI-03 – AAPI-08 | Low / Informational | **Open** — not addressed in this step |
+| AAPI-03 | Low | **Resolved** (2026-10-06) |
+| AAPI-04 | Low | **Resolved** (2026-10-06); uniqueness conflict (`409`) on create/rename accepted |
+| AAPI-05 | Informational | **Accepted / Documented** |
+| AAPI-06 | Informational | **Accepted / Documented** |
+| AAPI-07 | Informational | **Informational / No remediation required** |
+| AAPI-08 | Informational | **Resolved** (2026-10-06) for the System Administrator role; anonymous or legacy-key write access is an accepted operator configuration |
 
 #### Frontend identity boundary (AAPI-01, AAPI-02)
 
@@ -688,7 +696,7 @@ and CSRF on mutations. None of those protections changed.
 Behavior change to note: when an Application Administrator revokes frontend
 access from a frontend `read-only` user, the account becomes backend-only;
 restoring access afterwards requires the Admin API. `auth.frontendUsers.list`
-is unchanged (AAPI-04 remains open).
+lists the same accounts; AAPI-04 minimized the profiles it returns (see AAPI-04 below).
 
 ### AAPI-01 — Application Administrator can take over or alter backend-only accounts (High)
 
@@ -830,6 +838,35 @@ is unchanged (AAPI-04 remains open).
 
 ### AAPI-03 — Routine actions are not CSRF-protected (Low)
 
+- **Status:** Resolved.
+- **Current behavior (before the fix):** the issue was present in code. It
+  was not exploitable in the shipped configuration, because
+  `config/routine-resources.php` is empty and unregistered routines are
+  refused. It would have become live as soon as an operator registered a
+  write routine.
+- **Remediation:** `CsrfProtectionMiddleware` resolves `procedure`,
+  `function`, and `tableFunction` requests through `RoutineResourceRegistry`.
+  A registered routine with `access: write` requires a valid
+  `X-CSRF-Token` for session callers.
+  - Read routines stay unprotected, like `select`.
+  - Unregistered or malformed routine requests are left to
+    `AuthorizationMiddleware`, which refuses them.
+  - API-key and mode-`none` callers stay exempt, as for `insert`, `update`,
+    and `delete`.
+  - The frontend is read-only (`FrontendCapabilityPolicy::WRITE = false`) and
+    never calls write routines, so its CSRF allowlist needs no change.
+- **Regression coverage:** `ApiSecurityHardeningTest`.
+  - The test asserts that the shipped registry is empty, then injects an
+    in-memory registry into the middleware only. Nothing is registered.
+  - A write `procedure`, `function`, and `tableFunction` with a missing,
+    wrong, or truncated token get `403 CSRF_VALIDATION_FAILED`; with a valid
+    token they pass.
+  - Read and unregistered routines pass to authorization; API-key and
+    mode-`none` callers are exempt.
+  - Mutation check: disabling the write-routine check fails the suite.
+
+**Original finding:**
+
 - **Endpoint/action:** public `procedure`, `function`, `tableFunction`.
 - **Code path:** `CsrfProtectionMiddleware::PROTECTED_ACTIONS` lists `insert`,
   `update`, `delete` and `upsert`, but not the routine actions. Write
@@ -850,6 +887,43 @@ is unchanged (AAPI-04 remains open).
   least for routines whose registry entry has `access: write`.
 
 ### AAPI-04 — Username enumeration and SA profile disclosure to frontend administrators (Low)
+
+- **Status:** Resolved; one residual uniqueness signal is accepted.
+- **Current behavior (before the fix):** confirmed.
+  `auth.frontendUsers.list` returned SA name, mobile, and email to any
+  `frontend.users.manage` holder. The public mutations returned
+  `404 USER_NOT_FOUND` for missing accounts and `403` for protected ones.
+- **Remediation:**
+  - `backendProtected` is now `true` for every backend identity, using the
+    AAPI-01 classification. Previously only SA rows were marked.
+  - Backend identities keep their list row (username, roles, enabled state),
+    so the existing frontend UI shape is preserved. Their `name`, `mobile`,
+    and `email` are returned as `null` unless the viewer is a System
+    Administrator or the account itself.
+  - On the public frontend path, a missing target is refused with the same
+    `403 AUTHORIZATION_DENIED` as a protected target. The Admin API keeps
+    `404 USER_NOT_FOUND`.
+  - Frontend-managed users keep full profiles and management.
+- **Security reasoning:** Application Administrators cannot manage backend
+  identities after AAPI-01/02, so they have no need for their contact
+  details. A missing account no longer gives a side-effect-free existence
+  check.
+- **Accepted residual:** `auth.frontendUsers.create` and a rename still return
+  `409 USER_ALREADY_EXISTS` when a username is taken. Usernames must be
+  unique, and that check cannot be hidden without breaking the contract. The
+  probe has a side effect (it creates or renames an account) and is audited.
+  Login rate limiting bounds any guessing it enables.
+- **Regression coverage:** `ApiSecurityHardeningTest`.
+  - Service level: AA list minimization for SA and frontend-access Data
+    Operator rows; full profiles for SA viewers and the account itself;
+    backend-only accounts not listed; identical refusals for missing and
+    protected targets across five mutations, for both AA and SA actors.
+  - HTTP: the minimized SA row and an identical error object for missing and
+    protected targets.
+  - Mutation checks: removing minimization, restoring SA-only
+    `backendProtected`, and restoring the `404` each fail the suite.
+
+**Original finding:**
 
 - **Endpoint/action:** `auth.frontendUsers.list` and the targeted
   `auth.frontendUsers.*` mutations.
@@ -874,6 +948,43 @@ is unchanged (AAPI-04 remains open).
 
 ### AAPI-05 — Password changes do not require the current password (Informational)
 
+- **Status:** Accepted / Documented. No code change.
+- **Current behavior by path:**
+  - **Self-service:** there is no self-service path for ordinary users.
+    Only `frontend.users.manage` holders (AA, and SA for frontend accounts)
+    can change their own password, through
+    `auth.frontendUsers.changePassword`. The request needs an authenticated
+    session and a valid CSRF token.
+  - **Administrator reset:** `auth.frontendUsers.changePassword` on another
+    frontend account, and the Admin API `auth.users.changePassword` (gate,
+    session, `admin.manage`, CSRF). These are intentionally reset operations.
+  - **Setup:** `setup.createAdmin` sets only the first password, before
+    initialization.
+  - **Recovery:** there is no recovery or forgotten-password flow.
+- **Security reasoning:**
+  - Every password change increments `authVersion`, which revokes all of the
+    account's sessions, including the session that made the change.
+  - The flows are CSRF-protected, and cookies are `HttpOnly` and
+    `SameSite=Lax`.
+  - A party able to ride an administrator session can already disable,
+    delete, or reset other accounts. Re-authentication on self-change alone
+    would not materially reduce that exposure.
+  - The shipped frontend client sends no current password
+    (`auth.frontendUsers.changePassword` carries only `newPassword` and its
+    confirmation), so requiring one would break the existing contract without
+    a proportionate gain.
+- **Accepted risk:** a hijacked administrator session can lock out the account
+  owner by changing its password. Recovery is through another administrator
+  or the Admin API.
+- **Regression coverage:** `ApiSecurityHardeningTest`.
+  - Service level: frontend and Admin resets advance `authVersion`.
+  - HTTP: an AA reset revokes the target's existing session; an AA's own
+    password change revokes both of its sessions, including the one that made
+    the change; a revoked session cannot change a password; and the new
+    password logs in.
+
+**Original finding:**
+
 - **Endpoint/action:** `auth.frontendUsers.changePassword` (self and others);
   Admin `auth.users.changePassword`.
 - **Code path:** `FrontendUserRequestValidator` accepts only `newPassword` and
@@ -891,6 +1002,38 @@ is unchanged (AAPI-04 remains open).
   password changes. Keep administrative resets as they are.
 
 ### AAPI-06 — API key privileges are independent of the owner's role (Informational)
+
+- **Status:** Accepted / Documented. No code change.
+- **Current behavior:**
+  - A managed key stores its single role when created. That role comes from
+    `RoleModel::apiKeyRoles()` and is chosen by an SA, not derived from the
+    owner.
+  - At authentication, the owner must still exist and be enabled.
+  - Demoting the owner or changing its password does not change the key.
+  - Disabling or deleting the owner, or disabling or revoking the key, stops
+    authentication.
+  - A revoked key cannot be re-enabled.
+- **Security reasoning:**
+  - Key privileges are a separate grant made by a System Administrator.
+    `api-administrator` is a key-only role that no user can hold, so bounding
+    a key by its owner's role would make that role unusable and break the
+    existing API contract.
+  - The owner is an accountability and liveness anchor: disabling or deleting
+    it revokes its keys immediately.
+  - Only `admin.manage` holders, through the loopback Admin API, can create,
+    disable, or revoke keys.
+- **Accepted risk / operator guidance:** when an owner's trust level changes
+  without the account being disabled, review and revoke that owner's keys in
+  the Admin Console.
+- **Regression coverage:** `ApiSecurityHardeningTest` pins the lifecycle:
+  - a key keeps its role after owner demotion and password change;
+  - it is refused while the owner is disabled and recovers on re-enable;
+  - a disabled key is refused;
+  - a revoked key is refused and cannot be re-enabled;
+  - a key-only role can be issued to a lower-privileged owner;
+  - a key is refused after its owner is deleted.
+
+**Original finding:**
 
 - **Endpoint/action:** `auth.apiKeys.create`; key authentication.
 - **Code path:** `ApiKeyService::create` validates the key role against
@@ -913,6 +1056,27 @@ is unchanged (AAPI-04 remains open).
 
 ### AAPI-07 — Public API accepts a JSON list body (Informational)
 
+- **Status:** Informational / No remediation required.
+- **Current behavior:**
+  - `api/index.php` accepts any decoded JSON array. List support is not an
+    intended feature: the error message requires an object, and the Admin API
+    rejects lists.
+  - A list has no string `action` key, so it never reaches an action handler.
+    It is rejected by authentication (`401`) or by the `admin.manage` default
+    in `AuthorizationMiddleware` (`403`).
+  - Nested lists inside an object body (fields, filters, queries, parameters,
+    roles) are validated per action and are unaffected.
+  - The SQL Parser is non-executing and has its own request handler.
+- **Security reasoning:** there is no authorization bypass, mass-assignment,
+  or dispatch path: authorization fails closed before validation. Changing the
+  status code would only alter error shape, so no code change was made.
+- **Regression coverage:** `ApiSecurityHardeningTest` (HTTP).
+  - On the public API, list bodies (`[]`, a list of objects with `action`, a
+    list of action strings) get `401` anonymously and `403` with an AA session.
+  - On the Admin API, the same bodies get `400 INVALID_REQUEST`.
+
+**Original finding:**
+
 - **Endpoint/action:** `api/index.php`.
 - **Code path:** the public entry point checks `is_array` but not
   `array_is_list`. The Admin API rejects lists.
@@ -925,6 +1089,36 @@ is unchanged (AAPI-04 remains open).
 - **Recommended remediation:** add `array_is_list` to the public body check.
 
 ### AAPI-08 — `publicRoles` and `legacyApiKeyRoles` accept privileged backend roles (Informational)
+
+- **Status:** Resolved for the clearly unsafe state. Anonymous or legacy-key
+  write access is accepted as an explicit operator configuration.
+- **Current behavior (before the fix):** confirmed. Validation accepted any
+  backend role, including `system-administrator`, for the anonymous
+  (mode `none`) and legacy shared-key principals.
+- **Remediation:** `AuthorizationRepository::validate` rejects
+  `system-administrator` in `publicRoles` and `legacyApiKeyRoles` ("Unsafe
+  authorization role assignment."). The configuration fails closed: it is not
+  loaded and health reports it invalid.
+  - An unauthenticated or shared-secret identity has no legitimate use for
+    `admin.manage` or `frontend.users.manage`.
+  - No API writes this file, and the defaults and migrations use only
+    `read-only`.
+- **Not changed (accepted):** `data-operator` remains valid in either list.
+  Mode `none` is itself an explicit, Admin-only choice for trusted
+  deployments, and no evidence shows that anonymous write is never
+  legitimate. Defaults remain `read-only`.
+  - Authentication bypass is not possible: `auth.*` and `admin.*` always
+    require a session, and Admin actions are never public.
+  - Operators who enable mode `none` or the legacy key own the decision to
+    widen those roles.
+- **Regression coverage:** `ApiSecurityHardeningTest`.
+  - `system-administrator`, alone or with `read-only`, is rejected in both
+    lists.
+  - `[]`, `read-only`, and `data-operator` are accepted.
+  - The defaults remain `read-only`.
+  - Mutation check: removing the rejection fails the suite.
+
+**Original finding:**
 
 - **Endpoint/action:** all public data actions in mode `none`; the legacy
   API key.
@@ -945,8 +1139,11 @@ is unchanged (AAPI-04 remains open).
 
 **Summary:** 8 potential findings. 1 High (AAPI-01), 1 Medium (AAPI-02),
 2 Low (AAPI-03, AAPI-04) and 4 Informational (AAPI-05 to AAPI-08). The inventory
-step fixed none of them. AAPI-01 and AAPI-02 have since been resolved;
-AAPI-03 – AAPI-08 remain open.
+step fixed none of them. Final dispositions:
+- **Resolved:** AAPI-01, AAPI-02, AAPI-03, AAPI-04 (with the accepted `409`
+  residual) and AAPI-08 (for the System Administrator role).
+- **Accepted / Documented:** AAPI-05 and AAPI-06.
+- **Informational / No remediation required:** AAPI-07.
 
 ## 18. Files Inspected
 
@@ -1010,7 +1207,16 @@ and did not restrict System Administrators at all:
 The public path now refuses every backend identity for every actor, and
 backend identities are managed only through the loopback Admin API.
 
-Write routines also lack CSRF (AAPI-03, Low), and frontend administrators can
-enumerate usernames and view SA profiles (AAPI-04, Low). The 64 tests in
-Section 16 are proposed to pin the existing boundary and drive remediation
-of these findings; P1-01 – P1-03 are implemented. v2.1.3 is not complete.
+The remaining findings are dispositioned:
+- write routines now require CSRF (AAPI-03);
+- backend identity profiles and missing-account responses no longer leak to
+  frontend administrators (AAPI-04);
+- the System Administrator role is rejected for anonymous and legacy-key
+  principals (AAPI-08);
+- password-change re-authentication (AAPI-05), API key role persistence
+  (AAPI-06), and list bodies (AAPI-07) are accepted or informational, with
+  regression tests pinning the behavior.
+
+Of the 64 tests proposed in Section 16, those for the findings are
+implemented (P1-01 – P1-03, P1-10, P2-03, P2-18, P2-21). The remaining
+systematic P0 – P3 matrix has not been implemented, so v2.1.3 is not complete.

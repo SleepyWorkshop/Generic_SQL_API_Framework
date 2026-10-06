@@ -26,7 +26,12 @@ final class UserManagementService
         return $this->sorted(array_map(fn (array $user): array => $this->safeUser($user), $this->loadUsers()));
     }
 
-    public function listFrontendUsers(): array
+    /**
+     * Frontend user listing. Backend identities cannot be managed through the
+     * frontend path, so their profile details are shown only to System
+     * Administrators and to the account itself.
+     */
+    public function listFrontendUsers(?Principal $viewer = null): array
     {
         $users = array_filter(
             $this->loadUsers(),
@@ -34,7 +39,14 @@ final class UserManagementService
                 || $user['backendRole'] === null
                 || $user['backendRole'] === RoleModel::SYSTEM_ADMINISTRATOR
         );
-        return $this->sorted(array_map(fn (array $user): array => $this->safeFrontendUser($user), $users));
+        $fullProfiles = $viewer !== null && $viewer->backendRole === RoleModel::SYSTEM_ADMINISTRATOR;
+        return $this->sorted(array_map(function (array $user) use ($viewer, $fullProfiles): array {
+            $safe = $this->safeFrontendUser($user);
+            if ($safe['backendProtected'] && !$fullProfiles && $viewer?->userId !== $user['id']) {
+                $safe['name'] = $safe['mobile'] = $safe['email'] = null;
+            }
+            return $safe;
+        }, $users));
     }
 
     public function createUser(string $username, string $password, ?string $backendRole, bool $frontendAccess, ?string $frontendRole, bool $enabled = true, ?string $name = null, ?string $mobile = null, ?string $email = null): array
@@ -210,7 +222,7 @@ final class UserManagementService
     {
         try {
             $result = $this->authRepository->update(function (array &$configuration) use ($actor, $username): array {
-                $index = $this->requireUserIndex($configuration['users'], $username);
+                $index = $this->requireFrontendTargetIndex($configuration['users'], $actor, $username);
                 $user = $configuration['users'][$index];
                 $this->assertFrontendMutationAllowed($configuration['users'], $actor, $user, 'lifecycle');
                 if ($user['enabled'] && $user['backendRole'] === RoleModel::SYSTEM_ADMINISTRATOR
@@ -323,7 +335,7 @@ final class UserManagementService
     ): array {
         try {
             $result = $this->authRepository->update(function (array &$configuration) use ($actor, $username, $operation, $mutation, $requestedAccess, $requestedRole): array {
-                $index = $this->requireUserIndex($configuration['users'], $username);
+                $index = $this->requireFrontendTargetIndex($configuration['users'], $actor, $username);
                 $this->assertFrontendMutationAllowed(
                     $configuration['users'],
                     $actor,
@@ -369,6 +381,18 @@ final class UserManagementService
         if ($mutation === 'authorization' && $requestedRole === RoleModel::APPLICATION_ADMINISTRATOR) {
             $this->denyFrontendMutation($actor, $target, 'administrator_assignment_denied');
         }
+    }
+
+    /**
+     * A missing account is refused exactly like a protected one, so the public
+     * frontend path does not reveal which usernames exist.
+     */
+    private function requireFrontendTargetIndex(array $users, Principal $actor, string $username): int
+    {
+        $index = $this->findIndex($users, $username);
+        if ($index !== null) return $index;
+        $this->assertFrontendActor($users, $actor);
+        $this->denyFrontendMutation($actor, ['username' => $username], 'target_unavailable');
     }
 
     /**
@@ -496,7 +520,7 @@ final class UserManagementService
             'backendRole' => $user['backendRole'],
             'frontendAccess' => $user['frontendAccess'],
             'frontendRole' => $user['frontendRole'],
-            'backendProtected' => $user['backendRole'] === RoleModel::SYSTEM_ADMINISTRATOR,
+            'backendProtected' => !$this->isFrontendManagedIdentity($user),
             'createdAt' => $user['createdAt'],
         ];
     }
