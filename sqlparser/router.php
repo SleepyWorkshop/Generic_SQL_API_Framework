@@ -1,11 +1,11 @@
 <?php
 
 $path = rawurldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/');
+header_remove('X-Powered-By');
 
 if ($path === '/health') {
     $application = require __DIR__ . '/../config/app.php';
     $port = (int)(getenv('GENERIC_SQLPARSER_PORT') ?: ($_SERVER['SERVER_PORT'] ?? 0));
-    header_remove('X-Powered-By');
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
     echo json_encode([
@@ -18,8 +18,9 @@ if ($path === '/health') {
     return true;
 }
 
-$candidate = __DIR__ . $path;
-if ($path !== '/' && is_file($candidate)) return false;
+// Serve only the public assets, matching the production IIS/Nginx allowlist;
+// parser sources and this router are never reachable as scripts.
+if (in_array($path, ['/assets/css/app.css', '/assets/js/app.js'], true)) return false;
 if ($path === '/' || $path === '/index.php') {
     require __DIR__ . '/index.php';
     return true;

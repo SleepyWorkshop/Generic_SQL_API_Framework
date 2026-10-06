@@ -48,7 +48,12 @@ function coverageStartServer(string $root, string $documentRoot, string $router,
     coverageAssert($port !== null, 'Unable to reserve a test port.');
     $command = [PHP_BINARY];
     if (php_ini_loaded_file() === false) $command[] = '-n';
-    array_push($command, '-S', "127.0.0.1:{$port}", '-t', "{$root}/{$documentRoot}", $router);
+    // Match the production php.ini under `php -n`: startup warnings (e.g.
+    // post_max_size) are not displayed, so they cannot send headers before the
+    // 413, and session cleanup is left to the operating system, so probabilistic
+    // garbage collection of an unreadable system save path cannot log notices.
+    array_push($command, '-d', 'display_errors=0', '-d', 'session.gc_probability=0',
+        '-S', "127.0.0.1:{$port}", '-t', "{$root}/{$documentRoot}", $router);
     $null = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
     $processEnvironment = array_merge(is_array(getenv()) ? getenv() : [], $environment);
     foreach ($environment as $name => $value) if ($value === null) unset($processEnvironment[$name]);

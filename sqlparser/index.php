@@ -7,6 +7,7 @@ define('API_REQUEST_ID', bin2hex(random_bytes(8)));
 ob_start();
 require_once __DIR__ . '/../core/ExceptionHandler.php';
 ExceptionHandler::register('sqlparser');
+header_remove('X-Powered-By');
 
 $method = (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET');
 require_once __DIR__ . '/../app/Middleware/ApplicationRuntimeMiddleware.php';
@@ -27,6 +28,8 @@ if ($method !== 'GET') {
 if (strtolower((string)(getenv('GENERIC_APP_ENV') ?: 'development')) !== 'production') {
     header("Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
     header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+    header('Referrer-Policy: no-referrer');
 }
 // Asset URLs are absolute from the mount path the web server reports in
 // SCRIPT_NAME (e.g. /sqlparser/index.php under IIS), so they resolve with or
