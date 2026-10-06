@@ -5,9 +5,16 @@ require_once __DIR__ . '/../Requests/ApiRequestException.php';
 
 final class LocalAdminMiddleware extends Middleware
 {
+    /**
+     * Admin API actions that only establish or describe a session. Every other
+     * Admin API action (admin.*, first-run setup, backend identities, API keys,
+     * and backend roles) requires the enabled loopback Admin boundary.
+     */
+    private const SESSION_ACTIONS = ['setup.status', 'auth.csrf', 'auth.login', 'auth.session', 'auth.logout'];
+
     public function handle(array $request): void
     {
-        if (!str_starts_with((string)($request['action'] ?? ''), 'admin.')) {
+        if (in_array($request['action'] ?? null, self::SESSION_ACTIONS, true)) {
             return;
         }
         $enabled = getenv('GENERIC_ADMIN_ENABLED');

@@ -1,5 +1,8 @@
 <?php
 
+require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
+require_once __DIR__ . '/../Security/DatabaseTransportSecurity.php';
+
 final class ProductionValidator
 {
     public const VALIDATED = 'VALIDATED';
@@ -37,6 +40,7 @@ final class ProductionValidator
                     'available' => extension_loaded('odbc')],
                 'sqlServer' => ['status' => self::NOT_EXECUTED, 'available' => false,
                     'reason' => 'No authorized live SQL Server target was supplied.'],
+                'databaseTransport' => $this->databaseTransport(),
                 'tls' => ['status' => extension_loaded('openssl') ? self::PARTIAL : self::NOT_EXECUTED,
                     'reason' => 'Cryptographic capability does not validate a deployed certificate, hostname, or HTTPS binding.'],
             ],
@@ -119,6 +123,23 @@ final class ProductionValidator
             'secretScan' => self::VALIDATED,
             'note' => 'IIS XML is structurally checked here; use an XML parser and IIS tooling on the target Windows host.',
         ];
+    }
+
+    /** Saved SQL Server transport settings, reported without any secret values. */
+    private function databaseTransport(): array
+    {
+        $path = ($this->root ?? dirname(__DIR__, 2)) . '/database/config/database.json';
+        if (!is_file($path)) {
+            return ['status' => self::NOT_EXECUTED, 'reason' => 'No saved database configuration.'];
+        }
+        try {
+            $warnings = DatabaseTransportSecurity::warnings(DatabaseConfigurationResolver::load($path));
+        } catch (Throwable $exception) {
+            return ['status' => self::NOT_EXECUTED, 'reason' => 'Saved database configuration could not be read.'];
+        }
+        return $warnings === []
+            ? ['status' => self::VALIDATED, 'warnings' => []]
+            : ['status' => self::OPERATOR, 'warnings' => $warnings];
     }
 
     private function extensionStates(): array

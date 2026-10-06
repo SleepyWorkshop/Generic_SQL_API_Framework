@@ -7,6 +7,7 @@ require_once __DIR__ . '/../Requests/ApiRequestException.php';
 require_once __DIR__ . '/../Resources/SqlResourceStatement.php';
 require_once __DIR__ . '/MetadataRepository.php';
 require_once __DIR__ . '/Query/DatabaseDateValueNormalizer.php';
+require_once __DIR__ . '/../Resources/QuerySourcePolicy.php';
 
 class SqlRepository
 {
@@ -15,18 +16,21 @@ class SqlRepository
     private PaginationBuilder $paginationBuilder;
     private Logger $logger;
     private MetadataRepository $metadataRepository;
+    private QuerySourcePolicy $sourcePolicy;
 
     public function __construct(
         ?QueryEngine $queryEngine = null,
         ?SqlResourceRegistry $registry = null,
         ?Logger $logger = null,
-        ?MetadataRepository $metadataRepository = null
+        ?MetadataRepository $metadataRepository = null,
+        ?QuerySourcePolicy $sourcePolicy = null
     ) {
         $this->logger = $logger ?? new Logger();
         $this->queryEngine = $queryEngine ?? new QueryEngine(null, $this->logger);
         $this->registry = $registry ?? new SqlResourceRegistry();
         $this->paginationBuilder = new PaginationBuilder($this->queryEngine);
         $this->metadataRepository = $metadataRepository ?? new MetadataRepository($this->queryEngine);
+        $this->sourcePolicy = $sourcePolicy ?? new QuerySourcePolicy();
     }
 
     public function execute(array $request): array
@@ -48,6 +52,7 @@ class SqlRepository
         foreach ($request['filters'] ?? [] as $filter) {
             $filterDefinition = $this->requireAllowedFilterColumn($filter['field'], $allowedFilters);
             $semanticDate = in_array($filter['type'] ?? null, ['date', 'daterange'], true);
+            $resolvedFromSource = false;
             if (($filterDefinition['resolveSource'] ?? false) || $semanticDate) {
                 $source = $this->resolveSourceColumn(
                     $statement,
@@ -69,7 +74,11 @@ class SqlRepository
                         'physicalDataType' => $source['dataType'],
                     ]);
                     $allowedFilters[strtolower($filter['field'])] = $filterDefinition;
+                    $resolvedFromSource = true;
                 }
+            }
+            if ($filterDefinition['mappedExpression'] && !$resolvedFromSource) {
+                $this->assertMappedExpressionSource($statement, $filterDefinition['expression']);
             }
             $filtersByLocation[$filterDefinition['location']][] = $filter;
         }
@@ -430,7 +439,9 @@ class SqlRepository
     {
         $matches = [];
         foreach ($statement->sourceCandidates($field, $requireDirectProjection) as $candidate) {
-            if (!$this->metadataRepository->columnExists($candidate['table'], $candidate['column'])) {
+            // Runtime filters may resolve only against registered query sources.
+            if (!$this->sourcePolicy->allows($candidate['table'])
+                || !$this->metadataRepository->columnExists($candidate['table'], $candidate['column'])) {
                 continue;
             }
             $candidate['dataType'] = $this->metadataRepository->getColumnDataType(
@@ -441,6 +452,33 @@ class SqlRepository
         }
 
         return count($matches) === 1 ? $matches[0] : null;
+    }
+
+    /**
+     * Client-supplied source/HAVING mappings must reference a column of a
+     * registered top-level source of the authored statement. Unqualified
+     * expressions require every top-level source to be registered.
+     */
+    private function assertMappedExpressionSource(SqlResourceStatement $statement, string $expression): void
+    {
+        $identifier = preg_match('/\(\s*([^()]*?)\s*\)$/', $expression, $aggregate) === 1
+            ? $aggregate[1]
+            : $expression;
+        if ($identifier === '*') return;
+        $parts = explode('.', $identifier);
+        $sources = $statement->topLevelSources();
+        if (count($parts) > 1) {
+            $qualifier = strtolower($parts[count($parts) - 2]);
+            $sources = array_filter($sources, fn (array $source): bool => strtolower($source['qualifier']) === $qualifier);
+        }
+        if ($sources === [] || array_filter($sources, fn (array $source): bool => !$this->sourcePolicy->allows($source['table'])) !== []) {
+            throw new ApiRequestException(
+                'Resource access is denied.',
+                'RESOURCE_ACCESS_DENIED',
+                [['path' => 'execution.filters', 'message' => 'Mapped filter source is not available.']],
+                403
+            );
+        }
     }
 
     private function rejectInvalidIntegerDate(): void

@@ -5,6 +5,8 @@ require_once __DIR__ . '/MetadataRepository.php';
 require_once __DIR__ . '/Query/SelectBuilder.php';
 require_once __DIR__ . '/Query/RoutineBuilder.php';
 require_once __DIR__ . '/SetOperationBuilder.php';
+require_once __DIR__ . '/../Resources/RoutineResourceRegistry.php';
+require_once __DIR__ . '/../Resources/QuerySourcePolicy.php';
 
 /** Public compatibility facade for query construction and execution. */
 class QueryRepository
@@ -13,15 +15,22 @@ class QueryRepository
     private SelectBuilder $selectBuilder;
     private RoutineBuilder $routineBuilder;
     private SetOperationBuilder $setOperationBuilder;
+    private RoutineResourceRegistry $routines;
     private Logger $logger;
 
-    public function __construct(?QueryEngine $queryEngine = null, ?MetadataRepository $metadataRepository = null, ?Logger $logger = null)
-    {
+    public function __construct(
+        ?QueryEngine $queryEngine = null,
+        ?MetadataRepository $metadataRepository = null,
+        ?Logger $logger = null,
+        ?RoutineResourceRegistry $routines = null,
+        ?QuerySourcePolicy $sourcePolicy = null
+    ) {
         $this->logger = $logger ?? new Logger();
         $this->queryEngine = $queryEngine ?? new QueryEngine(null, $this->logger);
         $metadataRepository = $metadataRepository ?? new MetadataRepository($this->queryEngine);
-        $this->selectBuilder = new SelectBuilder($this->queryEngine, $metadataRepository, $this->logger);
+        $this->selectBuilder = new SelectBuilder($this->queryEngine, $metadataRepository, $this->logger, $sourcePolicy);
         $this->routineBuilder = new RoutineBuilder();
+        $this->routines = $routines ?? new RoutineResourceRegistry();
         $this->setOperationBuilder = new SetOperationBuilder($this, $this->queryEngine);
     }
 
@@ -74,16 +83,26 @@ class QueryRepository
 
     public function buildProcedure(array $request)
     {
-        return $this->routineBuilder->buildProcedure($request);
+        $routine = $this->resolveRoutine($request['procedure'] ?? null, 'procedure', $request);
+        return $this->routineBuilder->buildProcedure($routine, $request['params'] ?? []);
     }
 
     public function buildFunction(array $request)
     {
-        return $this->routineBuilder->buildFunction($request);
+        $routine = $this->resolveRoutine($request['function'] ?? null, 'function', $request);
+        return $this->routineBuilder->buildFunction($routine, $request['params'] ?? []);
     }
 
     public function buildTableFunction(array $request)
     {
-        return $this->routineBuilder->buildTableFunction($request);
+        $routine = $this->resolveRoutine($request['function'] ?? null, 'tableFunction', $request);
+        return $this->routineBuilder->buildTableFunction($routine, $request['params'] ?? []);
+    }
+
+    private function resolveRoutine($id, string $type, array $request): array
+    {
+        $routine = $this->routines->resolve($id, $type);
+        $this->routines->assertParameters($routine, $request['params'] ?? []);
+        return $routine;
     }
 }

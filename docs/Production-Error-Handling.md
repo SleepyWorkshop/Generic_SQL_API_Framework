@@ -45,6 +45,7 @@ accidental buffered output before emitting JSON.
 | Method not allowed | 405 | `METHOD_NOT_ALLOWED` |
 | Conflict | 409 | Existing conflict code |
 | Body too large | 413 | `REQUEST_TOO_LARGE` |
+| Unpaginated result over the row limit | 413 | `RESULT_TOO_LARGE` |
 | Rate limited | 429 | `RATE_LIMIT_EXCEEDED` |
 | Database availability gate/dependency unavailable | 503 | `DATABASE_UNAVAILABLE` |
 | Database authentication failure | 503 | `DATABASE_AUTHENTICATION_FAILED` |

@@ -16,6 +16,21 @@ SELECT. Use `action: "select"`; the frontend never sends SQL text.
 
 The public schema is authoritative in [JSON request reference](JSON-Request-Reference.md).
 
+## Query source registry
+
+Every physical table or view referenced by a request—source, join, subquery,
+set-operation branch, or CTE body—must be registered in
+`config/query-sources.php`. The registry is deny-by-default; keys are unqualified
+names in the configured database and match case-insensitively. An entry may
+restrict access with `roles` (role IDs and/or `frontend-access`). CTE names are
+request-local and never registry sources; they must be plain identifiers.
+Unregistered or role-restricted sources return `403 RESOURCE_ACCESS_DENIED`
+before any data query runs. The shipped registry contains the sources used by
+the bundled frontend reports/dashboards and tracked SQL Resources.
+
+Unpaginated results are limited to `GENERIC_MAX_RESULT_ROWS` rows (default
+10,000) and return `413 RESULT_TOO_LARGE` instead of being truncated.
+
 ## Selection and aliases
 
 Strings select columns. Objects add aliases, functions, recursive arithmetic,

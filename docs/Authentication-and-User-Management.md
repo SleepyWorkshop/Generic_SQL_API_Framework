@@ -15,7 +15,7 @@ Initial setup creates one enabled identity with both System Administrator and Ap
 
 ## Backend user administration
 
-These actions require `admin.manage` (System Administrator). Mutations also require the session-bound `X-CSRF-Token`.
+These actions are served only by the loopback Admin API (`admin/api.php` with `GENERIC_ADMIN_ENABLED=1`); the public `/api` returns `404 NOT_FOUND` for `auth.users.*`, `auth.apiKeys.*`, `auth.roles.list`, and `setup.createAdmin`. They require `admin.manage` (System Administrator). Mutations also require the session-bound `X-CSRF-Token`. First-run setup (`setup.createAdmin`) is likewise Admin-only and permanently unavailable after initialization; `setup.status` stays public.
 
 | Action | Purpose |
 | --- | --- |

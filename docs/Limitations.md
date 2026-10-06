@@ -12,9 +12,15 @@ Planned work is tracked separately in [Roadmap](Roadmap.md).
   can manage frontend-only access but cannot assign backend roles.
 - CORS uses exact validated backend origins; it is not itself access control.
 - The endpoint accepts POST and OPTIONS only.
-- JSON Query Mode accepts metadata-valid client-selected tables; it has no table
-  resource registry. Routine identifiers are not resource-allowlisted.
-- Metadata actions expose catalog object names to callers.
+- JSON Query Mode reads only tables/views registered in `config/query-sources.php`
+  (deny-by-default, optional per-role restriction); routines run only when
+  registered in `config/routine-resources.php`. Registries are server-owned files.
+- Metadata actions list only registered query sources and registered procedures.
+- Frontend access (`frontend.read`) is not narrowed by SQL Resource `sqlResources`
+  scopes; only backend roles are. This is an accepted limitation pending a
+  frontend-access scope model.
+- Unpaginated reads are limited to `GENERIC_MAX_RESULT_ROWS` rows (default 10,000)
+  and fail with `413 RESULT_TOO_LARGE` instead of truncating.
 - SQL Server over ODBC is the only provider.
 
 ## JSON Query Mode

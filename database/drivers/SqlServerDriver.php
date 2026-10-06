@@ -4,15 +4,28 @@ require_once __DIR__ . "/DatabaseDriverInterface.php";
 require_once __DIR__ . "/../../app/Security/DatabaseCredentialResolver.php";
 require_once __DIR__ . "/../../app/Security/DatabaseConfigurationResolver.php";
 require_once __DIR__ . "/../../app/Runtime/DatabaseAuthenticationSupport.php";
+require_once __DIR__ . "/../../app/Security/DatabaseTransportSecurity.php";
+require_once __DIR__ . "/../../app/Security/SecurityConfiguration.php";
 
 class SqlServerDriver implements DatabaseDriverInterface
 {
     private $connection = null;
     private ?array $configuration;
+    private ?bool $production;
 
-    public function __construct(?array $configuration = null)
+    public function __construct(?array $configuration = null, ?bool $production = null)
     {
         $this->configuration = $configuration;
+        $this->production = $production;
+    }
+
+    /**
+     * Drivers tried by automatic selection. Production uses only modern
+     * drivers with current TLS support; development keeps the full list.
+     */
+    public static function autoDetectionDrivers(bool $production): array
+    {
+        return $production ? DatabaseTransportSecurity::PRODUCTION_AUTO_DRIVERS : self::supportedDrivers();
     }
 
     /**
@@ -108,7 +121,7 @@ class SqlServerDriver implements DatabaseDriverInterface
     /**
      * Connect using authentication mode.
      */
-    private function openConnection(
+    protected function openConnection(
         string $dsn,
         string $authentication,
         string $username,
@@ -156,7 +169,7 @@ class SqlServerDriver implements DatabaseDriverInterface
         string $trust
     ): array {
 
-        $drivers = self::supportedDrivers();
+        $drivers = self::autoDetectionDrivers($this->production ?? SecurityConfiguration::isProduction());
 
         $serverAddress =
             $this->buildServerAddress(
@@ -195,6 +208,14 @@ class SqlServerDriver implements DatabaseDriverInterface
                     "driver" => $driver,
                     "connection" => $connection
                 ];
+            }
+
+            /*
+             * A TLS or certificate failure is never retried with another
+             * (possibly weaker) driver.
+             */
+            if (DatabaseTransportSecurity::isTlsFailure($this->connectionError())) {
+                throw new Exception('ODBC TLS or certificate validation failed; automatic driver fallback was stopped.');
             }
 
         }
@@ -343,6 +364,12 @@ class SqlServerDriver implements DatabaseDriverInterface
         }
 
         return $this->connection;
+    }
+
+    /** Last ODBC connection error, used only to classify failures. */
+    protected function connectionError(): string
+    {
+        return trim((string)@odbc_error() . ' ' . (string)@odbc_errormsg());
     }
 
     /**

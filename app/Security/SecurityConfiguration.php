@@ -100,6 +100,15 @@ final class SecurityConfiguration
         );
     }
 
+    public const MAX_RESULT_ROWS_DEFAULT = 10000;
+    public const MAX_RESULT_ROWS_MAXIMUM = 1000000;
+
+    /** Maximum rows an unpaginated data read may return (GENERIC_MAX_RESULT_ROWS). */
+    public static function maxResultRows(): int
+    {
+        return self::integerEnvironment('GENERIC_MAX_RESULT_ROWS', self::MAX_RESULT_ROWS_DEFAULT, 1, self::MAX_RESULT_ROWS_MAXIMUM);
+    }
+
     public static function apiRateLimitOptions(): array
     {
         return self::runtime()['rateLimit']['api'];

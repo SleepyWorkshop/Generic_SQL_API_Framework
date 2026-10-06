@@ -403,7 +403,8 @@ class QueryRequestValidator
             $errors[] = ['path' => $path, 'message' => 'With must be an object.'];
             return;
         }
-        if (!$this->isIdentifier($with['name'] ?? null)) {
+        // CTE names are request-local virtual tables, never qualified objects.
+        if (!is_string($with['name'] ?? null) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $with['name']) !== 1) {
             $errors[] = ['path' => $path . '.name', 'message' => 'CTE name must be a valid identifier.'];
         }
 

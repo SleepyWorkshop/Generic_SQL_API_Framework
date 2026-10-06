@@ -121,9 +121,14 @@ Windows authentication are rejected, and the driver enforces the same boundary.
 ## ODBC and validation
 
 The host needs PHP's `odbc` extension and a compatible SQL Server ODBC driver.
-With `driver: "auto"`, the framework tests its supported driver list newest-first
-and keeps the first successful connection. With an explicit driver, only that
-driver is attempted. Windows retains the ODBC cursor library used by the bundled
+With `driver: "auto"`, the framework tests drivers newest-first and keeps the
+first successful connection. In production, automatic selection uses only
+ODBC Driver 18 and 17; development keeps the full supported list. A TLS or
+certificate-validation failure is never retried with another driver. With an
+explicit driver, only that driver is attempted. In production, System Health
+(database card `warnings`) and `scripts/validate-production.php`
+(`databaseTransport`) report `encrypt_disabled`,
+`trust_server_certificate_enabled`, and `legacy_driver_configured`. Windows retains the ODBC cursor library used by the bundled
 runtime; unixODBC platforms use the SQL Server driver's cursor implementation so
 statement execution is not rejected with capability error `IM001`.
 

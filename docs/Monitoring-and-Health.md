@@ -71,7 +71,10 @@ detailed response contains these checks:
 - `application`: the responding application version;
 - `configuration`: required configuration presence, JSON readability, and
   format versions;
-- `database`: database availability and sanitized connectivity category;
+- `database`: database availability and sanitized connectivity category; in
+  production it adds `warnings` (`encrypt_disabled`,
+  `trust_server_certificate_enabled`, `legacy_driver_configured`) for weakened
+  SQL Server transport settings without changing the status;
 - `logging`: fail-open logging capability;
 - `encryption`: encryption-key presence and usability, without exposing key material
   (`configured`, `missing`, `key_invalid`, `invalid` for a wrong key or

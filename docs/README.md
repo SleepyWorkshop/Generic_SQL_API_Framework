@@ -55,6 +55,7 @@ web root or `/index.php` when `api/` itself is the document root.
 - [Windows and Linux production validation](Production-Validation.md)
 - [Security testing](Security-Testing.md)
 - [Dependency security review](security/Dependency-Security-Review.md)
+- [Static security analysis](security/Static-Security-Analysis-Inventory.md)
 - [Managed API keys](API-Keys.md)
 - [Database configuration](Database-Configuration.md)
 - [Hosting](Hosting.md)

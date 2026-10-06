@@ -1,49 +1,45 @@
 <?php
 
+/**
+ * Builds routine calls from resolved RoutineResourceRegistry entries. The
+ * schema and name are server-owned identifiers; arguments are always bound.
+ */
 class RoutineBuilder
 {
-    public function buildProcedure(array $request): array
+    public function buildProcedure(array $routine, array $params): array
     {
-        if (empty($request['procedure'])) {
-            throw new Exception('Procedure name is required.');
-        }
-        $params = $request['params'] ?? [];
+        $sql = 'EXEC ' . $this->qualifiedName($routine);
         $placeholders = $this->buildPlaceholders($params);
-        $sql = "EXEC {$request['procedure']}";
         if ($placeholders !== '') {
             $sql .= ' ' . $placeholders;
         }
-        return ['sql' => $sql, 'params' => $params];
+        return ['sql' => $sql, 'params' => array_values($params)];
     }
 
-    public function buildFunction(array $request): array
+    public function buildFunction(array $routine, array $params): array
     {
-        if (empty($request['function'])) {
-            throw new Exception('Function name is required.');
-        }
-        $params = $request['params'] ?? [];
-        $placeholders = $this->buildPlaceholders($params);
-        $sql = "SELECT {$request['function']}(";
-        if ($placeholders !== '') {
-            $sql .= $placeholders;
-        }
-        $sql .= ') AS Result';
-        return ['sql' => $sql, 'params' => $params];
+        return [
+            'sql' => 'SELECT ' . $this->qualifiedName($routine) . '(' . $this->buildPlaceholders($params) . ') AS Result',
+            'params' => array_values($params),
+        ];
     }
 
-    public function buildTableFunction(array $request): array
+    public function buildTableFunction(array $routine, array $params): array
     {
-        if (empty($request['function'])) {
-            throw new Exception('Function name is required.');
+        return [
+            'sql' => 'SELECT * FROM ' . $this->qualifiedName($routine) . '(' . $this->buildPlaceholders($params) . ')',
+            'params' => array_values($params),
+        ];
+    }
+
+    private function qualifiedName(array $routine): string
+    {
+        foreach (['schema', 'name'] as $part) {
+            if (!is_string($routine[$part] ?? null) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $routine[$part]) !== 1) {
+                throw new RuntimeException('Invalid registered routine identifier.');
+            }
         }
-        $params = $request['params'] ?? [];
-        $placeholders = $this->buildPlaceholders($params);
-        $sql = "SELECT * FROM {$request['function']}(";
-        if ($placeholders !== '') {
-            $sql .= $placeholders;
-        }
-        $sql .= ')';
-        return ['sql' => $sql, 'params' => $params];
+        return '[' . $routine['schema'] . '].[' . $routine['name'] . ']';
     }
 
     private function buildPlaceholders(array $params): string

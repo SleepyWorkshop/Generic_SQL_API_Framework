@@ -255,6 +255,8 @@ CSRF tokens are generated from 256 bits of randomness, stored only in the PHP se
 
 The supplied templates terminate TLS directly at IIS/Nginx and pass the authoritative server HTTPS state to FastCGI (`HTTPS=on` in Nginx). The PHP application does not trust `X-Forwarded-Proto`, `X-Forwarded-Host`, or `Forwarded` from arbitrary clients. This prevents spoofed forwarded headers from changing cookie or redirect behavior.
 
+The loopback Admin gates and rate-limit identities use `REMOTE_ADDR` only. Never place the Admin Console (or a same-host reverse proxy such as IIS ARR, a local TLS terminator, or a tunnel agent) in front of these entry points so that remote clients arrive as `127.0.0.1`; that would make every client appear local and share one rate-limit identity. The supplied templates use direct FastCGI, where `REMOTE_ADDR` is the real client.
+
 If an approved load balancer terminates TLS before IIS/Nginx, make that edge responsible for the HTTP-to-HTTPS redirect and overwrite—not append—forwarded metadata. Configure IIS ARR or Nginx real-IP/proxy handling to trust only explicit load-balancer addresses. Do not retain the origin redirect if it sees every trusted edge request as HTTP, or it will loop. The current application does not require forwarded-protocol trust because production cookies are Secure by environment and redirects occur at the trusted web layer.
 
 ## Error handling and logging

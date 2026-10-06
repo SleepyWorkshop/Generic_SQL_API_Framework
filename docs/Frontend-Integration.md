@@ -165,8 +165,8 @@ rejects it, but preventing the invalid request gives a clearer user experience.
 
 Use `metadata.tables`, `metadata.columns`, `metadata.views`,
 `metadata.procedures`, and `metadata.schema` only when exposing database catalog
-choices is appropriate. A metadata row does not grant permission to query or
-write that object. `metadata.columns` returns physical table column type/null
+choices is appropriate. Metadata lists only registered query sources and
+routines, and a metadata row does not grant permission to write that object. `metadata.columns` returns physical table column type/null
 information, not the output schema of an arbitrary report.
 
 ## Ownership boundary

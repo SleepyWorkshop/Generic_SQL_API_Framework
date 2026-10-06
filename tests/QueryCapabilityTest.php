@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
+
 require_once __DIR__ . '/../app/Requests/QueryRequestValidator.php';
 require_once __DIR__ . '/../app/Requests/QueryRequestNormalizer.php';
 require_once __DIR__ . '/../app/Repositories/QueryRepository.php';
@@ -90,7 +92,11 @@ class QueryCapabilityMetadataEngine extends QueryEngine
 $validator = new QueryRequestValidator();
 $normalizer = new QueryRequestNormalizer();
 $engine = new QueryCapabilityEngine();
-$repository = new QueryRepository($engine, new QueryCapabilityMetadata());
+$repository = new QueryRepository($engine, new QueryCapabilityMetadata(), routines: new RoutineResourceRegistry([
+    'dbo.RunReport' => ['type' => 'procedure', 'schema' => 'dbo', 'name' => 'RunReport', 'access' => 'read', 'parameters' => 1, 'roles' => ['read-only']],
+    'dbo.Score' => ['type' => 'function', 'schema' => 'dbo', 'name' => 'Score', 'access' => 'read', 'parameters' => 1, 'roles' => ['read-only']],
+    'dbo.Rows' => ['type' => 'tableFunction', 'schema' => 'dbo', 'name' => 'Rows', 'access' => 'read', 'parameters' => 1, 'roles' => ['read-only']],
+]), sourcePolicy: new PermissiveQuerySourcePolicy());
 
 $build = function (array $request) use ($validator, $normalizer, $repository): array {
     $validator->validate($request);

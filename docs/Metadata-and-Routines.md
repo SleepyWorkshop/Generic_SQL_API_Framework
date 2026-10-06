@@ -90,7 +90,36 @@ The generated concept is `SELECT * FROM dbo.RowsForYear(?)`; message:
 The shared source shape permits an optional alias, but it is ignored. Routine
 actions do not accept filters, sorting, pagination, named parameters, output
 parameter declarations, result-set selection, or transaction controls. The API
-does not inspect routine signatures or maintain a routine allowlist; identifier
-validation and parameterization prevent SQL syntax injection, while database
-permissions and API-level network controls remain responsible for authorization.
-Unknown/mismatched routines and signatures surface as generic `QUERY_ERROR`.
+does not inspect routine signatures. Unknown or mismatched signatures of a
+registered routine surface as generic `QUERY_ERROR`.
+
+## Routine registry
+
+Routines are deny-by-default. Only entries in `config/routine-resources.php`
+can be called, and only through the action matching their `type`:
+
+```php
+'dbo.RunReport' => [
+    'type' => 'procedure',          // procedure | function | tableFunction
+    'schema' => 'dbo',
+    'name' => 'RunReport',
+    'access' => 'read',             // write additionally requires data.write
+    'parameters' => 2,              // exact positional argument count
+    'roles' => ['read-only', 'data-operator'],
+],
+```
+
+Clients send the registry key (`source.procedure` / `source.function`). The SQL
+identifier is always built from the registry's `schema` and `name`
+(`EXEC [dbo].[RunReport] ?, ?`) in the configured database; client text never
+becomes a SQL identifier, and system or cross-database routines are unreachable
+unless an operator registers them. A caller needs `routine.execute`, one of the
+entry's `roles`, and `data.write` for `access: write`. `frontend.read` does not
+authorize routines. Unregistered IDs return `INVALID_ROUTINE`; a wrong argument
+count returns `INVALID_ROUTINE_PARAMETERS`; roles outside the entry return
+`RESOURCE_ACCESS_DENIED`. The shipped registry is empty.
+
+`metadata.procedures` lists only registered procedures. `metadata.tables`,
+`metadata.views`, `metadata.schema`, and `metadata.columns` list only query
+sources registered in `config/query-sources.php` (see
+[JSON Query Mode](Query-Mode.md#query-source-registry)).

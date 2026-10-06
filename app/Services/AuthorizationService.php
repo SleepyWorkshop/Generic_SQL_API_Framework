@@ -56,6 +56,22 @@ final class AuthorizationService
         ]);
     }
 
+    /**
+     * Routines are callable only when registered, when the principal holds
+     * routine.execute (frontend.read never qualifies), when one of its roles is
+     * listed by the registry entry, and, for write routines, data.write.
+     */
+    public function authorizeRoutine(Principal $principal, array $routine): void
+    {
+        $this->authorizeInternal($principal, 'routine.execute', null, null, true);
+        if (array_intersect($principal->roles(), $routine['roles']) === []) {
+            $this->deny($principal, 'routine.execute', true, 'resource_scope_denied', true, 'routine:' . $routine['id']);
+        }
+        if ($routine['access'] === 'write') {
+            $this->authorizeInternal($principal, 'data.write', null, null, true);
+        }
+    }
+
     public function authorizeAny(Principal $principal, array $permissions, ?string $resource = null, ?string $scope = null): void
     {
         foreach ($permissions as $permission) {

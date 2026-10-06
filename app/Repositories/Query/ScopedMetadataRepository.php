@@ -1,16 +1,23 @@
 <?php
 
 require_once __DIR__ . '/../MetadataRepository.php';
+require_once __DIR__ . '/../../Resources/QuerySourcePolicy.php';
 
-/** Adds request-local CTE output metadata without weakening physical-table validation. */
+/**
+ * Adds request-local CTE output metadata without weakening physical-table
+ * validation. Every physical table or view must also pass the query-source
+ * policy; CTE names stay local to the request and are not registry sources.
+ */
 class ScopedMetadataRepository extends MetadataRepository
 {
     private MetadataRepository $delegate;
+    private QuerySourcePolicy $sourcePolicy;
     private array $virtualTables = [];
 
-    public function __construct(MetadataRepository $delegate)
+    public function __construct(MetadataRepository $delegate, ?QuerySourcePolicy $sourcePolicy = null)
     {
         $this->delegate = $delegate;
+        $this->sourcePolicy = $sourcePolicy ?? new QuerySourcePolicy();
     }
 
     public function setVirtualTables(array $tables): void
@@ -25,14 +32,18 @@ class ScopedMetadataRepository extends MetadataRepository
 
     public function tableExists($table)
     {
-        return $this->findVirtualTable((string)$table) !== null
-            || $this->delegate->tableExists($table);
+        if ($this->findVirtualTable((string)$table) !== null) {
+            return true;
+        }
+        $this->sourcePolicy->assertAllowed((string)$table);
+        return $this->delegate->tableExists($table);
     }
 
     public function columnExists($table, $column)
     {
         $virtualTable = $this->findVirtualTable((string)$table);
         if ($virtualTable === null) {
+            $this->sourcePolicy->assertAllowed((string)$table);
             return $this->delegate->columnExists($table, $column);
         }
         foreach ($this->virtualTables[$virtualTable] as $virtualColumn) {
@@ -45,15 +56,18 @@ class ScopedMetadataRepository extends MetadataRepository
 
     public function getColumnDataType($table, $column)
     {
-        return $this->findVirtualTable((string)$table) !== null
-            ? null
-            : $this->delegate->getColumnDataType($table, $column);
+        if ($this->findVirtualTable((string)$table) !== null) {
+            return null;
+        }
+        $this->sourcePolicy->assertAllowed((string)$table);
+        return $this->delegate->getColumnDataType($table, $column);
     }
 
     public function getColumns($table)
     {
         $virtualTable = $this->findVirtualTable((string)$table);
         if ($virtualTable === null) {
+            $this->sourcePolicy->assertAllowed((string)$table);
             return $this->delegate->getColumns($table);
         }
         return [

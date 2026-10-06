@@ -57,7 +57,6 @@ if ($contentType !== 'application/json') {
 }
 
 require_once __DIR__ . '/../app/Middleware/AuthenticationMiddleware.php';
-require_once __DIR__ . '/../app/Middleware/AdminAuthorizationMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/FrontendUserAuthorizationMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/CsrfProtectionMiddleware.php';
 require_once __DIR__ . '/../app/Middleware/LoggingMiddleware.php';
@@ -74,13 +73,8 @@ require_once __DIR__ . '/../app/Requests/SetupRequestValidator.php';
 require_once __DIR__ . '/../app/Controllers/SetupController.php';
 require_once __DIR__ . '/../app/Requests/AuthRequestValidator.php';
 require_once __DIR__ . '/../app/Controllers/AuthController.php';
-require_once __DIR__ . '/../app/Requests/UserManagementRequestValidator.php';
-require_once __DIR__ . '/../app/Controllers/UserManagementController.php';
 require_once __DIR__ . '/../app/Requests/FrontendUserRequestValidator.php';
 require_once __DIR__ . '/../app/Controllers/FrontendUserController.php';
-require_once __DIR__ . '/../app/Requests/ApiKeyRequestValidator.php';
-require_once __DIR__ . '/../app/Controllers/ApiKeyController.php';
-require_once __DIR__ . '/../app/Controllers/RoleController.php';
 
 // Read Request Body
 $publicRequest = json_decode(RequestBodyReader::read(), true);
@@ -100,35 +94,28 @@ if (!is_array($publicRequest)) {
 Response::setRequestContext(['action' => is_string($publicRequest['action'] ?? null) ? $publicRequest['action'] : null]);
 (new LoggingMiddleware())->handle($publicRequest);
 
-$setupActions = ['setup.status', 'setup.createAdmin'];
+// First-run setup, backend identities, API keys, and backend roles are
+// administered only through the loopback Admin API (admin/api.php).
+$setupActions = ['setup.status'];
 $authActions = ['auth.csrf', 'auth.login', 'auth.session', 'auth.logout'];
-$userManagementActions = [
-    'auth.users.list',
-    'auth.users.create',
-    'auth.users.update',
-    'auth.users.enable',
-    'auth.users.disable',
-    'auth.users.delete',
-    'auth.users.changePassword',
-    'auth.users.assignAuthorization',
-];
 $frontendUserActions = [
     'auth.frontendUsers.list','auth.frontendUsers.create','auth.frontendUsers.update',
     'auth.frontendUsers.enable','auth.frontendUsers.disable','auth.frontendUsers.delete',
     'auth.frontendUsers.changePassword','auth.frontendUsers.assignRole',
 ];
-$apiKeyActions = ['auth.apiKeys.list','auth.apiKeys.create','auth.apiKeys.enable','auth.apiKeys.disable','auth.apiKeys.revoke'];
-$roleActions = ['auth.roles.list'];
 $publicAuthenticationActions = array_merge($setupActions, $authActions);
 unset($_SERVER['GENERIC_AUTH_PROVIDER']);
-if (str_starts_with((string)($publicRequest['action'] ?? ''), 'admin.')) {
+$requestedAction = (string)($publicRequest['action'] ?? '');
+if (str_starts_with($requestedAction, 'admin.')
+    || in_array($requestedAction, ['setup.createAdmin', 'auth.roles.list'], true)
+    || str_starts_with($requestedAction, 'auth.users.')
+    || str_starts_with($requestedAction, 'auth.apiKeys.')) {
     Response::error('Not found.', 404, 'NOT_FOUND');
 }
 (new ApplicationRuntimeMiddleware('api'))->handle($publicRequest);
 $authentication = new AuthenticationMiddleware(true, $publicAuthenticationActions);
 $authentication->handle($publicRequest);
 (new ApiRateLimitMiddleware())->handle($publicRequest);
-(new AdminAuthorizationMiddleware(array_merge($userManagementActions,$apiKeyActions,$roleActions)))->handle($publicRequest);
 (new FrontendUserAuthorizationMiddleware($frontendUserActions))->handle($publicRequest);
 (new CsrfProtectionMiddleware())->handle($publicRequest);
 
@@ -136,10 +123,7 @@ if (in_array($publicRequest['action'] ?? null, $setupActions, true)) {
     $request = (new SetupRequestValidator())->validate($publicRequest);
     Response::setRequestContext(['action' => $request['action']]);
     $controller = new SetupController();
-    if ($request['action'] === 'setup.status') {
-        $controller->status($request);
-    }
-    $controller->createAdmin($request);
+    $controller->status($request);
 }
 
 if (in_array($publicRequest['action'] ?? null, $authActions, true)) {
@@ -158,22 +142,7 @@ if (in_array($publicRequest['action'] ?? null, $authActions, true)) {
     $controller->logout($request);
 }
 
-if (in_array($publicRequest['action'] ?? null, $userManagementActions, true)) {
-    $request = (new UserManagementRequestValidator())->validate($publicRequest);
-    Response::setRequestContext(['action' => $request['action']]);
-    $controller = new UserManagementController();
-    if ($request['action'] === 'auth.users.list') $controller->listUsers($request);
-    if ($request['action'] === 'auth.users.create') $controller->createUser($request);
-    if ($request['action'] === 'auth.users.update') $controller->updateUser($request);
-    if ($request['action'] === 'auth.users.enable') $controller->enableUser($request);
-    if ($request['action'] === 'auth.users.disable') $controller->disableUser($request);
-    if ($request['action'] === 'auth.users.delete') $controller->deleteUser($request);
-    if ($request['action'] === 'auth.users.assignAuthorization') $controller->assignAuthorization($request);
-    $controller->changePassword($request);
-}
 if (in_array($publicRequest['action'] ?? null,$frontendUserActions,true)){$request=(new FrontendUserRequestValidator())->validate($publicRequest);Response::setRequestContext(['action'=>$request['action']]);(new FrontendUserController())->dispatch($request);}
-if (in_array($publicRequest['action'] ?? null,$apiKeyActions,true)){$request=(new ApiKeyRequestValidator())->validate($publicRequest);Response::setRequestContext(['action'=>$request['action']]);(new ApiKeyController())->dispatch($request);}
-if (in_array($publicRequest['action'] ?? null,$roleActions,true)){if(array_keys($publicRequest)!==['action'])Response::error('Invalid role request.',400,'INVALID_ROLE_REQUEST');Response::setRequestContext(['action'=>$publicRequest['action']]);(new RoleController())->list($publicRequest);}
 
 (new AuthorizationMiddleware())->handle($publicRequest);
 (new DatabaseAvailabilityMiddleware())->handle($publicRequest);

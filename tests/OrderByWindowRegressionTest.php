@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
+
 require_once __DIR__ . '/../app/Repositories/Query/SelectBuilder.php';
 
 class OrderByTestQueryEngine extends QueryEngine
@@ -56,8 +58,8 @@ function assertNotContains(string $needle, string $haystack, string $message): v
 }
 
 $metadata = new OrderByTestMetadataRepository();
-$legacy = new SelectBuilder(new OrderByTestQueryEngine(100), $metadata);
-$modern = new SelectBuilder(new OrderByTestQueryEngine(150), $metadata);
+$legacy = new SelectBuilder(new OrderByTestQueryEngine(100), $metadata, sourcePolicy: new PermissiveQuerySourcePolicy());
+$modern = new SelectBuilder(new OrderByTestQueryEngine(150), $metadata, sourcePolicy: new PermissiveQuerySourcePolicy());
 $base = ['table' => 'Items', 'columns' => ['ItemCode', 'Description']];
 
 $legacyAsc = $legacy->build($base + [

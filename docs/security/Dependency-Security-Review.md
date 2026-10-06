@@ -164,3 +164,44 @@ After the upgrade:
 | Status | Completed |
 | Environment | Development/security-review (WSL2) |
 | Application version line | 2.0.0 development line (unreleased) |
+
+## Addendum: bundled Windows PHP runtime (v2.1.2, SSA-12)
+
+The v2.1.1 review covered the WSL review environment only. The repository also
+tracks a portable Windows PHP runtime in `runtime/windows/php/` (80 files),
+which `start-windows.bat` uses for local Windows development. Production IIS
+deployments use a separately installed PHP (`C:\PHP` in the templates), so this
+bundle is a development runtime dependency, not an application library.
+
+| Field | Value |
+| --- | --- |
+| Component | PHP 8.5.10, Thread Safe, x64, Visual C++ 2022 (VS17) build |
+| Bundled OpenSSL | 3.5.7 (`libcrypto-3-x64.dll`, `libssl-3-x64.dll`) |
+| Provenance | Build metadata matches the official windows.php.net release pipeline. The original download URL and archive checksum were not recorded when the bundle was added (commits `9a9c48f`, updated in `c0814c9`). |
+| Integrity record | SHA-256 of every tracked file: [Windows-PHP-Runtime.sha256](Windows-PHP-Runtime.sha256) (`sha256sum -c` from the repository root) |
+| Required by `start-windows.bat` | `php.exe`, `php.ini`, the `odbc` and `openssl` extensions, and the DLLs they load |
+| Configuration notes | `display_errors=Off`, `expose_php=Off`, `allow_url_include=Off`; `allow_url_fopen=On` |
+
+Key file hashes (SHA-256):
+
+| File | SHA-256 |
+| --- | --- |
+| `php.exe` | `0b7ba037c6c05e8475001cce4a62459c216441139452101808d0a841e37d0af3` |
+| `php-cgi.exe` | `3a65a72519ff01320722dd2ef39c0f289faae805d5b54b283a9cf9f942d908f2` |
+| `php8ts.dll` | `0604b923e1a1bb1d0e31cabd61c5762d5a854c3b1e3972dac89963cc15ebd625` |
+| `libcrypto-3-x64.dll` | `4978b06f18c1d092e4f7c8c864cc814db2ff4535baa2de54937348ffe14aae5e` |
+| `libssl-3-x64.dll` | `dd76bebb8a13731a1bd047232c77299e7fa1fe9c8ef6d1563ca059473088630a` |
+| `ext/php_odbc.dll` | `8cdfac26bd27526ba7b604a1d87f1a1ef58f242ad0c038291f095522ae1c13d9` |
+| `ext/php_openssl.dll` | `1b6a63bee8f17a10ce05c758def258297f08b41d39a6dc5556d771ac3929b350` |
+
+Limitations and follow-up:
+
+- Versions were identified from the binaries' embedded build metadata and the
+  bundled `news.txt`; the binaries were not executed on Windows and were not
+  scanned for known vulnerabilities.
+- Compare the bundle with the current PHP 8.5 and OpenSSL 3.5 security releases
+  whenever the dependency review is repeated, and record the official archive
+  URL and checksum on the next update.
+- No binaries were removed. Unused components (for example `phpdbg.exe`, the
+  Apache SAPI DLL, and `dev/`) may be pruned only after verifying that
+  `start-windows.bat` and Windows development do not need them.

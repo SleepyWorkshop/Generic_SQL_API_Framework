@@ -10,6 +10,7 @@ require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../Repositories/AuthorizationRepository.php';
 require_once __DIR__ . '/../Repositories/ApiKeyRepository.php';
 require_once __DIR__ . '/../Security/SecurityConfiguration.php';
+require_once __DIR__ . '/../Security/DatabaseTransportSecurity.php';
 
 final class ApplicationHealthMonitor
 {
@@ -93,7 +94,7 @@ final class ApplicationHealthMonitor
         $checks = [
             'application' => ['status' => 'healthy', 'category' => 'responding', 'version' => $this->applicationVersion()],
             'configuration' => $this->configurationHealth(),
-            'database' => $this->databaseHealth(),
+            'database' => $this->withTransportWarnings($this->databaseHealth()),
             'logging' => $this->loggingHealth(),
             'encryption' => $this->encryptionHealth(),
             'processes' => ['status' => $this->processAggregate($processes), 'services' => $processes],
@@ -259,6 +260,21 @@ final class ApplicationHealthMonitor
             'durationMs' => round((microtime(true) - $started) * 1000, 2)];
         if (is_string($fingerprint)) $this->writeDatabaseCache($result + ['configurationFingerprint' => $fingerprint]);
         return $result;
+    }
+
+    /**
+     * Production reports weakened SQL Server transport settings as warnings.
+     * They do not change the health status: the connection may still work.
+     */
+    private function withTransportWarnings(array $check): array
+    {
+        if (!($this->production ?? SecurityConfiguration::isProduction()) || !is_file($this->databasePath)) return $check;
+        try {
+            $warnings = DatabaseTransportSecurity::warnings(DatabaseConfigurationResolver::load($this->databasePath));
+        } catch (Throwable $exception) {
+            return $check;
+        }
+        return $warnings === [] ? $check : $check + ['warnings' => $warnings];
     }
 
     private function databaseConfigurationCategory(): string

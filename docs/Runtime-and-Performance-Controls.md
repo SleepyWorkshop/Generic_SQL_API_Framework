@@ -22,7 +22,7 @@ Schema versions 1–5 migrate in place to version 6. Existing server, CORS, and 
 | `request.defaultPageSize` | 25 | 1–10,000 rows | Used when a pagination object contains `page` but omits `pageSize` |
 | `request.maxPageSize` | 1,000 | 1–10,000 rows | Larger page sizes are rejected; values are not clamped |
 
-Omitting pagination still means an unpaginated request, preserving the existing public contract. When pagination is requested, `page` remains mandatory. The default page size must not exceed the maximum.
+Omitting pagination still means an unpaginated request, preserving the existing public contract. Unpaginated data reads (`select`, set operations, routines, and SQL Resources) are limited to `GENERIC_MAX_RESULT_ROWS` rows (default 10,000, valid 1–1,000,000); exceeding it returns `413 RESULT_TOO_LARGE` rather than a truncated result. Metadata and paginated reads are not affected by this cap. When pagination is requested, `page` remains mandatory. The default page size must not exceed the maximum.
 
 `DB_QUERY_TIMEOUT_SECONDS`, `GENERIC_SESSION_IDLE_TIMEOUT`, `GENERIC_SESSION_ABSOLUTE_TIMEOUT`, `GENERIC_LOGIN_MAX_ATTEMPTS`, `GENERIC_LOGIN_WINDOW_SECONDS`, and `GENERIC_LOGIN_LOCKOUT_SECONDS` remain supported as validated deployment overrides. Invalid or out-of-range overrides are ignored in favor of the stored validated value. Related session overrides that would make idle timeout exceed absolute lifetime are ignored together.
 

@@ -564,7 +564,8 @@ generic `QUERY_ERROR`.
 
 ### Notes
 
-There is no routine allowlist beyond identifier validation.
+Only routines registered in `config/routine-resources.php` can be called; see
+[Metadata and routines](Metadata-and-Routines.md#routine-registry).
 
 ## `tableFunction`
 

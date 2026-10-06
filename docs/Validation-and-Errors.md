@@ -43,6 +43,10 @@ database details.
 | `INVALID_JSON` | 400 | Request body is malformed JSON. | Fix serialization; do not retry unchanged. |
 | `INVALID_REQUEST` | 400 | Unknown action/property or invalid required field/shape/value. | Show validation details and correct input. |
 | `INVALID_SQL_RESOURCE` | 400 | SQL Resource ID is invalid, missing, excluded, ambiguous, or unsafe. | Use a discovered backend-published resource ID. |
+| `INVALID_ROUTINE` | 400 | Routine ID is not registered in `config/routine-resources.php` for this action. | Use a backend-registered routine ID. |
+| `INVALID_ROUTINE_PARAMETERS` | 400 | Positional argument count differs from the registered routine. | Send exactly the registered number of parameters. |
+| `RESOURCE_ACCESS_DENIED` | 403 | Table/view, SQL Resource, or routine is unregistered or outside the caller's roles. | Do not retry; request backend registration or access. |
+| `RESULT_TOO_LARGE` | 413 | An unpaginated read exceeded `GENERIC_MAX_RESULT_ROWS` (default 10,000). Rows are never silently truncated. | Request pagination or narrow the filters. |
 | `INVALID_SQL_RUNTIME_FIELD` | 400 | Filter/sort field is not exposed by execution metadata. | Remove it or update the reviewed report definition. |
 | `INVALID_SQL_RUNTIME_VALUE` | 400 | Runtime mapped value failed conversion, currently integer-date. | Correct the field value. |
 | `INVALID_SQL_RUNTIME_FILTER` | 400 | Runtime placement is semantically unsafe/ambiguous. | Change filter logic/resource design. |
@@ -119,10 +123,11 @@ and frontend roles, SQL/write-resource scopes, administrator authorization,
 session-bound CSRF for cookie-authenticated mutations, login throttling, and a
 general local API rate limit. It does not implement tenant isolation, per-column
 read authorization, editable roles, or distributed multi-host rate limiting.
-Routine actions remain identifier-validated and parameterized but are not backed
-by a routine allowlist. JSON Query Mode accepts client-selected metadata-valid
-tables. Least-privilege database credentials and production network/TLS controls
-remain essential.
+Routine actions execute only routines registered in `config/routine-resources.php`
+(deny-by-default; the SQL identifier comes from the registry, never the request).
+JSON Query Mode, metadata listings, and SQL Resource source filters are limited to
+tables/views registered in `config/query-sources.php`. Least-privilege database
+credentials and production network/TLS controls remain essential.
 
 CORS is not access control. Exact origins are loaded from validated backend
 configuration, while non-browser clients must still satisfy the configured

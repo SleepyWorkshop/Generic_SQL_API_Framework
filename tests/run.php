@@ -45,6 +45,7 @@ $tests = [
     __DIR__ . '/ProductionServerConfigurationTest.php',
     __DIR__ . '/ProductionHostingTest.php',
     __DIR__ . '/HttpsSecurityTest.php',
+    __DIR__ . '/StaticSecurityRemediationTest.php',
     __DIR__ . '/RepositoryDocumentationTest.php'
 ];
 

@@ -127,7 +127,42 @@ class SqlResourceStatement
         }
         $physicalColumn = $projection['column'] ?? $column;
         $qualifiers = $projection['qualifiers'] ?? null;
+        $sources = $this->parseTopLevelSources($tokens, $fromIndex);
 
+        if ($qualifiers !== null && $qualifiers !== []) {
+            $sources = array_filter(
+                $sources,
+                fn (array $source): bool => in_array(strtolower($source['qualifier']), $qualifiers, true)
+            );
+        }
+
+        return array_values(array_map(
+            fn (array $source): array => [
+                'table' => $source['table'],
+                'column' => $physicalColumn,
+                'expression' => $source['qualifier'] . '.' . $physicalColumn,
+            ],
+            $sources
+        ));
+    }
+
+    /**
+     * Physical-or-CTE sources named in the main SELECT's top-level FROM/JOIN
+     * clauses, as unqualified table names with their effective qualifiers.
+     */
+    public function topLevelSources(): array
+    {
+        $tokens = self::topLevelTokens($this->body);
+        foreach ($tokens as $index => $token) {
+            if ($token['value'] === 'FROM') {
+                return array_values($this->parseTopLevelSources($tokens, $index));
+            }
+        }
+        return [];
+    }
+
+    private function parseTopLevelSources(array $tokens, int $fromIndex): array
+    {
         $from = $tokens[$fromIndex];
         $start = $from['start'] + strlen('FROM');
         $end = strlen($this->body);
@@ -156,22 +191,7 @@ class SqlResourceStatement
             $key = strtolower($source['table'] . '|' . $source['qualifier']);
             $sources[$key] = $source;
         }
-
-        if ($qualifiers !== null && $qualifiers !== []) {
-            $sources = array_filter(
-                $sources,
-                fn (array $source): bool => in_array(strtolower($source['qualifier']), $qualifiers, true)
-            );
-        }
-
-        return array_values(array_map(
-            fn (array $source): array => [
-                'table' => $source['table'],
-                'column' => $physicalColumn,
-                'expression' => $source['qualifier'] . '.' . $physicalColumn,
-            ],
-            $sources
-        ));
+        return $sources;
     }
 
     private function directProjection(string $field, int $fromPosition): ?array

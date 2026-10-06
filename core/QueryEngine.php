@@ -5,6 +5,7 @@ require_once __DIR__ . '/Logger.php';
 require_once __DIR__ . '/QueryTimeoutException.php';
 require_once __DIR__ . '/OperationalLogger.php';
 require_once __DIR__ . '/../app/Security/SecurityConfiguration.php';
+require_once __DIR__ . '/../app/Requests/ApiRequestException.php';
 
 class QueryEngine
 {
@@ -100,8 +101,12 @@ class QueryEngine
 
             $phase = 'fetch';
             $rows = [];
+            $rowLimit = $this->resultRowLimit($context);
             do {
-                while ($row = $this->fetchRow($statement)) $rows[] = $row;
+                while ($row = $this->fetchRow($statement)) {
+                    if ($rowLimit !== null && count($rows) >= $rowLimit) $this->resultTooLarge($rowLimit);
+                    $rows[] = $row;
+                }
             } while ($consumeAllResults && $this->nextResult($statement));
             $result = [
                 'executionTime' => round($this->elapsed($totalStarted), 2),
@@ -114,6 +119,8 @@ class QueryEngine
                 'resource' => is_string($context['resource'] ?? null) ? $context['resource'] : null,
             ]);
             return $result;
+        } catch (ApiRequestException $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
             $converted = $this->isTimeout($exception)
                 ? new QueryTimeoutException("Database query exceeded the configured {$this->queryTimeoutSeconds}-second timeout.", 0, $exception)
@@ -142,6 +149,30 @@ class QueryEngine
         } finally {
             if ($statement) $this->freeStatement($statement);
         }
+    }
+
+    /**
+     * Unpaginated data reads are capped instead of being loaded without bound.
+     * Metadata, write OUTPUT, and paginated reads keep their own limits.
+     */
+    private function resultRowLimit(array $context): ?int
+    {
+        if (($context['queryPhase'] ?? null) !== 'data' || ($context['pageSize'] ?? null) !== null) return null;
+        return SecurityConfiguration::maxResultRows();
+    }
+
+    private function resultTooLarge(int $limit): never
+    {
+        (new OperationalLogger())->warning('database', 'Database result row limit exceeded', [
+            'error_code' => 'RESULT_TOO_LARGE',
+            'row_limit' => $limit,
+        ]);
+        throw new ApiRequestException(
+            'The result is too large.',
+            'RESULT_TOO_LARGE',
+            [['path' => 'pagination', 'message' => "Unpaginated results are limited to {$limit} rows; request pagination."]],
+            413
+        );
     }
 
     protected function prepareStatement(string $sql) { return @odbc_prepare($this->connection, $sql); }

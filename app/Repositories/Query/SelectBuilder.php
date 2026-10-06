@@ -26,10 +26,14 @@ class SelectBuilder
     private SqlExpressionBuilder $expressionBuilder;
     private ?Logger $logger;
 
-    public function __construct(QueryEngine $queryEngine, MetadataRepository $metadataRepository, ?Logger $logger = null)
-    {
+    public function __construct(
+        QueryEngine $queryEngine,
+        MetadataRepository $metadataRepository,
+        ?Logger $logger = null,
+        ?QuerySourcePolicy $sourcePolicy = null
+    ) {
         $this->queryEngine = $queryEngine;
-        $this->metadataRepository = new ScopedMetadataRepository($metadataRepository);
+        $this->metadataRepository = new ScopedMetadataRepository($metadataRepository, $sourcePolicy);
         $this->logger = $logger;
         $this->expressionBuilder = new SqlExpressionBuilder();
         $this->orderByBuilder = new OrderByBuilder(
