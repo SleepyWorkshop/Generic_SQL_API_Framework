@@ -411,12 +411,38 @@ table by table, the widget SQL Resources referenced by the frontend but absent
 from the backend remain unresolved, and SSA-13 – SSA-20 are deferred. See the
 [Static security analysis inventory](security/Static-Security-Analysis-Inventory.md).
 
+## v2.1.3 — Authorization & API Security Testing
+
+Status: Completed
+
+The public and Admin API authorization boundary was inventoried, and a
+64-test plan was executed:
+- **Findings:** 9 findings (AAPI-01 – AAPI-09).
+  - Resolved: Application Administrator takeover of backend-only accounts
+    (High), public management of System Administrator accounts (Medium),
+    CSRF for registered write routines, minimized backend identity profiles
+    with uniform not-found responses, rejection of the System Administrator
+    role for anonymous and legacy-key principals, and rejection of non-string
+    public actions.
+  - Accepted and documented, with regression tests: password changes without
+    the current password, API key roles independent of the owner, and public
+    JSON list bodies.
+- **Test coverage:** all 64 planned tests pass, 56 over HTTP and 8 at the
+  enforcement layer for documented architectural reasons. They cover the
+  public and Admin boundaries, sessions, CSRF, API keys, resource scopes,
+  request validation, and status codes.
+- **Verification:** mutation checks confirmed that the tests catch weakened
+  controls, and the backend regression suite and PHP lint pass.
+
+See the
+[Authorization & API security inventory](security/Authorization-API-Security-Inventory.md).
+
 ## Security Verification
 
 - Dependency security review (completed in v2.1.1)
 - Static security analysis (completed in v2.1.2)
-- Authorization security testing
-- API security testing
+- Authorization security testing (completed in v2.1.3)
+- API security testing (completed in v2.1.3)
 - DAST / security scanning
 - Penetration-test preparation
 - Security architecture review
@@ -591,6 +617,7 @@ consume this API.
 | v2.1 | Security Verification & Operational Hardening | Planned |
 | v2.1.1 | Dependency Security Review | Completed |
 | v2.1.2 | Static Security Analysis | Completed |
+| v2.1.3 | Authorization & API Security Testing | Completed |
 | v3.0 | Multi-Database Support | Planned |
 | v3.1 | Developer Experience & API Integration | Planned |
 | v4.0 | Backend Platform & Enterprise Capabilities | Planned / Uncommitted |

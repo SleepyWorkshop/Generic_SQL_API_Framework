@@ -110,6 +110,19 @@ All notable changes are recorded here. The project follows semantic versioning.
   rotated and verified to no longer match the historical hash. Authored SQL
   Resource SQL is not validated table by table, and SSA-13 through SSA-20
   remain deferred.
+- Completed the v2.1.3 authorization and API security testing.
+  - Fixed: Application Administrators can no longer take over or alter
+    backend-only accounts, and System Administrator accounts can no longer be
+    managed through the public API (AAPI-01, AAPI-02).
+  - Also hardened: registered write routines require CSRF; frontend user
+    management minimizes backend identity profiles and gives uniform refusals
+    for missing accounts; the System Administrator role is rejected for
+    anonymous and legacy-key principals; non-string public actions are
+    rejected.
+  - Accepted and documented: password changes without the current password,
+    API key roles, and list bodies.
+  - All 64 planned authorization and API tests pass, 56 over HTTP and 8 at the
+    enforcement layer.
 
 ## [1.0.0] - Initial release
 

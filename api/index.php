@@ -91,6 +91,9 @@ if (!is_array($publicRequest)) {
         [['path' => '', 'message' => 'Request body must be a JSON object.']]
     );
 }
+if (array_key_exists('action', $publicRequest) && !is_string($publicRequest['action'])) {
+    Response::error('Invalid request.', 400, 'INVALID_REQUEST', [['path' => 'action', 'message' => 'Action must be a string.']]);
+}
 Response::setRequestContext(['action' => is_string($publicRequest['action'] ?? null) ? $publicRequest['action'] : null]);
 (new LoggingMiddleware())->handle($publicRequest);
 

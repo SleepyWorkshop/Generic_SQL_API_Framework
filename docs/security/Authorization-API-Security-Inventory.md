@@ -1,15 +1,16 @@
 # Authorization & API Security Inventory
 
-Review status: **All findings dispositioned (AAPI-01 – AAPI-08); v2.1.3 test plan not yet complete** — 2026-10-06
+Review status: **Completed** — all findings dispositioned (AAPI-01 – AAPI-09); all 64 planned tests verified — 2026-10-06
 
 This document records the read-only first step of roadmap phase v2.1.3
 (Authorization & API Security Testing) of
 [v2.1 — Security Verification & Operational Hardening](../Roadmap.md#v21--security-verification--operational-hardening).
 It maps the backend authorization and API boundary as implemented at commit
 `2436a8f` and proposes the v2.1.3 test plan. AAPI-01 and AAPI-02 have since
-been resolved, and AAPI-03 – AAPI-08 have received final dispositions (see
-[Remediation status](#remediation-status)). No code, configuration, test, or
-authentication state was changed. No password, hash, API key, session
+been resolved, AAPI-03 – AAPI-09 have received final dispositions (see
+[Remediation status](#remediation-status)), and the 64-test plan is verified
+(see [Coverage verification](#coverage-verification)). The inventory step
+itself changed no code, configuration, test, or authentication state. No password, hash, API key, session
 identifier, token, or other secret is reproduced here.
 
 ## 1. Scope
@@ -230,7 +231,10 @@ from storage rather than trusting the principal.
    result in a denial.
 6. **Missing identity:** `401 AUTHENTICATION_REQUIRED` (all three
    authorization middlewares check for a null principal).
-7. **Missing permission:** `403 AUTHORIZATION_DENIED`.
+7. **Missing permission:** `403 AUTHORIZATION_DENIED`; for `sql` and the
+   write actions, which name a resource, a missing permission is reported as
+   `403 RESOURCE_ACCESS_DENIED` (`AuthorizationService::deny` selects the code
+   from the presence of a resource).
 8. **Missing role or scope:** `403 RESOURCE_ACCESS_DENIED` for resource,
    routine and query-source scope; `403 AUTHORIZATION_DENIED` for frontend
    actor/target policy.
@@ -396,9 +400,12 @@ owned). IDOR risk is therefore concentrated in identity management.
 - **Unexpected parameters:** auth, setup, frontend user, user management,
   API key, role and Admin validators reject unknown properties. Query
   validators allowlist keys per action.
-- **Action type confusion:** non-string actions are cast or compared
-  strictly. Unknown actions → `404` (Admin, blocked public prefixes) or
-  authorization/validation errors (other public actions).
+- **Action type confusion:** the public API rejects a non-string `action`
+  with `400 INVALID_REQUEST` before any other processing (AAPI-09); the Admin
+  API's strict allowlist returns `404`. Unknown or padded string actions →
+  `404` (Admin, blocked public prefixes) or authentication, authorization, or
+  validation errors (other public actions). Actions are never trimmed or
+  case-folded.
 
 ## 11. Error and Status Code Behavior
 
@@ -417,7 +424,7 @@ owned). IDOR risk is therefore concentrated in identity management.
 | Unauthenticated / invalid key / expired or invalidated session | 401 | `AUTHENTICATION_REQUIRED` | Same code for all causes |
 | Unauthenticated rate limit / API rate limit | 429 | `RATE_LIMIT_EXCEEDED` | |
 | Login failure / lockout | 401 / 429 | `INVALID_CREDENTIALS` / `LOGIN_RATE_LIMITED` | |
-| Missing permission | 403 | `AUTHORIZATION_DENIED` | |
+| Missing permission | 403 | `AUTHORIZATION_DENIED` | `RESOURCE_ACCESS_DENIED` when the action names a resource (`sql`, writes) |
 | Resource, routine or query-source scope | 403 | `RESOURCE_ACCESS_DENIED` | |
 | CSRF missing or invalid | 403 | `CSRF_VALIDATION_FAILED` | Public: after frontend-user authorization, before data authorization. Admin: after authorization |
 | Last enabled SA | 403 | `LAST_ENABLED_ADMIN` | |
@@ -518,28 +525,31 @@ The intended convention is:
 
 ## 15. Existing Security Test Coverage
 
-14 existing suites cover authorization and API security: `ApiProtectionTest`,
+At the inventory step, 14 existing suites covered authorization and API security: `ApiProtectionTest`,
 `AuthenticationFlowTest`, `AuthenticationFoundationTest`,
 `AuthorizationAndApiKeyTest`, `AdminUserManagementTest`, `FirstTimeSetupTest`,
 `FrontendUserMutationAuthorizationTest`, `SecurityHardeningTest`,
 `SecurityTestingTest`, `SecurityAuditLoggingTest`,
 `StaticSecurityRemediationTest`, `HttpsSecurityTest`,
-`UnifiedAdminConsoleTest`, `ProductionErrorHandlingTest`.
+`UnifiedAdminConsoleTest`, `ProductionErrorHandlingTest`. v2.1.3 added
+`AuthorizationBoundaryTest`, `ApiSecurityHardeningTest`, and
+`AuthorizationApiCoverageTest`; the gaps found at the inventory step are
+closed as shown below and in [Coverage verification](#coverage-verification).
 
 | Security Area | Existing Test | Coverage | Gap |
 |---|---|---|---|
-| Public blocks for `admin.*`, `setup.createAdmin`, backend identity | `StaticSecurityRemediationTest` (HTTP) | Representative actions | Not every one of the 29 `admin.*` names and all 14 identity actions |
-| Admin gate (flag, loopback) | `StaticSecurityRemediationTest`, `UnifiedAdminConsoleTest` | Flag off / non-loopback samples | Full matrix of 44 gated actions × conditions |
-| `admin.manage` enforcement | `AdminUserManagementTest`, `SecurityTestingTest` | Role checks at service and middleware level | HTTP matrix for every Admin action and non-admin role |
+| Public blocks for `admin.*`, `setup.createAdmin`, backend identity | `StaticSecurityRemediationTest` (HTTP) | Every name, anonymous / read-only / SA (`AuthorizationApiCoverageTest`) | — |
+| Admin gate (flag, loopback) | `StaticSecurityRemediationTest`, `UnifiedAdminConsoleTest` | All 44 gated actions × flag `0` / unset / non-loopback (`AuthorizationApiCoverageTest`) | — |
+| `admin.manage` enforcement | `AdminUserManagementTest`, `SecurityTestingTest` | All 43 actions × read-only / data-operator / AA over HTTP (`AuthorizationApiCoverageTest`) | — |
 | Login, generic failures, regeneration | `SecurityTestingTest`, `AuthenticationFlowTest` | Good | — |
-| Session expiry, logout replay, `authVersion` | `SecurityTestingTest`, `ApiProtectionTest`, `SecurityHardeningTest` | Good | Rename and frontend-access changes as invalidation triggers |
-| CSRF | `SecurityTestingTest`, `SecurityHardeningTest`, `AuthorizationAndApiKeyTest` | Rotation, API-key independence, samples; write routines (`ApiSecurityHardeningTest`) | Every one of the 47 protected actions over HTTP |
-| API keys | `SecurityTestingTest`, `AuthorizationAndApiKeyTest`, `SecurityAuditLoggingTest` | Secret handling, owner state, revoke, role confinement | Mode matrix (`api_key`, `session+api_key`, legacy key) over HTTP |
+| Session expiry, logout replay, `authVersion` | `SecurityTestingTest`, `ApiProtectionTest`, `SecurityHardeningTest` | All `authVersion` triggers over HTTP (`AuthorizationApiCoverageTest`, `ApiSecurityHardeningTest`) | — |
+| CSRF | `SecurityTestingTest`, `SecurityHardeningTest`, `AuthorizationAndApiKeyTest` | Rotation, API-key independence, samples; write routines (`ApiSecurityHardeningTest`) | All 49 protected public and Admin names over HTTP (`AuthorizationApiCoverageTest`) | — |
+| API keys | `SecurityTestingTest`, `AuthorizationAndApiKeyTest`, `SecurityAuditLoggingTest` | Secret handling, owner state, revoke, role confinement | Mode matrix and legacy key over HTTP (`AuthorizationApiCoverageTest`) | — |
 | Role and resource scopes | `SecurityTestingTest`, `SqlResourceFilteringTest`, `StaticSecurityRemediationTest` | `sql`/`write` scopes, query sources, routines | — |
 | Frontend user policy | `FrontendUserMutationAuthorizationTest`, `AuthorizationBoundaryTest` (HTTP), `SecurityTestingTest` | AA self/peer/normal/SA targets; backend-only targets and SA → SA refused publicly (AAPI-01/02); profile minimization and uniform refusals (`ApiSecurityHardeningTest`, AAPI-04) | — |
 | Client-supplied identity fields | `SecurityTestingTest` | Server identity wins | — |
-| Method / content type / JSON | `ProductionErrorHandlingTest`, `SecurityTestingTest` | Error mapping, safe methods | HTTP `405`/`415`/`INVALID_JSON` on both APIs; public JSON list |
-| CORS | `SecurityTestingTest`, `ProductionValidationTest` | Configuration validation | HTTP preflight and disallowed-origin `403` |
+| Method / content type / JSON | `ProductionErrorHandlingTest`, `SecurityTestingTest` | Both APIs over HTTP (`AuthorizationApiCoverageTest`, `ApiSecurityHardeningTest`) | — |
+| CORS | `SecurityTestingTest`, `ProductionValidationTest` | Disallowed and allowed origins over HTTP (`AuthorizationApiCoverageTest`) | — |
 | Rate limiting | `SecurityHardeningTest`, `SecurityTestingTest`, `UnifiedAdminConsoleTest` | Login, API, unauthenticated | — |
 | Setup | `FirstTimeSetupTest`, `StaticSecurityRemediationTest` | Concurrency, gate | — |
 
@@ -656,6 +666,107 @@ or accepted.
 
 Total proposed tests: **64** (P0: 10, P1: 23, P2: 25, P3: 6).
 
+### Coverage verification
+
+All 64 planned tests are implemented and pass. **56** are verified over real
+HTTP against the PHP built-in server. **8** are verified at the enforcement
+layer (the exact middleware, service, repository, or session code that the
+HTTP entry points call), because an HTTP test is impractical or would require
+production registration:
+- **P2-03, P2-13:** an HTTP test would need a routine registered in
+  `config/routine-resources.php`, and the shipped registry is intentionally
+  empty.
+- **P2-14:** query-source checks run against live SQL Server metadata.
+- **P2-05, P2-06, P2-09:** these depend on PHP session internals, minimum
+  60 s / 300 s timeouts, or production hosting.
+- **P3-04:** production error mapping is verified on `ExceptionHandler` and
+  `Response`.
+- **P1-10:** configuration validation has no HTTP surface.
+
+No planned test is N/A, partial, or unverified.
+
+Test infrastructure notes:
+- `AuthorizationApiCoverageTest` runs with the database unavailable, which is
+  the runtime default. A data request that passes authentication, CSRF, and
+  authorization therefore ends at `503 DATABASE_UNAVAILABLE`, which serves as
+  the "authorized" marker; any refusal stops earlier with `401`/`403`.
+- Rate-limit and login-lockout counters live in `storage/security/` and cannot
+  be redirected per test. The suite therefore sends public API traffic
+  through `tests/support/ClientAddressRouter.php` with a per-run
+  documentation-range (`2001:db8::/32`) client address. The same test-only
+  router presents a non-loopback client to the Admin API, so the application
+  gate (`LocalAdminMiddleware`) is exercised over HTTP.
+- Mutation checks: 14 controls were individually weakened, and each was caught
+  by the suite named in the final report. All files were restored and
+  checksum-verified.
+
+| Test ID | Category | Test | Implementation | Status |
+|---|---|---|---|---|
+| P0-01 | Critical boundaries | Public API never exposes Admin actions | `AuthorizationApiCoverageTest` (HTTP, 29 names × 3 identities) | PASS |
+| P0-02 | Critical boundaries | Public API never exposes backend identity management | `AuthorizationApiCoverageTest` (HTTP); `StaticSecurityRemediationTest` | PASS |
+| P0-03 | Critical boundaries | Data actions require authentication | `AuthorizationApiCoverageTest` (HTTP, 16 actions) | PASS |
+| P0-04 | Critical boundaries | Gate blocks when Admin is disabled | `AuthorizationApiCoverageTest` (HTTP, 44 actions × flag `0` and unset) | PASS |
+| P0-05 | Critical boundaries | Gate blocks non-loopback | `AuthorizationApiCoverageTest` (HTTP, 44 actions, non-loopback client) | PASS |
+| P0-06 | Critical boundaries | Admin requires a session | `AuthorizationApiCoverageTest` (HTTP, 43 actions) | PASS |
+| P0-07 | Critical boundaries | Admin requires `admin.manage` | `AuthorizationApiCoverageTest` (HTTP, 43 actions × 3 roles) | PASS |
+| P0-08 | Critical boundaries | Admin allowlist | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P0-09 | Critical boundaries | Identity management never accepts API keys | `AuthorizationApiCoverageTest` (HTTP, 8 actions × 3 key roles × 2 modes) | PASS |
+| P0-10 | Critical boundaries | Frontend user management requires its permission | `AuthorizationApiCoverageTest` (HTTP, 8 actions × 3 identities) | PASS |
+| P1-01 | Privilege escalation | AA cannot take over backend-only accounts | `AuthorizationBoundaryTest` (HTTP); `FrontendUserMutationAuthorizationTest` | PASS |
+| P1-02 | Privilege escalation | AA cannot change lifecycle or profile of backend-only accounts | `AuthorizationBoundaryTest` (HTTP); `FrontendUserMutationAuthorizationTest` | PASS |
+| P1-03 | Privilege escalation | SA identity management stays on the Admin boundary | `AuthorizationBoundaryTest` (HTTP); `FrontendUserMutationAuthorizationTest` | PASS |
+| P1-04 | Privilege escalation | AA cannot create privileged users | `AuthorizationApiCoverageTest` (HTTP); `FrontendUserMutationAuthorizationTest` | PASS |
+| P1-05 | Privilege escalation | AA cannot promote or self-mutate | `AuthorizationApiCoverageTest` (HTTP); `FrontendUserMutationAuthorizationTest` | PASS |
+| P1-06 | Privilege escalation | Client identity fields are ignored or rejected | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-07 | Privilege escalation | No self-authorization change; last SA protected | `AuthorizationApiCoverageTest` (HTTP); `AdminUserManagementTest` | PASS |
+| P1-08 | Privilege escalation | API key role confinement | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-09 | Privilege escalation | No API key reaches Admin | `AuthorizationApiCoverageTest` (HTTP, 29 public + 43 Admin actions) | PASS |
+| P1-10 | Privilege escalation | Authorization invariants | `AuthorizationApiCoverageTest` (validation); `ApiSecurityHardeningTest` | PASS |
+| P1-11 | Admin API protection | Setup cannot run twice | `StaticSecurityRemediationTest` (HTTP); `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-12 | Admin API protection | Admin session actions never unlock gated actions | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-13 | Admin API protection | Admin CSRF on every protected action | `AuthorizationApiCoverageTest` (HTTP, 36 actions × 3 token cases, state unchanged) | PASS |
+| P1-14 | Admin API protection | Gate precedes authentication | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-15 | Admin API protection | Proxy headers ignored | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-16 | API authentication | Invalid keys rejected | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-17 | API authentication | Revoked or disabled keys rejected | `AuthorizationApiCoverageTest` (HTTP); `ApiSecurityHardeningTest` | PASS |
+| P1-18 | API authentication | Disabled owner disables the key | `AuthorizationApiCoverageTest` (HTTP); `ApiSecurityHardeningTest` | PASS |
+| P1-19 | API authentication | No configured keys fails closed | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-20 | API authentication | Mixed mode fallback | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-21 | API authentication | Mode `none` is least privilege | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-22 | API authentication | Legacy key | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P1-23 | API authentication | Key scope enforcement | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P2-01 | CSRF/session | Public CSRF on all 13 protected actions | `AuthorizationApiCoverageTest` (HTTP, 13 actions × 3 token cases, state unchanged) | PASS |
+| P2-02 | CSRF/session | API-key requests are exempt from CSRF | `AuthorizationApiCoverageTest` (HTTP); `SecurityTestingTest` | PASS |
+| P2-03 | CSRF/session | Write routines require CSRF for sessions | `ApiSecurityHardeningTest` (`CsrfProtectionMiddleware`, in-memory registry) | PASS |
+| P2-04 | CSRF/session | Login CSRF and rotation | `AuthorizationApiCoverageTest` (HTTP); `SecurityTestingTest` | PASS |
+| P2-05 | CSRF/session | Session fixation | `SecurityHardeningTest` (real PHP sessions, strict mode, regeneration) | PASS |
+| P2-06 | CSRF/session | Expiry | `SecurityTestingTest` (`AuthSessionService` idle and absolute expiry) | PASS |
+| P2-07 | CSRF/session | `authVersion` triggers | `AuthorizationApiCoverageTest` (HTTP); `ApiSecurityHardeningTest` (HTTP, password); `SecurityTestingTest` | PASS |
+| P2-08 | CSRF/session | Logout replay | `AuthorizationApiCoverageTest` (HTTP); `SecurityTestingTest` | PASS |
+| P2-09 | CSRF/session | Cookie attributes | `HttpsSecurityTest` (development, direct HTTPS, production) | PASS |
+| P2-10 | CSRF/session | No state change before POST dispatch | `AuthorizationApiCoverageTest` (HTTP, both APIs, state and session unchanged) | PASS |
+| P2-11 | IDOR/resource | SQL Resource scope | `AuthorizationApiCoverageTest` (HTTP); `SecurityTestingTest` | PASS |
+| P2-12 | IDOR/resource | Write scope | `AuthorizationApiCoverageTest` (HTTP, 4 write actions) | PASS |
+| P2-13 | IDOR/resource | Routine registry roles | `StaticSecurityRemediationTest` (`AuthorizationService::authorizeRoutine`, in-memory registry) | PASS |
+| P2-14 | IDOR/resource | Query-source registry | `StaticSecurityRemediationTest` (`ScopedMetadataRepository`, metadata, SQL Resource filters) | PASS |
+| P2-15 | IDOR/resource | API key identifiers | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P2-16 | IDOR/resource | Backup identifiers | `AuthorizationApiCoverageTest` (HTTP); `BackupRecoveryTest` | PASS |
+| P2-17 | IDOR/resource | Username case variants | `AuthorizationApiCoverageTest` (HTTP); `FrontendUserMutationAuthorizationTest` | PASS |
+| P2-18 | IDOR/resource | Username enumeration | `ApiSecurityHardeningTest` (HTTP and service) | PASS |
+| P2-19 | Method/content | Methods | `AuthorizationApiCoverageTest` (HTTP, both APIs) | PASS |
+| P2-20 | Method/content | Content type | `AuthorizationApiCoverageTest` (HTTP, both APIs) | PASS |
+| P2-21 | Method/content | JSON body | `AuthorizationApiCoverageTest` (HTTP, malformed / empty / scalar); `ApiSecurityHardeningTest` (list) | PASS |
+| P2-22 | Method/content | Unknown properties | `AuthorizationApiCoverageTest` (HTTP, 8 validators) | PASS |
+| P2-23 | Method/content | Action type confusion | `AuthorizationApiCoverageTest` (HTTP, both APIs; no PHP warnings logged) | PASS (after AAPI-09 fix) |
+| P2-24 | Method/content | CORS | `AuthorizationApiCoverageTest` (HTTP, `POST` and `OPTIONS`) | PASS |
+| P2-25 | Method/content | Body limits | `AuthorizationApiCoverageTest` (HTTP, public 1 KiB limit and 30 MiB Admin limit) | PASS |
+| P3-01 | Error/status | Status matrix | `AuthorizationApiCoverageTest` (every §11 row observed with its exact code); `ProductionApplicationAvailabilityTest` (`SERVICE_UNAVAILABLE`) | PASS |
+| P3-02 | Error/status | Runtime gate precedence | `ProductionApplicationAvailabilityTest` (HTTP, production, unauthenticated → `503`) | PASS |
+| P3-03 | Error/status | Database state hidden from unauthorized callers | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P3-04 | Error/status | No internal detail in production errors | `ProductionErrorHandlingTest` | PASS |
+| P3-05 | Error/status | `401` precedes CSRF for unauthenticated data writes | `AuthorizationApiCoverageTest` (HTTP) | PASS |
+| P3-06 | Error/status | Rate limits | `AuthorizationApiCoverageTest` (HTTP, lockout case variants, session and anonymous API limits); `SecurityHardeningTest` | PASS |
+
 ## 17. Potential Findings
 
 ### Remediation status
@@ -670,6 +781,7 @@ Total proposed tests: **64** (P0: 10, P1: 23, P2: 25, P3: 6).
 | AAPI-06 | Informational | **Accepted / Documented** |
 | AAPI-07 | Informational | **Informational / No remediation required** |
 | AAPI-08 | Informational | **Resolved** (2026-10-06) for the System Administrator role; anonymous or legacy-key write access is an accepted operator configuration |
+| AAPI-09 | Informational | **Resolved** (2026-10-06); found by test P2-23 |
 
 #### Frontend identity boundary (AAPI-01, AAPI-02)
 
@@ -1137,11 +1249,32 @@ lists the same accounts; AAPI-04 minimized the profiles it returns (see AAPI-04 
 - **Recommended remediation:** restrict both lists to `read-only` in
   validation, or report a production validation warning.
 
-**Summary:** 8 potential findings. 1 High (AAPI-01), 1 Medium (AAPI-02),
-2 Low (AAPI-03, AAPI-04) and 4 Informational (AAPI-05 to AAPI-08). The inventory
-step fixed none of them. Final dispositions:
+### AAPI-09 — Non-string public `action` emitted a PHP warning (Informational)
+
+- **Status:** Resolved. Found while implementing plan test P2-23.
+- **Behavior before the fix:** `api/index.php`, `AuthenticationMiddleware`,
+  and `AuthorizationMiddleware` cast `action` to a string. An array value
+  emitted a PHP "Array to string conversion" warning; it was logged to the
+  operational log and not returned to the client. The request was still
+  refused (`401` anonymously), so there was no authorization or dispatch
+  impact.
+- **Remediation:** `api/index.php` rejects a non-string `action` with
+  `400 INVALID_REQUEST` immediately after the JSON-object check, before any
+  middleware casts it. A missing `action` and list bodies (AAPI-07) are
+  unchanged.
+- **Regression coverage:** `AuthorizationApiCoverageTest` (P2-23).
+  - Array, number, `null`, boolean, and object actions get `400` from the
+    public API (anonymously and with a session) and `404` from the Admin API.
+  - The suite's isolated operational log must contain no PHP warning, notice,
+    or deprecation.
+  - Mutation check: removing the guard fails the suite.
+
+**Summary:** 9 findings. 1 High (AAPI-01), 1 Medium (AAPI-02), 2 Low
+(AAPI-03, AAPI-04) and 5 Informational (AAPI-05 to AAPI-09). The inventory
+step fixed none of the first eight; AAPI-09 was found during test
+implementation. Final dispositions:
 - **Resolved:** AAPI-01, AAPI-02, AAPI-03, AAPI-04 (with the accepted `409`
-  residual) and AAPI-08 (for the System Administrator role).
+  residual), AAPI-08 (for the System Administrator role), and AAPI-09.
 - **Accepted / Documented:** AAPI-05 and AAPI-06.
 - **Informational / No remediation required:** AAPI-07.
 
@@ -1217,6 +1350,8 @@ The remaining findings are dispositioned:
   (AAPI-06), and list bodies (AAPI-07) are accepted or informational, with
   regression tests pinning the behavior.
 
-Of the 64 tests proposed in Section 16, those for the findings are
-implemented (P1-01 – P1-03, P1-10, P2-03, P2-18, P2-21). The remaining
-systematic P0 – P3 matrix has not been implemented, so v2.1.3 is not complete.
+All 64 tests planned in Section 16 are implemented and pass: 56 over HTTP,
+and 8 at the enforcement layer for the architectural reasons recorded in
+[Coverage verification](#coverage-verification). Implementing the plan found
+one additional informational defect (AAPI-09), which is resolved. v2.1.3 is
+complete.
