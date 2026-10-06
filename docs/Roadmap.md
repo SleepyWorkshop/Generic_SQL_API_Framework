@@ -384,9 +384,20 @@ The core security architecture is already implemented in v2.0.
 This phase focuses on deeper verification and remaining operational security
 work.
 
+## v2.1.1 — Dependency Security Review
+
+Status: Completed
+
+The application declares no Composer, npm, vendored, or external-include
+dependencies; its dependency surface is the host PHP runtime, extensions,
+operating-system libraries, and ODBC stack. Outdated runtime components found in
+the development/security-review environment were updated and the backend
+regression suite passed. See the
+[Dependency security review](security/Dependency-Security-Review.md).
+
 ## Security Verification
 
-- Dependency security review
+- Dependency security review (completed in v2.1.1)
 - Static security analysis
 - Authorization security testing
 - API security testing
@@ -562,6 +573,7 @@ consume this API.
 | v2.0.0 | Platform Expansion & Security | Implemented / Current |
 | v2.0.0 Production Hardening | Production Phases 1–5 and production documentation | Completed |
 | v2.1 | Security Verification & Operational Hardening | Planned |
+| v2.1.1 | Dependency Security Review | Completed |
 | v3.0 | Multi-Database Support | Planned |
 | v3.1 | Developer Experience & API Integration | Planned |
 | v4.0 | Backend Platform & Enterprise Capabilities | Planned / Uncommitted |

@@ -87,6 +87,37 @@ repositoryDocumentationAssert(
         && is_file($root . '/docs/Windows-IIS-Deployment.md'),
     'Roadmap does not record completion of the production documentation milestone.'
 );
+// v2.1.1 is completed and backed by its review record; the review must keep
+// application and runtime dependencies separate and avoid overclaiming.
+$dependencyReviewPath = $root . '/docs/security/Dependency-Security-Review.md';
+repositoryDocumentationAssert(is_file($dependencyReviewPath), 'Dependency security review is missing.');
+$dependencyReview = (string)file_get_contents($dependencyReviewPath);
+repositoryDocumentationAssert(
+    preg_match('/^## v2\.1\.1 — Dependency Security Review\R+Status: Completed$/m', $roadmap) === 1
+        && str_contains($roadmap, '| v2.1.1 | Dependency Security Review | Completed |')
+        && str_contains($roadmap, '](security/Dependency-Security-Review.md)'),
+    'Roadmap does not record completed v2.1.1 Dependency Security Review.'
+);
+foreach ([
+    'Purpose', 'Scope', 'Review environment', 'Application dependency inventory',
+    'Runtime dependency inventory', 'Initial findings', 'Remediation',
+    'Post-remediation verification', 'Remaining runtime considerations',
+    'Limitations', 'Final assessment',
+] as $section) {
+    repositoryDocumentationAssert(
+        preg_match('/^## ' . preg_quote($section, '/') . '$/m', $dependencyReview) === 1,
+        "Dependency security review is missing section: {$section}."
+    );
+}
+repositoryDocumentationAssert(
+    str_contains($dependencyReview, 'Review status: **Completed**')
+        && str_contains($dependencyReview, 'No external vulnerability scanner')
+        && str_contains($dependencyReview, 'does not prove')
+        && !is_file($root . '/composer.json')
+        && !is_file($root . '/package.json'),
+    'Dependency security review status, limitations, or dependency inventory is inconsistent.'
+);
+
 foreach (['Filesystem health', 'Session health'] as $removedCheck) {
     repositoryDocumentationAssert(
         !str_contains($roadmap, $removedCheck),
@@ -101,7 +132,7 @@ $markdownAnchors = static function (string $path) use ($markdownSlug): array {
     preg_match_all('/^#{1,6}\s+(.+?)\s*#*$/m', (string)file_get_contents($path), $headings);
     return array_map($markdownSlug, $headings[1]);
 };
-foreach (array_merge([$root . '/README.md', $root . '/CHANGELOG.md'], glob($root . '/docs/*.md') ?: []) as $document) {
+foreach (array_merge([$root . '/README.md', $root . '/CHANGELOG.md'], glob($root . '/docs/*.md') ?: [], glob($root . '/docs/security/*.md') ?: []) as $document) {
     preg_match_all('/\]\(([^)\s]*)\)/', (string)file_get_contents($document), $links);
     foreach ($links[1] as $link) {
         if ($link === '' || preg_match('#^[a-z][a-z0-9+.-]*:#i', $link) === 1) continue;

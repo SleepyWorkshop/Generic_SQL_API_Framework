@@ -95,6 +95,10 @@ All notable changes are recorded here. The project follows semantic versioning.
 - Added attack-oriented tests for authentication, authorization, API keys,
   CSRF/CORS, SQL/CRUD injection, traversal, secrets, backups, health, logging,
   and error disclosure.
+- Documented the v2.1.1 dependency security review: the application has no
+  Composer/npm or vendored dependencies, and outdated PHP, OpenSSL, curl,
+  SQLite, and libxml2 runtime packages in the review environment were updated
+  with the backend regression suite passing afterwards.
 
 ## [1.0.0] - Initial release
 
