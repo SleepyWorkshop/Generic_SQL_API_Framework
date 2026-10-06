@@ -395,10 +395,26 @@ the development/security-review environment were updated and the backend
 regression suite passed. See the
 [Dependency security review](security/Dependency-Security-Review.md).
 
+## v2.1.2 — Static Security Analysis
+
+Status: Completed
+
+A manual static review of the backend, Admin Console, SQL Parser, deployment
+templates, and repository history found 20 findings (SSA-01 – SSA-20). The
+approved remediation scope, SSA-01 – SSA-12, is complete: deny-by-default
+routine and query-source registries, public-API removal of setup and identity
+management, SQL Resource runtime-filter source checks, production ODBC
+transport hardening, an unpaginated result-row limit, regression coverage, and
+documented or accepted limitations. The exposed administrator credential
+(SSA-05) was rotated and verified. Authored SQL Resource SQL is not validated
+table by table, the widget SQL Resources referenced by the frontend but absent
+from the backend remain unresolved, and SSA-13 – SSA-20 are deferred. See the
+[Static security analysis inventory](security/Static-Security-Analysis-Inventory.md).
+
 ## Security Verification
 
 - Dependency security review (completed in v2.1.1)
-- Static security analysis
+- Static security analysis (completed in v2.1.2)
 - Authorization security testing
 - API security testing
 - DAST / security scanning
@@ -574,6 +590,7 @@ consume this API.
 | v2.0.0 Production Hardening | Production Phases 1–5 and production documentation | Completed |
 | v2.1 | Security Verification & Operational Hardening | Planned |
 | v2.1.1 | Dependency Security Review | Completed |
+| v2.1.2 | Static Security Analysis | Completed |
 | v3.0 | Multi-Database Support | Planned |
 | v3.1 | Developer Experience & API Integration | Planned |
 | v4.0 | Backend Platform & Enterprise Capabilities | Planned / Uncommitted |

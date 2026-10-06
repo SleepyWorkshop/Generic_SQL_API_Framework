@@ -99,6 +99,17 @@ All notable changes are recorded here. The project follows semantic versioning.
   Composer/npm or vendored dependencies, and outdated PHP, OpenSSL, curl,
   SQLite, and libxml2 runtime packages in the review environment were updated
   with the backend regression suite passing afterwards.
+- Completed the v2.1.2 static security analysis and remediated, documented,
+  or accepted findings SSA-01 through SSA-12: deny-by-default routine and
+  query-source registries (reconciled with the sources used by the frontend),
+  Admin-only setup and identity/API-key/role management, registered-source
+  checks for SQL Resource runtime filters, production ODBC Driver 18/17
+  transport hardening and warnings, a `GENERIC_MAX_RESULT_ROWS` limit for
+  unpaginated reads, Windows PHP runtime provenance and checksums, and security
+  regression coverage. The exposed administrator credential (SSA-05) was
+  rotated and verified to no longer match the historical hash. Authored SQL
+  Resource SQL is not validated table by table, and SSA-13 through SSA-20
+  remain deferred.
 
 ## [1.0.0] - Initial release
 

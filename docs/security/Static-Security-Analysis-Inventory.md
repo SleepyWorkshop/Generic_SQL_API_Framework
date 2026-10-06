@@ -1,13 +1,15 @@
 # Static security analysis inventory (v2.1.2)
 
-Review status: **Remediation in progress — v2.1.2 not yet completed** — 2026-10-06
+Review status: **Completed** — 2026-10-06
 
 This report records roadmap phase v2.1.2 (Static Security Analysis) of
 [v2.1 — Security Verification & Operational Hardening](../Roadmap.md#v21--security-verification--operational-hardening).
 The original read-only inventory is preserved below the
 [remediation status](#remediation-status); findings whose analysis changed
-after deeper tracing carry a **Correction** note. Phase v2.1.2 stays open until
-the remaining operator action for SSA-05 is complete.
+after deeper tracing carry a **Correction** note. Phase v2.1.2 is complete:
+every finding in the approved remediation scope (SSA-01 – SSA-12) is fixed,
+documented, or accepted, and the SSA-05 operator action (credential rotation)
+was completed and verified on 2026-10-06. SSA-13 – SSA-20 remain deferred.
 
 ## Method and scope
 
@@ -77,7 +79,7 @@ SSA-20. Deployment-dependent: SSA-08. No exploitable path: SSA-10.
 | SSA-02 | High | **Fixed** | `setup.createAdmin` removed from the public API (404). It runs only through the Admin API, where `LocalAdminMiddleware` requires loopback and `GENERIC_ADMIN_ENABLED=1`. Setup stays permanently unavailable after initialization; `setup.status` stays public. |
 | SSA-03 | Medium | **Implemented for the current enforcement boundary; frontend sources reconciled** | Deny-by-default `config/query-sources.php` + `QuerySourcePolicy`, enforced for every physical table/view of JSON Query Mode (source, join, subquery, union branch, CTE body) in `ScopedMetadataRepository`, for metadata listings, and for SQL Resource runtime source filters; CTE names stay local and must be plain identifiers. Authored SQL Resource SQL is not validated table by table. See [SSA-03 frontend source reconciliation](#ssa-03-frontend-source-reconciliation). |
 | SSA-04 | Medium | **Fixed** | `auth.users.*`, `auth.apiKeys.*`, and `auth.roles.list` removed from the public API (404) and served only by the loopback Admin API with the Admin flag. `auth.frontendUsers.*` is unchanged. |
-| SSA-05 | High | **Open — operator action** | The historical hash is identical to the current hash of an enabled System Administrator in the review installation, and both GitHub remotes are publicly readable. The administrator password must be rotated (and anywhere it was reused). Git history is not rewritten. See [SSA-05](#ssa-05--an-administrator-password-hash-is-present-in-pushed-git-history-medium). |
+| SSA-05 | High | **Cleared — credential rotated** | The affected System Administrator password was rotated through the Admin Console on 2026-10-06 and login with the new password was confirmed by the operator. A `hash_equals` comparison of the current stored hash for the same account against the historical hash returned no match; no other stored record matches it either. The historical hash remains in public Git history but no longer corresponds to the account's credential. Git history is not rewritten. See [SSA-05](#ssa-05--an-administrator-password-hash-is-present-in-pushed-git-history-medium). |
 | SSA-06 | Low | **Accepted limitation** | Documented in `docs/Limitations.md`; a regression test pins the current behavior (frontend access is not narrowed by SQL Resource scopes, backend roles are). |
 | SSA-07 | Low | **Fixed** | SQL Resource runtime filters resolve only against registered query sources; explicit `source`/`having` mappings must reference a registered top-level source (derived-table aliases are denied). |
 | SSA-08 | Low | **Documented** | `docs/Production-Security-and-Deployment.md` forbids same-host proxies in front of the loopback/`REMOTE_ADDR` gates. No proxy-header trust was added. |
@@ -265,7 +267,16 @@ warnings, literal edge cases, and the SSA-06 accepted limitation).
     matches the historical hash.
   - Git history is intentionally not rewritten: the hash is already public in
     clones and forks, and rotation is what removes the risk.
-  - Status: open until rotation is confirmed.
+  - Rotation completed (2026-10-06): the operator rotated the affected System
+    Administrator password through the Admin Console and confirmed login with
+    the new password. The current stored hash for the same account was then
+    compared locally against the historical hash with `hash_equals`; the
+    result was **no match** (and no other stored record matches it). Only the
+    boolean result was produced; neither value was displayed or recorded.
+  - Status: **Cleared — credential rotated.** The historical hash remains in
+    public Git history, but it no longer corresponds to the account's
+    credential. Any other system where the same password was reused is outside
+    this repository and remains the operator's responsibility.
 
 ### SSA-06 — `frontend.read` skips SQL Resource scope checks (Low)
 
