@@ -123,6 +123,18 @@ All notable changes are recorded here. The project follows semantic versioning.
     API key roles, and list bodies.
   - All 64 planned authorization and API tests pass, 56 over HTTP and 8 at the
     enforcement layer.
+- Completed the v2.1.5 security architecture and operational hardening review.
+  - Fixed: readiness at the internal IIS route `/api/health/ready` always
+    returned 200; health probes are now recognized at any mount path
+    (SAOH-03).
+  - Hardened: production guidance moves runtime configuration out of the code
+    tree through `GENERIC_RUNTIME_CONFIG_DIR`, so the PHP worker cannot modify
+    the PHP allowlists in `Backend/config`. The bundled development runtimes
+    stay read-only, and `validate-production.php` reports where runtime
+    configuration lives (SAOH-01, SAOH-02).
+  - Accepted and documented: shared worker identity, backup-signing key
+    custody, `db_datareader` breadth, external log rotation, and single-host
+    security state.
 
 ## [1.0.0] - Initial release
 

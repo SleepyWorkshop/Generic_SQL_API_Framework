@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
 require_once __DIR__ . '/../Security/DatabaseTransportSecurity.php';
+require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 
 final class ProductionValidator
 {
@@ -41,6 +42,7 @@ final class ProductionValidator
                 'sqlServer' => ['status' => self::NOT_EXECUTED, 'available' => false,
                     'reason' => 'No authorized live SQL Server target was supplied.'],
                 'databaseTransport' => $this->databaseTransport(),
+                'runtimeConfiguration' => $this->runtimeConfigurationLocation(),
                 'tls' => ['status' => extension_loaded('openssl') ? self::PARTIAL : self::NOT_EXECUTED,
                     'reason' => 'Cryptographic capability does not validate a deployed certificate, hostname, or HTTPS binding.'],
             ],
@@ -140,6 +142,27 @@ final class ProductionValidator
         return $warnings === []
             ? ['status' => self::VALIDATED, 'warnings' => []]
             : ['status' => self::OPERATOR, 'warnings' => $warnings];
+    }
+
+    /**
+     * Runtime configuration (users, keys, settings) must not share the code
+     * tree: Backend/config also holds executable PHP allowlists, which the
+     * worker identity must not be able to modify. Reports no path.
+     */
+    private function runtimeConfigurationLocation(): array
+    {
+        $normalize = static function (string $path): string {
+            $resolved = realpath($path);
+            return rtrim(str_replace('\\', '/', $resolved === false ? $path : $resolved), '/') . '/';
+        };
+        $directory = $normalize(RuntimeConfiguration::directory());
+        $root = $normalize((string)$this->root);
+        $compare = PHP_OS_FAMILY === 'Windows' ? 'strncasecmp' : 'strncmp';
+        if ($compare($directory, $root, strlen($root)) !== 0) {
+            return ['status' => self::VALIDATED, 'location' => 'outside_code_tree'];
+        }
+        return ['status' => self::OPERATOR, 'location' => 'inside_code_tree',
+            'reason' => 'Set GENERIC_RUNTIME_CONFIG_DIR to a directory outside the code tree so Backend/config can stay read-only for the PHP worker.'];
     }
 
     private function extensionStates(): array

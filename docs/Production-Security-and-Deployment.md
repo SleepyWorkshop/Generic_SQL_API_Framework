@@ -85,12 +85,17 @@ Apply least privilege to the PHP service identity:
 | `admin/index.php`, `admin/api.php`, `admin/assets/` | loopback site only | read/execute |
 | `sqlparser/index.php`, `sqlparser/assets/` | selected internal listener | read/execute |
 | `app/`, `core/`, `database/drivers/`, `queries/` | no | read |
-| `config/`, `database/config/` | no | read; write only if Admin configuration changes are permitted |
+| `config/` (shipped PHP configuration and allowlists) | no | read only |
+| runtime configuration directory (`GENERIC_RUNTIME_CONFIG_DIR`, outside the code tree) | no | read/write |
+| `database/config/` | no | read/write (encrypted `database.json` saved by the Admin Console) |
 | `logs/`, `runtime/`, `storage/security/`, PHP session directory | no | read/write |
+| `runtime/windows/`, `runtime/linux/` (development PHP runtimes) | no | read only |
 | `runtime/secrets/` or external secret store | no | narrowly restricted read |
 | `.git/`, backups, temporary files | never | no web-server access |
 
 Do not place `.env`, keys, logs, JSON configuration, backups, or repository metadata under a static document root. The supplied configurations use fixed public roots and fixed FastCGI targets as defense in depth.
+
+Users, password and API-key hashes, roles, Admin settings, availability state, and their lock files are runtime configuration. Store them in a dedicated directory outside the code tree, named by `GENERIC_RUNTIME_CONFIG_DIR` for every boundary and every command-line script, rather than in `Backend/config`. That directory also contains the PHP allowlists the application executes (query sources, routines, write resources, SQL Resources) and `constants.php`. If the worker identity could write it, any file-write flaw, or anyone acting as that identity, could change those allowlists. The bundled development runtimes are code too and are not used by IIS or PHP-FPM.
 
 ## PHP runtime requirements
 
@@ -204,7 +209,7 @@ Set server-side values on the IIS FastCGI application/application-pool identity 
 
 ```text
 GENERIC_APP_ENV=production
-GENERIC_RUNTIME_CONFIG_DIR=<absolute path to Backend/config>
+GENERIC_RUNTIME_CONFIG_DIR=<absolute path to a runtime state directory outside Backend, e.g. /srv/generic-reporting/state/config>
 GENERIC_SQL_API_ENCRYPTION_KEY=<secret supplied outside the repository>
 GENERIC_SQL_API_KEY=<legacy key only when that authentication path is used>
 ```
@@ -215,7 +220,8 @@ The encryption key must be available to the PHP worker identity but stored separ
 
 On IIS, provision the key outside the site content and grant the application-pool
 identity only the access it needs. Apply NTFS ACLs to `database/config`,
-`runtime/secrets`, `config`, sessions, and logs; inherited broad read access is
+`runtime/secrets`, the runtime configuration directory, sessions, and logs, and
+keep `Backend/config` read-only for the pool; inherited broad read access is
 not an acceptable production default. Do not put the key in `web.config`, a
 batch file, an IIS-visible directory, or a process command line. Recycle the
 FastCGI application pool after changing its environment and verify the effective
@@ -223,7 +229,9 @@ identity can decrypt configuration without returning any secret in diagnostics.
 
 On Linux, provide the key through the PHP-FPM service/pool environment using a
 root-controlled deployment mechanism outside the repository and document the
-distribution-specific `clear_env` behavior. Configuration, session, log, and
+distribution-specific `clear_env` behavior. The code tree, including
+`Backend/config`, stays owned by the deployment account and read-only to the PHP
+worker. The runtime configuration, session, log, and
 runtime directories should be owned by the deployment account and PHP worker
 group with the narrowest usable modes; secret files should be owner-only where
 the service model permits. Never export the key in an interactive shell history
@@ -322,7 +330,7 @@ display disabled and configure IIS/Nginx to pass through application JSON errors
 - **Encrypted configuration unavailable:** restore the external encryption key for the worker identity; never generate a replacement for existing ciphertext.
 - **Stale code after deployment:** recycle the IIS application pool or reload/restart PHP-FPM because production OPcache timestamp checks are disabled.
 - **Requests serialize or queue:** confirm traffic is not using `php -S`, then inspect IIS FastCGI/FPM worker saturation and downstream database capacity.
-- **Permission failures:** verify code is readable while only config/database-config, logs, runtime, storage, and session locations that actually require mutation are writable.
+- **Permission failures:** verify code and `config/` are readable while only the runtime configuration directory, `database/config`, logs, runtime, storage, and session locations that actually require mutation are writable.
 - **Redirect loop:** confirm TLS terminates on the server applying the redirect. If a trusted edge terminates TLS, move the redirect there and restrict forwarded-header trust to that edge.
 - **Browser CSP violation:** identify the exact blocked resource. Do not add script wildcards, `'unsafe-eval'`, or inline-script allowances; update the narrow boundary policy only when the application genuinely requires it.
 - **Secure cookie not returned:** confirm the browser is using the intended HTTPS hostname and the certificate is trusted; production cookies are intentionally not usable over plain HTTP.

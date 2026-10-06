@@ -437,15 +437,80 @@ The public and Admin API authorization boundary was inventoried, and a
 See the
 [Authorization & API security inventory](security/Authorization-API-Security-Inventory.md).
 
+## v2.1.4 — DAST & Penetration-Test Preparation
+
+Status: Partially Completed / Deferred
+
+A passive, unauthenticated DAST review of a local development deployment and a
+review of the production IIS and Nginx templates were performed:
+- **Findings:** 5 findings (DAST-01 – DAST-05).
+  - Resolved: the SQL Parser no longer discloses the PHP version in
+    `X-Powered-By` (DAST-01), and its development router serves only the
+    intended assets instead of executing any PHP file in its document root
+    (DAST-02). Both have regression tests and mutation checks.
+  - Accepted: DAST-03, DAST-04, and DAST-05 are informational observations
+    that affect development only.
+- **Regression coverage:** the existing automated regression suites were mapped
+  to the DAST areas. That coverage is not DAST and does not replace the
+  deferred testing.
+- **Penetration-test preparation:** completed. It covers scope, rules of
+  engagement, test accounts to provision, test areas, and known findings and
+  accepted risks.
+
+Deferred to the external penetration test, and not performed in this phase:
+- authenticated dynamic testing;
+- session dynamic testing;
+- rate-limit dynamic testing;
+- injection testing against a live or deployed environment;
+- TLS and deployed IIS or Nginx behavior.
+
+External penetration testing remains required for those areas. See the
+[DAST report](security/DAST-Report.md) and the
+[Penetration-test preparation](security/Penetration-Test-Preparation.md) handoff.
+
+## v2.1.5 — Security Architecture & Operational Hardening
+
+Status: Completed
+
+The review covered:
+
+- the security architecture and trust boundaries;
+- secret and key custody;
+- the production PHP runtime;
+- the IIS and Nginx templates and the deployment procedure;
+- filesystem least privilege;
+- the database, session, logging and auditing, backup, error-handling, and
+  health and monitoring designs;
+- operational hardening.
+
+It was a review of the repository; no live or deployed host was tested.
+- **Findings:** 8 findings (SAOH-01 – SAOH-08); no Critical or High finding.
+  - Resolved: runtime configuration moves out of the code tree so the PHP
+    worker can no longer modify the PHP allowlists in `Backend/config`
+    (Medium); the bundled development PHP runtimes stay read-only for the
+    production worker; and readiness at the internal IIS route
+    `/api/health/ready` reports "not ready" correctly instead of always 200.
+  - Accepted and documented: shared worker identity across boundaries,
+    backup-signing key custody, `db_datareader` breadth, external log
+    rotation, and single-host security state.
+- **Verification:** a new regression suite with mutation checks; the backend
+  regression suite and PHP lint pass.
+
+Target-host verification of ACLs, `php.ini`, and session storage remains
+operator-owned. The deferred v2.1.4 dynamic testing remains with the external
+penetration test. See the
+[Security architecture and operational hardening](security/Security-Architecture-and-Operational-Hardening.md)
+review.
+
 ## Security Verification
 
 - Dependency security review (completed in v2.1.1)
 - Static security analysis (completed in v2.1.2)
 - Authorization security testing (completed in v2.1.3)
 - API security testing (completed in v2.1.3)
-- DAST / security scanning
-- Penetration-test preparation
-- Security architecture review
+- DAST / security scanning (partially completed in v2.1.4; dynamic testing deferred to the external penetration test)
+- Penetration-test preparation (completed in v2.1.4)
+- Security architecture review (completed in v2.1.5)
 - Final security verification report
 
 ## Optional Security Enhancements
@@ -618,6 +683,8 @@ consume this API.
 | v2.1.1 | Dependency Security Review | Completed |
 | v2.1.2 | Static Security Analysis | Completed |
 | v2.1.3 | Authorization & API Security Testing | Completed |
+| v2.1.4 | DAST & Penetration-Test Preparation | Partially Completed / Deferred |
+| v2.1.5 | Security Architecture & Operational Hardening | Completed |
 | v3.0 | Multi-Database Support | Planned |
 | v3.1 | Developer Experience & API Integration | Planned |
 | v4.0 | Backend Platform & Enterprise Capabilities | Planned / Uncommitted |

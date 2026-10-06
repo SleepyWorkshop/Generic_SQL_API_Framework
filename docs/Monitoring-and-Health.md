@@ -13,6 +13,11 @@ storage, tracing, process supervision, or an external monitoring platform.
 | API readiness | `GET /health/ready` | Public | `200` when ready, otherwise `503` | Local configuration/runtime/application checks plus any cached connectivity result; no SQL connection |
 | Detailed health | Admin action `admin.health` | Authenticated System Administrator (`admin.manage`) | Existing Admin JSON envelope | Local checks, managed-process probes, and a short-cached database test |
 
+The probes are identified by their final path segments, so the internal IIS
+routes `/api/health/live` and `/api/health/ready` behave exactly like
+`/health/live` and `/health/ready`. Only the bare development `/health` path
+returns managed-process metadata.
+
 The public responses contain only a status, safe category, service/version, and
 the four readiness check results. They never return paths, credentials, keys,
 connection strings, exception messages, SQL, environment values, sessions,

@@ -390,9 +390,18 @@ C:\GenericReporting\
     api\  admin\  sqlparser\                    the three web entry boundaries
     app\  core\  database\  queries\  config\  deployment\  scripts\
     logs\  runtime\  storage\  backups\         writable application state
+  state\config\                                runtime configuration (GENERIC_RUNTIME_CONFIG_DIR)
   sessions\                                    PHP session files
   php-logs\                                    PHP error log
 ```
+
+Runtime configuration (users, password hashes, API-key hashes, roles, Admin
+settings, availability state, and their lock files) lives in `state\config`,
+outside the code tree. `Backend\config` then holds only the shipped PHP files,
+including the query-source, routine, write-resource, and SQL Resource
+allowlists, and stays read-only for the application pool. Every FastCGI
+registration (section 11.2) and every command-line script in this guide must use
+the same `GENERIC_RUNTIME_CONFIG_DIR`.
 
 ### 8.2 Copy the files
 
@@ -411,8 +420,13 @@ Create the secret-free runtime configuration files (`config\admin.json`,
 `auth.json`, and so on) once:
 
 ```powershell
+$env:GENERIC_RUNTIME_CONFIG_DIR = 'C:\GenericReporting\state\config'
 C:\PHP\php.exe C:\GenericReporting\Backend\scripts\bootstrap-runtime-configuration.php
 ```
+
+Keep `GENERIC_RUNTIME_CONFIG_DIR` set in the shell for the other command-line
+scripts in this guide (`validate-production.php`, `application-backup.php`), so
+they use the same directory as the IIS workers.
 
 Expected output: `READY created=...`. Running it again never overwrites existing
 values. Database availability starts **disconnected** until you connect it in
@@ -469,7 +483,7 @@ icacls $root /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)
 
 # Writable application state.
 foreach ($path in @(
-    "$root\Backend\config",
+    "$root\state\config",
     "$root\Backend\database\config",
     "$root\Backend\logs",
     "$root\Backend\runtime",
@@ -481,6 +495,14 @@ foreach ($path in @(
     icacls $path /grant "${id}:(OI)(CI)M"
 }
 
+# The bundled development PHP runtimes are code: keep them read-only even
+# though Backend\runtime is writable. IIS uses C:\PHP, not these folders.
+foreach ($dev in @("$root\Backend\runtime\windows", "$root\Backend\runtime\linux")) {
+    if (Test-Path $dev) {
+        icacls $dev /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)F" "${id}:(OI)(CI)RX"
+    }
+}
+
 # PHP itself is read-only for the pool.
 icacls C:\PHP /grant "${id}:(OI)(CI)RX"
 ```
@@ -488,16 +510,38 @@ icacls C:\PHP /grant "${id}:(OI)(CI)RX"
 | Path | Pool access | Why |
 |---|---|---|
 | `Backend\` (code), `Frontend\...\dist\`, `C:\PHP` | Read & execute | Code and static files |
-| `Backend\config` | Modify | Admin settings, users, keys, runtime/availability state, lock files |
+| `Backend\config` | Read & execute | Shipped PHP configuration and allowlists; never writable by the pool |
+| `state\config` | Modify | Admin settings, users, keys, runtime/availability state, lock files |
 | `Backend\database\config` | Modify | Encrypted `database.json` saved by the Admin Console |
 | `Backend\logs` | Modify | Operational and audit logs |
 | `Backend\runtime` | Modify | Health cache, backup lock, backup-signing key (`runtime\secrets`) |
+| `Backend\runtime\windows`, `Backend\runtime\linux` | Read & execute | Development PHP runtimes; not used by IIS |
 | `Backend\storage` | Modify | Rate-limit counters |
 | `Backend\backups` | Modify | Application recovery points |
 | `sessions`, `php-logs` | Modify | PHP sessions and PHP error log |
 
 None of the writable folders is under an IIS application path, so they are not
 web-addressable. Re-run the commands after adding new folders.
+
+The pool must not be able to modify the PHP files it executes. Granting Modify on
+`Backend\config` would let any file-write flaw in the application, or anyone
+acting as the pool identity, change the query-source, routine, write-resource,
+and SQL Resource allowlists or `constants.php`.
+
+**Existing installations** that keep runtime JSON in `Backend\config`:
+
+1. In System Health, **Disable** the API.
+2. Create `C:\GenericReporting\state\config`.
+3. Move `admin.json`, `auth.json`, `authorization.json`, `api-keys.json`,
+   `installation.json`, `database-state.json`, and
+   `application-runtime-state.json` from `Backend\config` into it. Delete the
+   `*.lock` files left in `Backend\config`.
+4. Set `GENERIC_RUNTIME_CONFIG_DIR` on all three FastCGI registrations
+   (section 11.2).
+5. Re-run the commands above, which also remove the pool's Modify grant from
+   `Backend\config`.
+6. Recycle the application pool, confirm `/health/ready`, and
+   **Enable** the API.
 
 ## 11. Configure FastCGI and environment variables
 
@@ -531,6 +575,7 @@ foreach ($boundary in 'api', 'admin', 'sqlparser') {
     & $appcmd set config -section:system.webServer/fastCgi /+"$app" /commit:apphost
     & $appcmd set config -section:system.webServer/fastCgi /+"$app.environmentVariables.[name='PHPRC',value='C:\PHP']" /commit:apphost
     & $appcmd set config -section:system.webServer/fastCgi /+"$app.environmentVariables.[name='GENERIC_APP_ENV',value='production']" /commit:apphost
+    & $appcmd set config -section:system.webServer/fastCgi /+"$app.environmentVariables.[name='GENERIC_RUNTIME_CONFIG_DIR',value='C:\GenericReporting\state\config']" /commit:apphost
 }
 & $appcmd set config -section:system.webServer/fastCgi /+"[fullPath='C:\PHP\php-cgi.exe',arguments='-d generic_sql_api.boundary=admin'].environmentVariables.[name='GENERIC_ADMIN_ENABLED',value='1']" /commit:apphost
 ```
@@ -539,6 +584,7 @@ foreach ($boundary in 'api', 'admin', 'sqlparser') {
 |---|:---:|:---:|:---:|---|
 | `PHPRC=C:\PHP` | ✔ | ✔ | ✔ | Use `C:\PHP\php.ini` |
 | `GENERIC_APP_ENV=production` | ✔ | ✔ | ✔ | Production mode (secure cookies, application availability controls, no local process management) |
+| `GENERIC_RUNTIME_CONFIG_DIR=C:\GenericReporting\state\config` | ✔ | ✔ | ✔ | Runtime configuration outside the read-only code tree (section 8.1); the parser reads its availability state there |
 | `GENERIC_ADMIN_ENABLED=1` | | ✔ | | Allows `admin.*` actions; never set it on `/api` or `/sqlparser` |
 | `GENERIC_SQL_API_ENCRYPTION_KEY=<SECRET>` | ✔ | ✔ | | Decrypts `database.json` (11.3). The parser never touches the database |
 
@@ -965,8 +1011,9 @@ operations tooling; see [Operational Logging](Operational-Logging.md).
   Windows **Task Scheduler** task that runs
   `C:\PHP\php.exe C:\GenericReporting\Backend\scripts\application-backup.php scheduled-create`
   under an account with the section 10 permissions. That task must receive the
-  same `GENERIC_SQL_API_ENCRYPTION_KEY` through your organization's
-  secret-injection mechanism, never as a command-line argument.
+  same `GENERIC_RUNTIME_CONFIG_DIR` and `GENERIC_SQL_API_ENCRYPTION_KEY` as the
+  Admin registration, the key through your organization's secret-injection
+  mechanism and never as a command-line argument.
 - **Health:** the System Health **Backup** card reports the latest verified
   recovery point, the schedule, and failures without affecting overall health.
 
@@ -982,14 +1029,16 @@ pool recycles. Every update must end with a recycle.
 1. Create an application backup (section 21) and confirm SQL Server backups are current.
 2. Optionally **Disable** the API in System Health so clients get a clean `503`.
 3. Copy the new release over `Backend` (and the new frontend `dist`). Do not
-   overwrite `config\*.json`, `database\config\database.json`, `runtime\secrets`,
+   overwrite `state\config`, `database\config\database.json`, `runtime\secrets`,
    `logs`, `storage`, or `backups`.
 4. Re-copy any changed `deployment\iis\*.web.config.example` files to their
    `web.config` locations (section 13), keeping local edits such as the redirect
    hostname or parser IP restrictions.
-5. Run `C:\PHP\php.exe C:\GenericReporting\Backend\scripts\bootstrap-runtime-configuration.php`
+5. With `GENERIC_RUNTIME_CONFIG_DIR` set as in section 8.3, run
+   `C:\PHP\php.exe C:\GenericReporting\Backend\scripts\bootstrap-runtime-configuration.php`
    (adds any new configuration files without overwriting existing values) and
-   re-run the NTFS commands from section 10 for any new folders.
+   re-run the NTFS commands from section 10, which also keep `Backend\config`
+   and the development runtimes read-only after the copy.
 6. Recycle: `& "$env:windir\System32\inetsrv\appcmd.exe" recycle apppool /apppool.name:GenericSQLAPI`
 7. Hard-refresh browsers (Ctrl+F5) so new Admin/parser JavaScript loads.
 8. Re-run section 19 and **Enable** the API.
@@ -1036,8 +1085,8 @@ Run the read-only validator for a structured report:
 - [ ] Code in `C:\GenericReporting`; no development `config`, `database.json`, `runtime\secrets`, logs, or backups copied
 - [ ] Runtime configuration bootstrapped; `validate-production.php` reports templates `VALIDATED`
 - [ ] Application pool `GenericSQLAPI`: No Managed Code, Integrated, 64-bit, ApplicationPoolIdentity
-- [ ] NTFS: install root read-only for the pool; only the listed state folders writable
-- [ ] Three FastCGI registrations with `PHPRC` and `GENERIC_APP_ENV=production`; `GENERIC_ADMIN_ENABLED=1` on Admin only; encryption key on API and Admin only, stored in the secret vault
+- [ ] NTFS: install root, `Backend\config`, and the development runtimes read-only for the pool; only the listed state folders writable
+- [ ] Three FastCGI registrations with `PHPRC`, `GENERIC_APP_ENV=production`, and `GENERIC_RUNTIME_CONFIG_DIR`; `GENERIC_ADMIN_ENABLED=1` on Admin only; encryption key on API and Admin only, stored in the secret vault
 - [ ] Site `GenericReporting` with `/api`, `/admin`, `/sqlparser` applications; anonymous identity = application pool identity
 - [ ] All four `web.config` files installed; `/sqlparser` restricted to loopback or not deployed
 - [ ] HTTPS binding with a trusted certificate; optional redirect site; HSTS verified

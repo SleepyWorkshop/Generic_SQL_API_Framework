@@ -14,6 +14,10 @@ if (!in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)) {
 }
 
 $path = rawurldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/health', PHP_URL_PATH) ?: '/health');
+// The probe is identified by its final segments, so it is the same whether the
+// API is reached at the site root or under an IIS application such as /api
+// (/api/health/ready). Only the bare development /health returns process data.
+if (preg_match('#/health/(live|ready)$#', $path, $probe) === 1) $path = '/health/' . $probe[1];
 $monitor = new ApplicationHealthMonitor();
 if ($path === '/health/ready') {
     $payload = $monitor->readiness();
