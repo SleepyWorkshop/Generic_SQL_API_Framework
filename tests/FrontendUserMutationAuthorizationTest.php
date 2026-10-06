@@ -103,6 +103,68 @@ try {
         fn () => $service->assignFrontendAccess($admin, 'Super.Admin', true, null),
     ] as $operation) frontendMutationDenied($operation, 'Admin modified a Super Admin.');
 
+    // AAPI-01: backend identities are refused by the public frontend path for
+    // every actor. A backend identity holds a role the frontend cannot assign
+    // (Data Operator) or a backend role without frontend access.
+    $backendIdentities = [
+        'Backend.Operator' => ['backend-operator-password', RoleModel::DATA_OPERATOR, false],
+        'Backend.Reader' => ['backend-reader-password', RoleModel::READ_ONLY, false],
+        'Frontend.Operator' => ['frontend-operator-password', RoleModel::DATA_OPERATOR, true],
+    ];
+    foreach ($backendIdentities as $username => [$password, $role, $access]) $service->createUser($username, $password, $role, $access, null);
+    foreach ([...array_keys($backendIdentities), 'backend.operator'] as $target) {
+        foreach (['Application Admin' => $admin, 'Super Admin' => $superAdmin] as $actorName => $actor) {
+            foreach ([
+                'password reset' => fn () => $service->changeFrontendUserPassword($actor, $target, 'taken-over-password'),
+                'rename' => fn () => $service->updateFrontendProfile($actor, $target, 'Taken Over', 'Taken.Over', '+15551234567', null),
+                'disable' => fn () => $service->setFrontendUserEnabled($actor, $target, false),
+                'enable' => fn () => $service->setFrontendUserEnabled($actor, $target, true),
+                'delete' => fn () => $service->deleteFrontendUser($actor, $target),
+                'grant access' => fn () => $service->assignFrontendAccess($actor, $target, true, null),
+                'grant Admin' => fn () => $service->assignFrontendAccess($actor, $target, true, RoleModel::APPLICATION_ADMINISTRATOR),
+                'revoke access' => fn () => $service->assignFrontendAccess($actor, $target, false, null),
+            ] as $operationName => $operation) frontendMutationDenied($operation, "{$actorName} {$operationName} reached backend identity {$target}.");
+        }
+    }
+    foreach ($backendIdentities as $username => [$password, $role, $access]) {
+        $stored = $repository->findUser($username);
+        frontendMutationAssert($stored !== null && $stored['username'] === $username && $stored['enabled'] === true
+            && $stored['backendRole'] === $role && $stored['frontendAccess'] === $access && $stored['frontendRole'] === null
+            && $stored['authVersion'] === 1 && password_verify($password, $stored['passwordHash']),
+            "Rejected public mutation changed backend identity {$username}.");
+    }
+    // Request fields cannot convert or replace a backend identity.
+    foreach ([
+        fn () => $service->createFrontendUser($admin, 'Backend Operator', 'Backend.Operator', '+15551234567', null, 'replacement-password', RoleModel::READ_ONLY),
+        fn () => $service->createFrontendUser($admin, 'Backend Operator', 'BACKEND.OPERATOR', '+15551234567', null, 'replacement-password', RoleModel::APPLICATION_ADMINISTRATOR),
+        fn () => $service->updateFrontendProfile($admin, 'Normal.Renamed', 'Normal Renamed', 'Backend.Operator', '+15550001111', null),
+    ] as $operation) {
+        try { $operation(); throw new RuntimeException('A frontend request replaced a backend identity.'); }
+        catch (ApiRequestException $exception) { frontendMutationAssert($exception->getErrorCode() === 'USER_ALREADY_EXISTS', 'Backend identity collision returned the wrong error.'); }
+    }
+    foreach ([
+        ['action' => 'auth.frontendUsers.changePassword', 'username' => 'Backend.Operator', 'newPassword' => 'validated-user-password', 'passwordConfirmation' => 'validated-user-password', 'backendRole' => null],
+        ['action' => 'auth.frontendUsers.update', 'username' => 'Backend.Operator', 'name' => 'Operator', 'newUsername' => 'Backend.Operator', 'mobile' => '+15551234567', 'email' => null, 'frontendAccess' => true],
+        ['action' => 'auth.frontendUsers.assignRole', 'username' => 'Backend.Operator', 'frontendAccess' => true, 'frontendRole' => null, 'backendRole' => RoleModel::READ_ONLY],
+    ] as $request) {
+        try { (new FrontendUserRequestValidator())->validate($request); throw new RuntimeException('Frontend validator accepted a backend identity field.'); }
+        catch (ApiRequestException $exception) { frontendMutationAssert($exception->getErrorCode() === 'INVALID_FRONTEND_USER_REQUEST', 'Backend identity field returned the wrong error.'); }
+    }
+
+    // Legitimate frontend users (including frontend-assigned Read Only users)
+    // remain manageable by an Application Administrator.
+    $service->changeFrontendUserPassword($admin, 'Created.Reader', 'replacement-reader-password');
+    $service->updateFrontendProfile($admin, 'Created.Reader', 'Created Reader', 'Created.Reader', '+15551112222', null);
+    $service->setFrontendUserEnabled($admin, 'Created.Reader', false);
+    $service->setFrontendUserEnabled($admin, 'Created.Reader', true);
+    $reader = $repository->findUser('Created.Reader');
+    frontendMutationAssert($reader['backendRole'] === RoleModel::READ_ONLY && $reader['frontendAccess'] === true
+        && password_verify('replacement-reader-password', $reader['passwordHash']), 'Frontend Read Only user is no longer manageable.');
+    // Revoking frontend access leaves a backend-only account; only the Admin API manages it afterwards.
+    $service->assignFrontendAccess($admin, 'Created.Reader', false, null);
+    frontendMutationDenied(fn () => $service->assignFrontendAccess($admin, 'Created.Reader', true, null), 'Backend-only Read Only account regained access through the frontend path.');
+    frontendMutationDenied(fn () => $service->changeFrontendUserPassword($admin, 'Created.Reader', 'taken-over-password'), 'Backend-only Read Only account was taken over through the frontend path.');
+
     // Super Admin retains full frontend management over Admin accounts.
     $service->updateFrontendProfile($superAdmin, 'Peer.Owner', 'Managed Admin', 'Managed.Admin', '+15552345678', null);
     $service->changeFrontendUserPassword($superAdmin, 'Managed.Admin', 'managed-admin-password');
@@ -113,27 +175,44 @@ try {
     $service->assignFrontendAccess($superAdmin, 'Managed.Admin', true, null);
     frontendMutationAssert($repository->findUser('Managed.Admin')['frontendRole'] === null, 'Super Admin could not demote an Admin.');
 
-    // Persisted enabled Super Admin count is authoritative.
-    frontendMutationDenied(fn () => $service->setFrontendUserEnabled($superAdmin, 'Super.Admin', false), 'Sole Super Admin disabled itself.', 'LAST_ENABLED_ADMIN');
-    frontendMutationDenied(fn () => $service->deleteFrontendUser($superAdmin, 'Super.Admin'), 'Sole Super Admin deleted itself.', 'LAST_ENABLED_ADMIN');
+    // Persisted enabled Super Admin count is authoritative (Admin API path).
+    frontendMutationDenied(fn () => $service->setEnabled('Super.Admin', false), 'Sole Super Admin disabled itself.', 'LAST_ENABLED_ADMIN');
+    frontendMutationDenied(fn () => $service->deleteUser('Super.Admin', 'Super.Admin'), 'Sole Super Admin deleted itself.', 'LAST_ENABLED_ADMIN');
     frontendMutationDenied(fn () => $service->assignAuthorization(
         'Super.Admin', null, true, RoleModel::APPLICATION_ADMINISTRATOR, str_repeat('f', 32)
     ), 'Sole Super Admin demoted itself.', 'LAST_ENABLED_ADMIN');
     $service->createUser('Second.Super', 'second-super-password', RoleModel::SYSTEM_ADMINISTRATOR, true, RoleModel::APPLICATION_ADMINISTRATOR);
-    $service->setFrontendUserEnabled($superAdmin, 'Second.Super', false);
-    frontendMutationDenied(fn () => $service->setFrontendUserEnabled($superAdmin, 'Super.Admin', false), 'Disabled Super Admin counted as enabled.', 'LAST_ENABLED_ADMIN');
+
+    // AAPI-02: Super Admin identities, including the actor's own, are refused
+    // by the public frontend path even for a Super Admin actor.
+    foreach ([
+        fn () => $service->updateFrontendProfile($superAdmin, 'Second.Super', 'Changed Super', 'Changed.Super', '+15551234567', null),
+        fn () => $service->changeFrontendUserPassword($superAdmin, 'Second.Super', 'changed-super-password'),
+        fn () => $service->setFrontendUserEnabled($superAdmin, 'Second.Super', false),
+        fn () => $service->deleteFrontendUser($superAdmin, 'Second.Super'),
+        fn () => $service->assignFrontendAccess($superAdmin, 'Second.Super', false, null),
+        fn () => $service->changeFrontendUserPassword($superAdmin, 'Super.Admin', 'changed-own-password'),
+        fn () => $service->setFrontendUserEnabled($superAdmin, 'Super.Admin', false),
+        fn () => $service->deleteFrontendUser($superAdmin, 'Super.Admin'),
+    ] as $operation) frontendMutationDenied($operation, 'Public frontend path modified a Super Admin.');
+    frontendMutationAssert($repository->findUser('Second.Super')['enabled'] === true
+        && password_verify('second-super-password', $repository->findUser('Second.Super')['passwordHash']),
+        'Rejected public Super Admin mutation changed the account.');
+
+    $service->setEnabled('Second.Super', false);
+    frontendMutationDenied(fn () => $service->setEnabled('Super.Admin', false), 'Disabled Super Admin counted as enabled.', 'LAST_ENABLED_ADMIN');
     $service->setEnabled('Second.Super', true);
     $service->assignAuthorization(
         'Second.Super', null, true, RoleModel::APPLICATION_ADMINISTRATOR, $superAdmin->userId
     );
     frontendMutationAssert($repository->findUser('Second.Super')['backendRole'] === null, 'Super Admin demotion failed with another enabled Super Admin.');
     $service->createUser('Third.Super', 'third-super-password', RoleModel::SYSTEM_ADMINISTRATOR, true, RoleModel::APPLICATION_ADMINISTRATOR);
-    $service->setFrontendUserEnabled($superAdmin, 'Third.Super', false);
-    $service->deleteFrontendUser($superAdmin, 'Third.Super');
+    $service->setEnabled('Third.Super', false);
+    $service->deleteUser('Third.Super', 'Super.Admin');
     $service->createUser('Final.Super', 'final-super-password', RoleModel::SYSTEM_ADMINISTRATOR, true, RoleModel::APPLICATION_ADMINISTRATOR);
-    $service->setFrontendUserEnabled($superAdmin, 'Super.Admin', false);
+    $service->setEnabled('Super.Admin', false);
     $service->setEnabled('Super.Admin', true);
-    $service->deleteFrontendUser($superAdmin, 'Super.Admin');
+    $service->deleteUser('Super.Admin', 'Super.Admin');
     frontendMutationAssert($repository->findUser('Super.Admin') === null, 'Super Admin self-delete failed while another enabled Super Admin remained.');
 
     $listed = $service->listFrontendUsers();

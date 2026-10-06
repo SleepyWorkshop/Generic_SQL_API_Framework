@@ -351,10 +351,13 @@ final class UserManagementService
     ): void
     {
         $isSystemAdministrator = $this->assertFrontendActor($users, $actor);
-        if ($isSystemAdministrator) return;
-        if ($target['backendRole'] === RoleModel::SYSTEM_ADMINISTRATOR) {
+        // Backend identities are managed only through the loopback Admin API,
+        // so the public frontend path refuses them for every actor, including
+        // System Administrators.
+        if (!$this->isFrontendManagedIdentity($target)) {
             $this->denyFrontendMutation($actor, $target, 'backend_identity_protected');
         }
+        if ($isSystemAdministrator) return;
         $self = $actor->userId === $target['id'];
         if ($self && in_array($mutation, ['profile', 'password'], true)) return;
         if ($self) $this->denyFrontendMutation($actor, $target, 'self_mutation');
@@ -366,6 +369,21 @@ final class UserManagementService
         if ($mutation === 'authorization' && $requestedRole === RoleModel::APPLICATION_ADMINISTRATOR) {
             $this->denyFrontendMutation($actor, $target, 'administrator_assignment_denied');
         }
+    }
+
+    /**
+     * A frontend-managed identity holds no backend role, or holds a backend
+     * role the frontend itself assigns (FrontendCapabilityPolicy) together with
+     * frontend access. System Administrators, roles the frontend cannot assign
+     * (such as Data Operator), and backend roles without frontend access are
+     * backend identities.
+     */
+    private function isFrontendManagedIdentity(array $target): bool
+    {
+        if ($target['backendRole'] === null) return true;
+        return $target['backendRole'] !== RoleModel::SYSTEM_ADMINISTRATOR
+            && $target['frontendAccess'] === true
+            && in_array($target['backendRole'], FrontendCapabilityPolicy::assignableRoles(), true);
     }
 
     private function assertFrontendActor(array $users, Principal $actor): bool
