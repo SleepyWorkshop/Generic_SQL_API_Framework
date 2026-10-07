@@ -8,12 +8,12 @@ Common response fields are defined once in [Response reference](Response-Referen
 Unless a section says otherwise, request-shape failures are HTTP 400
 `INVALID_REQUEST` and execution failures are HTTP 500 `QUERY_ERROR`.
 
-The Admin Console's high-level feature switches are enforced before validation:
-Read Data covers query/routine/SQL Resource actions, Write Data covers CRUD,
-Metadata covers `metadata.*`, and Pagination/Sorting cover the corresponding
-request properties. A disabled feature returns HTTP 403 `FEATURE_DISABLED`.
-Administrator runtime actions are documented separately in
-[Admin runtime and feature reference](Admin-Runtime-and-Features.md).
+Every action is authenticated according to the configured API mode and
+authorized by the caller's role, resource scopes, and the query-source, routine,
+and write-resource registries before validation; see
+[Authentication and authorization](Authentication-and-Authorization.md). Session
+and frontend-user actions are in that document, and Admin actions are in
+[Admin Console](Admin-Console.md).
 
 ## `select`
 
@@ -239,7 +239,7 @@ conditional as described in [Response reference](Response-Reference.md).
 ### Errors
 
 Write-specific validation and conflict codes are documented in
-[CRUD](CRUD.md).
+[Write API](Write-API.md).
 
 ### Notes
 
@@ -297,7 +297,7 @@ Success returns operation `update` and the actual `affectedRows`.
 
 ### Errors
 
-See [CRUD](CRUD.md) for write validation and conflict codes.
+See [Write API](Write-API.md) for write validation and conflict codes.
 
 ### Notes
 
@@ -353,7 +353,7 @@ Success returns operation `delete` and `affectedRows`.
 
 ### Errors
 
-See [CRUD](CRUD.md) for write validation and conflict codes.
+See [Write API](Write-API.md) for write validation and conflict codes.
 
 ### Notes
 
@@ -413,7 +413,7 @@ configured identity `generatedId`.
 
 ### Errors
 
-Key failures use `INVALID_UPSERT_KEY`; see [CRUD](CRUD.md) for other write codes.
+Key failures use `INVALID_UPSERT_KEY`; see [Write API](Write-API.md) for other write codes.
 
 ### Notes
 
@@ -471,7 +471,7 @@ Invalid branch shape/count uses `INVALID_REQUEST`; execution uses `QUERY_ERROR`.
 ### Notes
 
 There is no top-level sorting/pagination and no public INTERSECT/EXCEPT. See
-[Set operations](Set-Operations.md).
+[JSON Query Mode](Query-Mode.md#set-operations).
 
 ## `procedure`
 
@@ -826,6 +826,7 @@ Invalid shape is `INVALID_REQUEST`; database failure is `QUERY_ERROR`.
 ### Notes
 
 The result is a flat ordered row list, not a nested schema document. Metadata
-actions expose catalog names to every caller accepted by the configured
-authentication mode; per-resource authorization is not yet implemented. See
+actions require `metadata.read` (or frontend access) and list only tables and
+views registered in `config/query-sources.php` and routines registered in
+`config/routine-resources.php` that the caller may use. See
 [Metadata and routines](Metadata-and-Routines.md).

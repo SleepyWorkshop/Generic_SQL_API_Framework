@@ -8,7 +8,7 @@ version supports it.
 | Capability | JSON Query Mode | SQL Resource Mode | Write API |
 |---|---|---|---|
 | SELECT | Public `select` | Server-owned SELECT/CTE | No |
-| Runtime comparison/LIKE/list/range/null filters | Yes | Yes, declared execution or legacy logical fields | UPDATE/DELETE only |
+| Runtime comparison/LIKE/list/range/null filters | Yes | Yes, fields declared in execution metadata | UPDATE/DELETE only |
 | Filter subqueries / EXISTS | IN/NOT IN/EXISTS/NOT EXISTS only | Can be authored in SQL; runtime values are not subqueries | No |
 | AND / OR | One top-level logic | One logic; OR cannot span locations | One top-level logic |
 | Integer-date filter conversion | BETWEEN on integer metadata | Configured `integer-date` | Live database type validation |
@@ -41,7 +41,7 @@ version supports it.
 | Transactions | No public contract | No public contract | No public contract |
 | Prepared values | WHERE/HAVING | Runtime filters | Data and filters |
 | Client arbitrary SQL/path | Rejected/not a property | Rejected/not a property | Rejected/not a property |
-| Metadata checks | Tables/columns/projections | Discovered file plus execution/legacy allowlists | Registry plus live write metadata |
+| Metadata checks | Tables/columns/projections | Discovered file plus execution metadata; runtime source filters against the query-source registry | Registry plus live write metadata |
 
 ## Other public execution surfaces
 
@@ -56,7 +56,7 @@ version supports it.
 | Procedure metadata | `metadata.procedures` |
 | Whole schema rows | `metadata.schema` |
 | API authentication/authorization | `none`, session, managed/legacy API key, or session + API key; fixed roles/resource scopes; administrator-session-only management |
-| Database provider | SQL Server through ODBC only |
+| Database provider | Microsoft SQL Server through ODBC only |
 
 For exact shapes use [Action reference](Action-Reference.md); for unsupported
 boundaries and workarounds use [Current limitations](Limitations.md).

@@ -1,79 +1,83 @@
-# Backend documentation
+# Documentation map
 
-This is the documentation entry point for frontend developers, backend
-maintainers, and operators. The implementation is a backend-only SQL Server API:
-clients send one allowlisted JSON action to the `api/index.php` entry script and
-receive one standard JSON envelope. Its URL is `/api/index.php` from a repository
-web root or `/index.php` when `api/` itself is the document root.
+Every document here describes the current release unless stated otherwise.
+Planned work appears only in the [Roadmap](Roadmap.md); release history is in
+the [changelog](../CHANGELOG.md). Start with the repository
+[README](../README.md) for an overview.
 
-## Start here
+## Using the API
 
-1. [Introduction](Introduction.md) — scope and core concepts.
-2. [HTTP API](API.md) — transport and the Universal JSON Contract.
-3. [Action reference](Action-Reference.md) — all 16 public actions.
-4. [JSON request reference](JSON-Request-Reference.md) — exact accepted fields and shapes.
-5. [Response reference](Response-Reference.md) — success, write, and error envelopes.
-6. [Frontend integration](Frontend-Integration.md) — turning UI state into requests.
+| Document | Covers |
+|---|---|
+| [HTTP API](API.md) | Endpoint, transport, request flow, and the Universal JSON Contract |
+| [Action reference](Action-Reference.md) | Every public data action with examples |
+| [JSON request reference](JSON-Request-Reference.md) | Exact accepted fields and shapes |
+| [Response reference](Response-Reference.md) | Success and write envelopes, per-action messages |
+| [Errors and validation](Errors-and-Validation.md) | Error envelope, every error code, failure handling |
+| [Frontend integration](Frontend-Integration.md) | Turning UI state into requests |
+| [Capability matrix](Capability-Matrix.md) | What each mode supports, side by side |
+| [Limitations](Limitations.md) | Intentional boundaries and known gaps |
 
-## Querying
+## Query modes
 
-- [JSON Query Mode](Query-Mode.md)
-- [Query examples](Query-Examples.md)
-- [SQL → API JSON Generator](SQL-Parser-Generator.md)
-- [Query function reference](Query-Functions.md)
-- [Filtering, sorting, and pagination](Filtering-Sorting-Pagination.md)
-- [Set operations](Set-Operations.md)
-- [Metadata and routines](Metadata-and-Routines.md)
+| Document | Covers |
+|---|---|
+| [JSON Query Mode](Query-Mode.md) | Client-composed SELECT, joins, CTEs, windows, set operations |
+| [Query functions](Query-Functions.md) | The complete function allowlist |
+| [Filtering, sorting, and pagination](Filtering-Sorting-Pagination.md) | Operators, sort rules, and paging across modes |
+| [Query examples](Query-Examples.md) | Worked requests |
+| [Metadata and routines](Metadata-and-Routines.md) | Metadata actions and the routine registry |
+| [SQL Resource Mode](SQL-Resource-Mode.md) | Executing server-owned SQL files by ID |
+| [SQL Resource authoring](SQL-Resource-Authoring.md) | Adding and reviewing SQL Resource files |
+| [Write API](Write-API.md) | INSERT, UPDATE, DELETE, UPSERT, and the write-resource registry |
+| [SQL Parser](SQL-Parser-Generator.md) | Converting SQL into request JSON |
 
-## Server-owned SQL
+## Operating the backend
 
-- [SQL Resource Mode](SQL-Resource-Mode.md)
-- [SQL Resource configuration](SQL-Resource-Configuration.md)
-- [SQL Resource files and examples](SQL-Resource-Files.md)
+| Document | Covers |
+|---|---|
+| [Architecture](Architecture.md) | Components, request flow, and process model |
+| [Local development](Local-Development.md) | Launchers, bundled runtimes, local troubleshooting |
+| [Production security and deployment](Production-Security-and-Deployment.md) | Production hosting for IIS and Nginx, permissions, secrets, operator checklists |
+| [Windows Server IIS deployment](Windows-IIS-Deployment.md) | Step-by-step Windows installation |
+| [Database configuration](Database-Configuration.md) | `database.json`, encryption, ODBC, key rotation |
+| [Admin Console](Admin-Console.md) | Pages, availability controls, every Admin API action |
+| [Authentication and authorization](Authentication-and-Authorization.md) | Modes, sessions, API keys, roles, user management |
+| [Runtime and performance controls](Runtime-and-Performance-Controls.md) | Timeouts, rate limits, sessions, request and page limits |
+| [Monitoring and health](Monitoring-and-Health.md) | Liveness, readiness, detailed health |
+| [Logging](Logging.md) | Operational and audit logs |
+| [Backup and recovery](Backup-and-Recovery.md) | Application configuration backups and restore |
 
-## Writes
+## Security
 
-- [CRUD / Write API](CRUD.md)
-- [Write resource configuration](Write-Resource-Configuration.md)
+| Document | Covers |
+|---|---|
+| [Security model](security/Security-Model.md) | Current trust boundaries, controls, and accepted risks |
+| [Security verification](security/Security-Verification.md) | Verification history, findings register, deferred work |
+| [Penetration-test preparation](security/Penetration-Test-Preparation.md) | Handoff for the outstanding external penetration test |
 
-## Boundaries and operations
+## Maintaining the repository
 
-- [Validation, errors, and security](Validation-and-Errors.md)
-- [Capability matrix](Capability-Matrix.md) — the authoritative quick comparison.
-- [Current limitations](Limitations.md)
-- [Architecture](Architecture.md)
-- [Local Admin Console and configuration](Admin-Console-and-Configuration.md)
-- [Runtime and performance controls](Runtime-and-Performance-Controls.md)
-- [Admin runtime and feature reference](Admin-Runtime-and-Features.md)
-- [Authentication and user management](Authentication-and-User-Management.md)
-- [Authorization and roles](Authorization-and-Roles.md)
-- [Audit and security logging](Audit-and-Security-Logging.md)
-- [Operational logging](Operational-Logging.md)
-- [Backup and recovery](Backup-and-Recovery.md)
-- [Monitoring and health](Monitoring-and-Health.md)
-- [Production error handling](Production-Error-Handling.md)
-- [Windows and Linux production validation](Production-Validation.md)
-- [Security testing](Security-Testing.md)
-- [Dependency security review](security/Dependency-Security-Review.md)
-- [Static security analysis](security/Static-Security-Analysis-Inventory.md)
-- [Managed API keys](API-Keys.md)
-- [Database configuration](Database-Configuration.md)
-- [Hosting](Hosting.md)
-- [Windows Server IIS deployment](Windows-IIS-Deployment.md) — step-by-step procedure from a fresh server
-- [Production web-server hosting](Production-Security-and-Deployment.md)
-- [AI development guide](AI-Development-Guide.md)
-- [Roadmap](Roadmap.md)
-- [Changelog](../CHANGELOG.md)
+| Document | Covers |
+|---|---|
+| [AI development guide](AI-Development-Guide.md) | Repository boundaries and invariants for maintainers and coding agents |
+| [Testing](Testing.md) | Running the suite, coverage, static checks, deployment validation |
+| [Contributing](../CONTRIBUTING.md) | Change expectations and pull requests |
+| [Roadmap](Roadmap.md) | Current, upcoming, and deferred work |
 
 ## Terminology
 
-- **JSON Query Mode** builds a validated SELECT from client-supplied structure.
-- **SQL Resource Mode** discovers and executes server-owned, read-only SQL files;
-  the client supplies a safe resource ID and optional validated execution metadata.
-- **Write API** performs registered single-object INSERT, UPDATE, DELETE, or UPSERT.
-- **Universal JSON Contract** is the shared request dispatch and response envelope.
-- **Execution metadata** declares approved SQL Resource output controls and
-  narrowly constrained source/HAVING mappings; it never contains arbitrary SQL.
-
-Documentation describes the current implementation. Planned work belongs only in
-[Roadmap](Roadmap.md); it is not part of the public contract.
+- **Universal JSON Contract:** the shared request dispatch (`action`) and
+  response envelope.
+- **JSON Query Mode:** the backend builds a validated SELECT from
+  client-supplied structure.
+- **SQL Resource Mode:** the client runs a server-owned, read-only SQL file by
+  ID, optionally with validated `execution` metadata.
+- **Execution metadata:** the request's declaration of approved SQL Resource
+  output columns, filter mappings, and default sort; never arbitrary SQL.
+- **Write API:** registered single-object INSERT, UPDATE, DELETE, or UPSERT.
+- **Registry:** a deny-by-default server-owned allowlist in `config/`
+  (query sources, routines, write resources).
+- **Runtime configuration directory:** the directory named by
+  `GENERIC_RUNTIME_CONFIG_DIR` holding users, roles, API keys, Admin settings,
+  and availability state.

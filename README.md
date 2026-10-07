@@ -1,237 +1,138 @@
 # Generic SQL API Framework
 
-Generic SQL API Framework is a PHP backend that converts validated JSON requests
-into SQL Server operations over ODBC. It provides a stable API for structured
-queries, reviewed SQL reports, CRUD, routines, and metadata without accepting raw
-SQL from clients or requiring a controller for every resource.
+Generic SQL API Framework is a PHP backend that exposes a Microsoft SQL Server
+database through one validated JSON API. Clients describe reads, reviewed
+reports, writes, routine calls, and metadata lookups as JSON; the backend
+validates them against a fixed contract and server-owned allowlists, builds
+parameterized SQL, and returns a standard JSON envelope. Clients never send raw
+SQL, and no per-resource controller is needed.
 
-The last released version is **v1.0.0**. The current repository contains the
-**v2.0.0 development line, which is unreleased**. See [CHANGELOG.md](CHANGELOG.md)
-for release history and [Roadmap.md](docs/Roadmap.md) for future work.
+It is for teams that build reporting frontends and internal tools on SQL Server
+and want one secured, configurable data API instead of hand-written endpoints.
+Dashboards and report screens live in separate frontend projects.
+
+## Release status
+
+The current release is **v2.0.0** (2026-10-05). The `dev` branch also contains
+completed, unreleased v2.1 security verification and hardening work, listed
+under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md). Planned work is in the
+[Roadmap](docs/Roadmap.md).
 
 ## Capabilities
 
-- JSON Query Mode for validated SELECT, joins, grouping, HAVING, sorting,
-  pagination, CTEs, set operations, windows, CASE, arithmetic, and allow-listed
-  SQL Server functions.
-- SQL Resource Mode for recursively discovered, server-owned `.sql` files with
-  validated execution metadata, filters, sorting, and pagination.
-- Deny-by-default write resources for single-object INSERT, UPDATE, DELETE, and
-  SQL Server UPSERT operations.
-- Stored procedures, scalar functions, table-valued functions, and database
-  metadata actions.
-- Configurable `none`, `session`, `api_key`, and `session+api_key` authentication.
-- Fixed backend/frontend roles, resource scopes, managed API keys, administrator
-  user management, CSRF protection, and request/login rate limits.
-- Encrypted database configuration, audit/security logging, backup verification,
-  health/readiness reporting, runtime controls, and production-safe errors.
-- A non-executing SQL-to-Universal-JSON parser for supported SQL shapes.
-- IIS/FastCGI and Nginx/PHP-FPM production deployment templates.
+- **JSON Query Mode:** validated SELECT with joins, grouping, HAVING, sorting,
+  pagination, CTEs, UNION/UNION ALL, window functions, CASE, arithmetic, and an
+  allowlist of SQL Server functions, over a deny-by-default registry of tables
+  and views.
+- **SQL Resource Mode:** reviewed `.sql` files under `queries/`, discovered
+  automatically and executed by ID with validated runtime filters, sorting, and
+  pagination.
+- **Write API:** single-object INSERT, UPDATE, DELETE, and UPSERT on
+  deny-by-default registered resources.
+- **Routines and metadata:** registered stored procedures, scalar and
+  table-valued functions, and table, column, view, procedure, and schema
+  metadata.
+- **Security:** `none`, `session`, `api_key`, or `session+api_key`
+  authentication; fixed backend and frontend roles with resource scopes; managed
+  one-time-reveal API keys; CSRF; exact-origin CORS; login and API rate limits;
+  encrypted database configuration; audit logging.
+- **Operations:** a loopback Admin Console for setup, configuration, users, API
+  keys, health, availability, and application backups; liveness and readiness
+  probes; production-safe errors with request IDs.
+- **SQL Parser:** a separate, non-executing tool that converts supported SQL
+  into API request JSON.
 
-Microsoft SQL Server through ODBC is the only supported database provider.
-Driver stubs for other databases are not selectable production implementations.
+**Database support:** Microsoft SQL Server through PHP ODBC is the only
+supported provider. Other files in `database/drivers/` are empty stubs.
 
-## HTTP surfaces
+## Architecture
 
-| Surface | Entry point | Purpose | Boundary |
-| --- | --- | --- | --- |
-| Application API | `api/index.php` | Query, SQL resource, CRUD, routine, metadata, and application auth actions | Configured normal API authentication and authorization |
-| Public health | `api/health.php` | Lightweight liveness/readiness | Deliberately minimal public response |
-| Admin Console/API | `admin/index.php`, `admin/api.php` | Setup, configuration, users, keys, health, and local lifecycle | Loopback plus System Administrator session; mutations require CSRF |
-| SQL parser | `sqlparser/index.php` | Convert supported SQL to request JSON without execution | Separate local/deployment boundary; no database access |
-
-Send API requests as `POST` with `Content-Type: application/json`. When API Key
-authentication is selected, send the managed secret only in:
-
-```http
-X-API-Key: gsk_...
+```text
+Client
+  → IIS + PHP FastCGI  |  Nginx + PHP-FPM  |  PHP built-in server (development)
+  → api/index.php  (public API)    admin/api.php  (loopback Admin)    sqlparser/
+  → middleware: availability, authentication, rate limit, CSRF, authorization
+  → validator → normalizer → controller → service → repository → builders
+  → QueryEngine → ODBC → SQL Server
 ```
 
-Do not send API keys as bearer tokens. Administrator endpoints always require an
-administrator session regardless of the normal API authentication mode.
+| HTTP surface | Entry point | Access |
+|---|---|---|
+| Public API | `api/index.php` | Configured API authentication and role authorization |
+| Health probes | `api/health.php` | Public, minimal `/health/live` and `/health/ready` |
+| Admin Console and API | `admin/index.php`, `admin/api.php` | Loopback only, System Administrator session, CSRF |
+| SQL Parser | `sqlparser/index.php` | Loopback or internal only; no database access |
 
-## Action model
-
-The public data actions are:
-
-- `select`, `union`, and `unionAll` for structured reads;
-- `sql` for reviewed SQL resources;
-- `insert`, `update`, `delete`, and `upsert` for registered write resources;
-- `procedure`, `function`, and `tableFunction` for routines;
-- `metadata.tables`, `metadata.columns`, `metadata.views`,
-  `metadata.procedures`, and `metadata.schema` for metadata.
-
-A minimal structured query is:
+A minimal request:
 
 ```json
 {
   "action": "select",
   "source": { "table": "Items", "alias": "I" },
   "fields": ["I.ItemCode", "I.Description"],
-  "filters": [
-    { "field": "I.Active", "operator": "=", "value": 1 }
-  ],
+  "filters": [{ "field": "I.Active", "operator": "=", "value": 1 }],
   "sort": [{ "field": "I.ItemCode", "direction": "ASC" }],
   "pagination": { "page": 1, "pageSize": 50 }
 }
 ```
 
-Clients submit only the documented public contract. Validation and normalization
-produce a private execution model before controller, service, repository, and
-builder code runs. Runtime values remain prepared parameters.
+Requests are `POST` with `Content-Type: application/json`. API keys are sent
+only as `X-API-Key: gsk_...`. See [Architecture](docs/Architecture.md) and the
+[HTTP API](docs/API.md).
 
-`sql` is not a raw-SQL endpoint. It resolves an identifier to a reviewed file
-under `queries/`; `queries/system/` is excluded from public discovery and is used
-internally for metadata. Optional execution metadata in
-`config/sql-resources.php` defines approved frontend controls without accepting
-SQL fragments.
+## Deployment models
 
-Writes are separately allowlisted in `config/write-resources.php`. Deployments
-must explicitly declare tables, actions, writable/filterable columns, UPSERT
-keys, and optional identity columns. The repository includes the explicit
-`crud-test` mapping for `dbo.ApiCrudTest`; replace or remove it for deployments
-that do not provide that test table. Every unregistered resource is denied.
+| Model | Use | Guide |
+|---|---|---|
+| `start-windows.bat` / `start-linux.sh` with PHP's built-in server | Local development only | [Local development](docs/Local-Development.md) |
+| Windows Server, IIS, PHP FastCGI | Production | [Windows Server IIS deployment](docs/Windows-IIS-Deployment.md) |
+| Linux, Nginx, PHP-FPM | Production | [Production security and deployment](docs/Production-Security-and-Deployment.md) |
 
-See [API.md](docs/API.md), [Action Reference](docs/Action-Reference.md), and the
-[Capability Matrix](docs/Capability-Matrix.md) for the exact contract.
+Production requires PHP 8.2 or newer with ODBC, OpenSSL, session, JSON, and
+OPcache; a Microsoft ODBC Driver for SQL Server; `GENERIC_APP_ENV=production`;
+`GENERIC_RUNTIME_CONFIG_DIR` outside the code tree; and
+`GENERIC_SQL_API_ENCRYPTION_KEY` supplied through the worker environment. The
+Admin Console and SQL Parser must never be exposed publicly. Application backups
+cover configuration only; SQL Server backup is an operator responsibility.
 
-## Architecture
+## Where to start
 
-```text
-HTTP entry point
-  -> authentication, throttling, authorization, CSRF, logging, availability
-  -> request validator
-  -> request normalizer
-  -> controller -> service -> repository
-  -> query/write builders -> QueryEngine -> Database/ODBC -> SQL Server
-  -> Response / ExceptionHandler
-```
+- **Frontend or API client developers:** [HTTP API](docs/API.md),
+  [Action reference](docs/Action-Reference.md), and
+  [Frontend integration](docs/Frontend-Integration.md).
+- **Operators:** [Local development](docs/Local-Development.md) to try it, then
+  the deployment guide for your platform and
+  [Admin Console](docs/Admin-Console.md).
+- **Security reviewers:** [Security model](docs/security/Security-Model.md) and
+  [Security verification](docs/security/Security-Verification.md).
+- **Maintainers and coding agents:** [AI development guide](docs/AI-Development-Guide.md),
+  [Testing](docs/Testing.md), and [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Builders validate identifiers and assemble SQL; repositories orchestrate
-metadata and execution; `QueryEngine` owns prepared ODBC execution and cleanup.
-SQL Resource Mode follows its own reviewed-file path and does not expand the JSON
-Query expression allowlist. See [Architecture.md](docs/Architecture.md).
+The full [documentation map](docs/README.md) lists every document.
 
-## Configuration and security
-
-The local Admin Console is the normal setup path. It atomically bootstraps ignored
-runtime configuration, manages users and keys, validates database settings, and
-stores the complete database configuration in an AES-256-GCM envelope. The
-Base64-encoded 32-byte `GENERIC_SQL_API_ENCRYPTION_KEY` remains outside that
-envelope and outside version control.
-
-Security boundaries include:
-
-- exact-origin CORS and bounded JSON request bodies;
-- host-only Secure/HttpOnly/SameSite session cookies in production;
-- session-bound CSRF tokens for browser mutations;
-- hash-only, one-time-reveal managed API keys with `gsk_` secrets;
-- fixed roles and deny-by-default resource authorization;
-- prepared runtime values and allowlisted identifiers/functions;
-- correlated, redacted, date-wise subsystem diagnostics and JSON Lines audit/security logs;
-- request-scoped ODBC connections and configurable statement timeouts.
-
-Plaintext database configuration remains readable only for compatibility.
-Production deployments should use the encrypted form and externally managed key.
-Never commit credentials, encryption keys, generated configuration, sessions,
-runtime state, backups, or logs.
-
-## Local development
-
-Requirements are PHP 8.2 or newer, JSON, OpenSSL, sessions, ODBC, and a supported
-Microsoft SQL Server ODBC driver when connecting to a database.
-
-Windows includes a bundled PHP runtime:
-
-```bat
-start-windows.bat
-```
-
-Linux prefers `runtime/linux/php/php` when present and otherwise uses `php` from
-`PATH`:
-
-```bash
-./start-linux.sh
-```
-
-Both launchers validate the runtime, bootstrap configuration, prepare an ignored
-local encryption key, select the configured loopback Admin port, start the
-managed API and SQL Parser, connect application database availability, verify
-all three runtime states, and start the Admin Console. A failed component remains
-accurately unavailable while the Admin control plane starts for recovery. The
-PHP built-in server is for local development only.
-
-For manual production provisioning, copy
-`database/config/database.example.json` to the ignored `database.json`, complete
-it, and follow [Database Configuration](docs/Database-Configuration.md).
-
-## Testing
-
-The normal suite is database-independent:
+## Tests
 
 ```bash
 php tests/run.php
 php -n tests/run.php
 ```
 
-Tests use fake executors and metadata repositories; they do not require SQL
-Server, ODBC, credentials, or a running service. Live SQL Server validation is
-still required for deployment-specific drivers, permissions, constraints,
-triggers, execution plans, and concurrency behavior.
+The suite is database-independent and needs no SQL Server, ODBC, or credentials.
+See [Testing](docs/Testing.md).
 
-Useful static checks:
+## Repository layout
 
-```bash
-find api admin app config core database scripts sqlparser tests -type f -name '*.php' -exec php -l {} \;
-node --check admin/assets/admin.js
-node --check sqlparser/assets/js/app.js
-bash -n start-linux.sh
-git diff --check
-```
+| Path | Contents |
+|---|---|
+| `api/`, `admin/`, `sqlparser/` | HTTP entry points and the Admin and SQL Parser UIs |
+| `app/` | Middleware, request validation, controllers, services, repositories, builders, security, runtime, health, backup |
+| `core/`, `database/` | Query engine, responses, logging, and the SQL Server driver |
+| `config/` | Shipped registries and `*.example.json` templates |
+| `queries/` | SQL Resources and internal metadata SQL (`queries/system/`) |
+| `deployment/` | IIS, Nginx, and production PHP templates |
+| `scripts/` | Runtime control, backup, database check, and production validation CLIs |
+| `runtime/` | Bundled development PHP runtimes and local runtime state |
+| `tests/` | Database-independent regression suites |
+| `docs/` | Reference, operations, and security documentation |
 
-CI runs PHP 8.2 syntax checks and the database-independent suite.
-
-## Operations and deployment
-
-System Health exposes local API/parser lifecycle and database availability plus
-safe configuration, logging, encryption, and backup checks.
-The public health route exposes only liveness/readiness fields. The Super Admin
-Backup & Recovery page and CLI create, sign, verify, preview, and safely restore
-ZIP application-configuration recovery points. They do not back up SQL Server;
-database backup remains an operator responsibility.
-
-Production hosting uses IIS with PHP FastCGI on Windows or Nginx with PHP-FPM on
-Linux. The production web server owns TLS, redirects, security headers, process
-lifecycle, worker concurrency, and sensitive-path denial. Do not expose the Admin
-Console or SQL parser publicly, and do not use either development launcher as a
-production process manager. In production the Admin Console controls only
-application availability (API, SQL Parser, and database access gates),
-configuration, and diagnostics; it never starts or stops IIS, PHP workers, or
-SQL Server.
-
-For a complete Windows installation from a fresh server, follow
-[Windows Server IIS deployment](docs/Windows-IIS-Deployment.md). Read
-[Hosting](docs/Hosting.md),
-[Production Security and Deployment](docs/Production-Security-and-Deployment.md),
-[Monitoring and Health](docs/Monitoring-and-Health.md), and
-[Backup and Recovery](docs/Backup-and-Recovery.md) before deployment.
-
-## Repository structure
-
-| Path | Responsibility |
-| --- | --- |
-| `api/`, `admin/`, `sqlparser/` | HTTP boundaries and local UIs |
-| `app/Controllers`, `app/Services` | Application orchestration |
-| `app/Requests`, `app/Middleware` | Contract and security enforcement |
-| `app/Repositories`, `app/Resources` | SQL construction, persistence, and resource discovery |
-| `app/Security`, `app/Runtime`, `app/Health`, `app/Backup` | Operational and security services |
-| `core/`, `database/` | Execution, responses, logging, and SQL Server driver |
-| `config/` | Tracked examples/registries and ignored generated configuration |
-| `queries/` | Internal metadata SQL and discoverable reviewed SQL resources |
-| `deployment/` | IIS, Nginx, PHP-FPM, and production PHP examples |
-| `scripts/` | Runtime, backup, validation, and provisioning utilities |
-| `tests/` | Standalone database-independent regression suites |
-| `docs/` | Detailed API, security, deployment, and maintenance documentation |
-
-Start with the [documentation map](docs/README.md). Maintainers and coding agents
-should also read the [AI Development Guide](docs/AI-Development-Guide.md).
+Licensed under the terms in [LICENSE](LICENSE).

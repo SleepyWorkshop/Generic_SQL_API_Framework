@@ -7,13 +7,14 @@ links to remain authoritative for the underlying behavior:
 
 | Topic | Reference |
 |---|---|
-| Hosting model and development launchers | [Hosting](Hosting.md) |
+| Development launchers | [Local development](Local-Development.md) |
 | Production security principles, headers, sessions, CORS, secrets | [Production Security and Deployment](Production-Security-and-Deployment.md) |
 | `database.json`, encryption envelope, key rotation | [Database Configuration](Database-Configuration.md) |
-| Admin Console pages and availability controls | [Admin runtime and features](Admin-Runtime-and-Features.md), [Admin Console and configuration](Admin-Console-and-Configuration.md) |
+| Admin Console pages and availability controls | [Admin Console](Admin-Console.md) |
 | Liveness, readiness, System Health | [Monitoring and Health](Monitoring-and-Health.md) |
 | Application backups and restore | [Backup and Recovery](Backup-and-Recovery.md) |
-| Operational and audit logs | [Operational Logging](Operational-Logging.md), [Audit and Security Logging](Audit-and-Security-Logging.md) |
+| Operational and audit logs | [Logging](Logging.md) |
+| Security model and accepted risks | [Security model](security/Security-Model.md) |
 
 Values written like `reports.example.internal`, `C:\GenericReporting`,
 `ApplicationDb`, or `<SECRET>` are examples or placeholders. Replace them
@@ -76,7 +77,7 @@ returns a safe `503 SERVICE_UNAVAILABLE` while Admin and health routes stay
 reachable. Database Connect/Disconnect is likewise an application gate: it never
 starts or stops SQL Server, and there is no connection pool. Every API request
 opens and closes its own ODBC connection. See
-[Admin runtime and features](Admin-Runtime-and-Features.md).
+[Admin Console](Admin-Console.md).
 
 A separate loopback-only site for Admin or the SQL Parser (as described in
 [Production Security and Deployment](Production-Security-and-Deployment.md)) is
@@ -881,7 +882,7 @@ should be limited to isolated test environments.
    and **Save CORS**. Remove development origins you do not need.
 5. **Configuration → Security → Authentication**: choose the API authentication
    mode (`session` is the default; see
-   [Authentication and User Management](Authentication-and-User-Management.md)).
+   [Authentication and authorization](Authentication-and-Authorization.md)).
 
 ## 18. Configure the database connection
 
@@ -987,7 +988,7 @@ None may return `200` with file contents.
 Every API error response carries `meta.requestId` (also the `X-Request-ID`
 header); search the dated application logs for it. Logs never contain
 passwords, keys, or query parameter values. Rotate and archive them with your
-operations tooling; see [Operational Logging](Operational-Logging.md).
+operations tooling; see [Logging](Logging.md).
 
 ## 21. Backups and restore
 

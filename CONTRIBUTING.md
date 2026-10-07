@@ -1,50 +1,74 @@
 # Contributing
 
-This repository is a backend SQL API. Keep frontend/dashboard/reporting changes outside backend pull requests.
+This repository is the backend SQL API. Keep frontend, dashboard, and report
+changes in the frontend repository.
 
-## Structure and flow
+Read the [AI development guide](docs/AI-Development-Guide.md) before changing
+code: it lists the repository boundaries, the security-relevant request flow,
+and common regression risks.
 
-Public requests enter at `api/index.php`, pass through `app/Requests/QueryRequestValidator.php` and `QueryRequestNormalizer.php`, then through controllers/services. `app/Repositories/QueryRepository.php` is an orchestration/execution facade. Keep query logic in the specialized files under `app/Repositories/Query/` and in `SetOperationBuilder.php`; do not merge them back into `QueryRepository`.
+## Structure
 
-Database connection/execution belongs in `core/Database.php`, `core/QueryEngine.php`, and `database/`. Public envelope logic belongs in `core/Response.php`. Public contract changes must be made at the validator and normalizer boundary before builder internals are documented as public.
+Public requests enter at `api/index.php`, pass through
+`app/Requests/QueryRequestValidator.php` and `QueryRequestNormalizer.php`, then
+through controllers and services. `app/Repositories/QueryRepository.php` is an
+orchestration and execution facade; keep query logic in the builders under
+`app/Repositories/Query/` and in `SetOperationBuilder.php`.
 
-## Local checks
+Database connection and execution belong in `core/Database.php`,
+`core/QueryEngine.php`, and `database/`. Response envelopes belong in
+`core/Response.php`. Public contract changes start at the validator and
+normalizer.
 
-PHP 8.2 or later is the CI baseline. Check syntax:
+## Checks
 
-```bash
-find api admin app config core database scripts sqlparser tests -type f -name '*.php' -exec php -l {} \;
-```
-
-Run all normal backend tests:
+PHP 8.2 is the CI baseline. Before opening a pull request run:
 
 ```bash
 php tests/run.php
 php -n tests/run.php
+find api admin app config core database scripts sqlparser tests -type f -name '*.php' -exec php -l {} \;
 ```
 
-The runner executes:
+The suite must run without SQL Server, an ODBC extension, credentials, or
+`database/config/database.json`; use fake `QueryEngine` and
+`MetadataRepository` subclasses whose constructors do not connect. Do not skip
+logic when a database is absent, hide connection failures, or increase timeouts
+to make tests pass. See [Testing](docs/Testing.md) for the full set of checks.
 
-- `UniversalApiContractTest.php` for validation, normalization, representative query generation, routines, metadata normalization, and response/error envelopes
-- `OrderByWindowRegressionTest.php` for top-level versus window ordering and both pagination strategies
-- `BackendLogicTest.php` for filter operators, joins, functions, windows, pagination counts, set operations, and response formatting
-
-These tests must run without SQL Server, an ODBC extension, credentials, or `database/config/database.json`. Use fake `QueryEngine` and `MetadataRepository` subclasses whose constructors do not connect. Do not skip failed logic when a database is absent, hide connection failures, or increase timeouts.
-
-## Live database testing
-
-Real SQL Server testing is separate and currently manual. Create the ignored database JSON, install PHP ODBC and a supported SQL Server ODBC driver, then use `php scripts/check-database.php` before exercising `api/index.php`. Encrypted passwords additionally require PHP OpenSSL and a matching `GENERIC_SQL_API_ENCRYPTION_KEY` supplied outside the repository. Never add fake credentials or encryption keys to normal CI. If an optional integration workflow is introduced later, it must remain separate and explicitly secret-backed.
+Live SQL Server testing is manual: install PHP ODBC and a supported Microsoft
+ODBC driver, configure the database through the Admin Console, run
+`php scripts/check-database.php`, then exercise the API. Never add credentials
+or encryption keys to CI.
 
 ## Change expectations
 
-- Preserve public behavior unless the change explicitly revises the contract.
-- Reject unknown properties and validate identifiers/operators; do not add a raw-SQL escape hatch.
-- Keep filter, HAVING, and routine values prepared where the current architecture prepares them.
-- Add regression coverage for every bug. Window `ORDER BY` must never emit a bare integer position such as `ROW_NUMBER() OVER (ORDER BY 1)`.
-- Test both SQL Server compatibility paths when changing pagination.
-- Distinguish public JSON (`fields[].field`, `filters`, `limit`, nested `pagination`) from normalized builder keys.
-- Update README, API/reference/examples, roadmap, and changelog together when their claims change. Use the [AI development guide](docs/AI-Development-Guide.md) for repository-specific boundaries and checks.
-- Do not claim that placeholder drivers are supported providers.
-- Keep credentials, `database/config/database.json`, `GENERIC_SQL_API_ENCRYPTION_KEY`, logs, generated exports/uploads, and OPcache files out of commits. Encryption setup must not retain a plaintext configuration backup.
+- Preserve public behavior unless the change deliberately revises the contract.
+- Reject unknown properties and validate identifiers and operators; never add a
+  raw-SQL escape hatch.
+- Keep filter, HAVING, routine, and write values as prepared parameters.
+- Add a regression test for every bug. Window `ORDER BY` must never emit a bare
+  integer position such as `ROW_NUMBER() OVER (ORDER BY 1)`.
+- Test both SQL Server pagination paths (`OFFSET/FETCH` and `ROW_NUMBER`) when
+  changing pagination.
+- Distinguish public JSON names (`fields[].field`, `filters`, `limit`, nested
+  `pagination`) from normalized builder keys.
+- Do not describe the driver stubs in `database/drivers/` as supported
+  providers.
+- Keep credentials, `database.json`, `GENERIC_SQL_API_ENCRYPTION_KEY`, runtime
+  configuration, logs, backups, and OPcache files out of commits.
 
-Before opening a pull request, include a concise description, motivation, tests run, whether any live database test was performed, and any public-contract or deployment impact. Review `git diff` for unrelated changes.
+## Documentation
+
+- Reference documents describe current behavior. Update the relevant reference
+  document in the same change as the code.
+- Planned work belongs only in [docs/Roadmap.md](docs/Roadmap.md).
+- Add user-visible changes to `CHANGELOG.md` under `[Unreleased]`.
+- Record security findings in
+  [docs/security/Security-Verification.md](docs/security/Security-Verification.md).
+
+## Pull requests
+
+Include a concise description, the motivation, the tests run, whether a live
+database test was performed, and any public-contract or deployment impact.
+Review `git diff` for unrelated changes.

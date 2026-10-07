@@ -17,8 +17,12 @@ Planned work is tracked separately in [Roadmap](Roadmap.md).
   registered in `config/routine-resources.php`. Registries are server-owned files.
 - Metadata actions list only registered query sources and registered procedures.
 - Frontend access (`frontend.read`) is not narrowed by SQL Resource `sqlResources`
-  scopes; only backend roles are. This is an accepted limitation pending a
-  frontend-access scope model.
+  scopes; only backend roles are (accepted, SSA-06).
+- There is no per-role read-column authorization; any column of an authorized
+  table, view, or SQL Resource is readable (ST-003). Expose sensitive columns
+  only through least-privilege views or SQL Resources.
+- There is no separate limit on the number of filters per request; it is bounded
+  by the request body limit (ST-004).
 - Unpaginated reads are limited to `GENERIC_MAX_RESULT_ROWS` rows (default 10,000)
   and fail with `413 RESULT_TOO_LARGE` instead of truncating.
 - SQL Server over ODBC is the only provider.
@@ -67,6 +71,12 @@ Use SQL Resource Mode for approved complex read-only SQL beyond these boundaries
   pagination. Resource authors must choose fixed pagination or runtime controls.
 - Server-owned specialized SQL is still constrained by actual SQL Server version,
   compatibility, permissions, object schema, and resource transformation rules.
+- The SQL inside a resource file is not checked table by table against the
+  query-source registry; only runtime `source` filters are.
+- **Known gap:** the bundled frontend references widget SQL Resources that are
+  not present in `queries/widgets/` (9 of 26 exist). Those widgets fail with
+  `INVALID_SQL_RESOURCE` until their SQL is added; tables used by their runtime
+  source filters must then be registered in `config/query-sources.php`.
 
 ## Write API
 
@@ -83,9 +93,10 @@ Use SQL Resource Mode for approved complex read-only SQL beyond these boundaries
 
 ## Routines, metadata, and responses
 
-- Routine parameters are positional. Named/output parameters, signature
-  discovery, result-set choice, runtime filter/sort/page, and per-routine
-  allowlisting are absent.
+- Routines run only when registered in `config/routine-resources.php` (the
+  shipped registry is empty). Parameters are positional, with the exact count
+  fixed by the registry. Named or output parameters, signature discovery,
+  result-set choice, and runtime filter/sort/page are absent.
 - `source.alias` passes the shared validator for routines and metadata.columns but
   is discarded by normalization and has no effect.
 - Query responses do not contain result-column type/schema metadata. Use
@@ -98,5 +109,8 @@ Use SQL Resource Mode for approved complex read-only SQL beyond these boundaries
 
 - The PHP built-in server and both launchers are development conveniences and
   single-process; they are not production multi-worker hosting.
+- Sessions, rate-limit counters, and runtime state are single-host files; there
+  is no shared store for multiple application hosts.
+- The Admin Console has no MFA.
 - No live SQL Server integration workflow ships with CI. The automated suite uses
   fakes and validates generated SQL/contracts without database credentials.

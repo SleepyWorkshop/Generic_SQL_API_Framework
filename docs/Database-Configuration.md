@@ -94,9 +94,8 @@ Database page, optionally test the plaintext settings, and save. This safely
 migrates the current values through the same resolver and encryption component.
 No `database.json.backup` is created. The launcher prepares an ignored local key
 when necessary; Admin Console validates the submitted values, encrypts the whole
-configuration, verifies the encrypted round trip, and atomically saves it. The
-removed manual key-generation and migration launchers are not part of normal
-setup. Production hosts may provide `GENERIC_SQL_API_ENCRYPTION_KEY` from their
+configuration, verifies the encrypted round trip, and atomically saves it.
+Production hosts provide `GENERIC_SQL_API_ENCRYPTION_KEY` from their
 secret manager before starting the application.
 
 Database configuration reads participate in the same adjacent-file shared lock
@@ -169,12 +168,12 @@ an approved, access-controlled recovery copy of the matching key and encrypted
 configuration; never back up plaintext configuration.
 
 Legacy plaintext configuration and the former password-only encrypted format
-remain readable for compatibility. An Admin save or the one-time migrator seals
-the complete configuration, but read-only deployments are not migrated merely
-by loading them. Operators must explicitly save/migrate such files so plaintext
+remain readable for compatibility. Saving through the Admin Console seals the
+complete configuration; files are not migrated merely by loading them. Operators must explicitly save/migrate such files so plaintext
 does not persist indefinitely.
 
-The query timeout is separate application configuration.
-`DB_QUERY_TIMEOUT_SECONDS` defaults to 45 seconds and is requested when the ODBC
-driver supports `SQL_QUERY_TIMEOUT`; unsupported drivers fall back to the PHP
+The query timeout is separate application configuration: the runtime setting
+`query.timeoutSeconds` (default 45 seconds, overridable by
+`DB_QUERY_TIMEOUT_SECONDS`) is requested when the ODBC driver supports
+`SQL_QUERY_TIMEOUT`; unsupported drivers fall back to the PHP
 execution limit. Neither timeout controls login, HTTP proxy, or browser timeouts.

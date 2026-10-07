@@ -7,7 +7,7 @@ require_once __DIR__ . '/../app/Middleware/LocalAdminMiddleware.php';
 
 /*
  * HTTP regression coverage for the v2.1.3 authorization findings AAPI-01 and
- * AAPI-02 (docs/security/Authorization-API-Security-Inventory.md): the public
+ * AAPI-02 (docs/security/Security-Verification.md): the public
  * auth.frontendUsers.* path manages only frontend identities, and backend
  * identities (System Administrators, Data Operators, backend-only accounts)
  * are managed only through the loopback Admin API.

@@ -10,7 +10,8 @@ require_once __DIR__ . '/../app/Resources/RoutineResourceRegistry.php';
 
 /*
  * Regression coverage for the v2.1.3 findings AAPI-03 – AAPI-08
- * (docs/security/Authorization-API-Security-Inventory.md).
+ * (findings register in docs/security/Security-Verification.md; current
+ * controls in docs/security/Security-Model.md).
  */
 
 function hardeningAssert(bool $condition, string $message): void

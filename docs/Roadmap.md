@@ -1,743 +1,99 @@
-# Generic SQL API Framework Roadmap
+# Roadmap
 
-The Generic SQL API Framework is a backend platform for exposing SQL-based
-data and operations through a secure, configurable API.
+This is the only place for planned, upcoming, and deferred backend work. Current
+behavior is documented in the [documentation map](README.md); released changes
+are in the [changelog](../CHANGELOG.md). Nothing here is part of the public
+contract until it is implemented, tested, and documented.
 
-This roadmap reflects the actual implementation and the remaining planned
-backend work. Historical roadmap items that were implemented later are shown
-under the version where they were actually delivered.
-
-Frontend dashboards, reporting interfaces, charts, and other presentation
-features are outside the scope of this backend project.
-
-Detailed implementation history is maintained in `CHANGELOG.md`.
-
----
-
-# v1.0.0 — Core Generic SQL API Framework
-
-Status: Completed
-
-The first stable release established the core Generic SQL API platform.
-
-## API Foundation
-
-- Dynamic JSON-driven API processing
-- Generic request validation and normalization
-- Standardized JSON responses
-- CORS support
-- Global error handling
-- Request and error logging
-- Query execution statistics
-- Repository-based query execution
-
-## SQL Query Engine
-
-- Dynamic SQL Server SELECT generation
-- Fields and aliases
-- DISTINCT
-- TOP
-- CASE expressions
-- Arithmetic expressions
-- Prepared filters
-- JOIN support
-- GROUP BY
-- HAVING
-- ORDER BY
-- Compatibility-aware pagination
-- Allow-listed SQL functions
-
-## Advanced SQL
-
-- CTE support
-- UNION / UNION ALL
-- Window functions
-- Subqueries
-- Stored procedures
-- Scalar functions
-- Table-valued functions
-- Metadata actions
-- SQL Server-specific query handling
-
-## v1.0 Fixes
-
-- Metadata-aware conversion of date strings to `YYYYMMDD` integer values for
-  integer-family date columns
-- Query construction and execution compatibility improvements
-
----
-
-# v2.0.0 — Platform Expansion & Security
-
-Status: Implemented / Current Development Line
-
-v2 expanded the original SQL API into a complete backend platform with
-administration, authentication, authorization, write operations, resource
-discovery, security controls, operations, deployment support, and extensive
-testing.
-
-## Admin Console
-
-- Unified loopback Admin Console
-- First-run setup
-- Encrypted database configuration
-- User management
-- Fixed roles
-- Managed API keys
-- CORS configuration
-- Runtime configuration
-- System health
-- Development process controls and production application availability controls
-- Hosting-mode-aware configuration (no Server tab in production)
-- Deployment-path-independent Admin Console
-
-## Authentication
-
-- Session authentication
-- Managed API-key authentication
-- `none` authentication mode
-- `session` authentication mode
-- `api_key` authentication mode
-- `session+api_key` authentication mode
-- Session regeneration
-- Session expiration
-- Secure logout
-- Session destruction
-
-## Authorization
-
-- Separate backend and frontend authorization domains
-- Deny-by-default resource scopes
-- Role-based authorization
-- User role assignment
-- SQL resource authorization
-- Write-resource authorization
-- Last-administrator protection
-- Authorization-change session invalidation
-
-## Managed API Keys
-
-- `gsk_` API keys
-- One-time key reveal
-- Hash-only key storage
-- Owner assignment
-- Role assignment
-- Enable/disable lifecycle
-- Permanent revoke
-- Key fingerprints
-- Last-used metadata
-
-## Generic SQL Resources
-
-- Recursive SQL Resource discovery
-- Safe path-derived resource IDs
-- Traversal protection
-- Collision protection
-- Runtime filters
-- Execution metadata
-- Deterministic sorting
-- Pagination
-- Output/source/HAVING filter mappings
-- SQL Resource capability validation
-- SQL Resource security validation
-
-## Write Operations
-
-- INSERT
-- UPDATE
-- DELETE
-- SQL Server UPSERT
-- Deny-by-default write-resource registry
-- Resource-level action permissions
-- Writable-column controls
-- Filterable-column controls
-- UPSERT key configuration
-- Live SQL Server metadata validation
-- Prepared DML values
-- Affected-row responses
-- Identity responses
-- Safe constraint-error classification
-
-## SQL Engine Expansion
-
-- Recursive query expressions
-- Expanded SQL function coverage
-- CTE support
-- Window functions
-- Set operations
-- SQL Server structural numeric expressions
-- Prepared runtime values
-- Modular query builders
-- `QueryRepository` retained as the execution facade
-
-## SQL-to-Universal-JSON Parser
-
-- Standalone non-executing SQL parser
-- Lexical parsing
-- Capability analysis
-- Validation
-- Structured errors
-- Browser-based parser interface
-- Database-independent parsing operation
-
-## Runtime & Performance Controls
-
-- Configurable SQL query timeout
-- Pagination limits
-- Request body limits
-- API rate limits
-- Login rate limits
-- Idle session expiration
-- Absolute session expiration
-- Runtime configuration through the Admin Console
-
-## Logging & Auditing
-
-- Request-correlated JSON Lines logging
-- Security and audit events
-- Sensitive-data redaction
-- Concurrency-safe log writes
-- Production-safe error envelopes
-- Correlation IDs for production errors
-
-## Backup & Recovery
-
-- Application configuration backups
-- Checksum verification
-- Encryption verification
-- Safe external restore staging
-- Configuration migration
-- File-locking protections
-- Secure temporary-file handling
-
-## Health & Operations
-
-- Public liveness checks
-- Public readiness checks
-- Authenticated detailed health checks
-- Configuration health
-- Database health with disabled, connected, and unhealthy states
-- Process health (managed processes in development, web-server-owned
-  application availability in production)
-- Logging health
-- Encryption health
-- Backup health (reported separately; never affects overall status or readiness)
-- Cross-platform lifecycle management
-- Stale-process recovery
-- Duplicate-process recovery
-- Restart cleanup
-- Dynamic port handling
-
-## Security Hardening
-
-- Hardened session cookies
-- Cookie-only session transport
-- Login session regeneration
-- CSRF rotation
-- Session expiration
-- Concurrent-session protections
-- Database/configuration file locking
-- Temporary-file permission hardening
-- Secure key handling
-- Secret rotation guidance
-- Log redaction
-- Exact-origin CORS validation
-- Authentication throttling
-- Fixed-host HTTPS redirects
-- HSTS
-- CSP and security headers
-- Sensitive-file web denials
-- Trusted-proxy boundaries
-
-## Production Deployment
-
-- IIS/FastCGI deployment templates
-- Nginx/PHP-FPM deployment templates
-- TLS/security-header examples
-- Production PHP configuration
-- Deployment validation tooling
-- Windows operator guidance
-- Linux operator guidance
-- Production process ownership through IIS/FastCGI or Nginx/PHP-FPM
-- Development-only local process management
-- Deployment-independent Admin Console base paths
-
-## Production Hardening
-
-Status: Completed
-
-Five production phases aligned the Admin Console, health model, and
-deployment templates with IIS/FastCGI and Nginx/PHP-FPM ownership of listeners
-and workers. Each phase was delivered with regression tests.
-
-| Phase | Scope | Status |
+| Milestone | Scope | Status |
 |---|---|---|
-| Phase 1 | Production configuration and IIS ownership | Completed |
-| Phase 2 | API and SQL Parser application availability | Completed |
-| Phase 3 | Application database availability | Completed |
-| Phase 4 | Production System Health | Completed |
-| Phase 5 | Admin Console cleanup | Completed |
-
-- **Phase 1 — Production configuration and IIS ownership:** development port
-  settings are no longer presented as production listener settings;
-  `admin.server.save` is rejected in production; every IIS boundary
-  (`/api`, `/admin`, `/sqlparser`) has its own FastCGI registration that sets
-  `GENERIC_APP_ENV=production` explicitly.
-- **Phase 2 — API and SQL Parser availability:** production Start/Stop/Reload
-  change only application availability, enforced at each entry point with a
-  safe `503 SERVICE_UNAVAILABLE`; no process, port, or PID is created, while
-  development keeps its real process managers.
-- **Phase 3 — Database availability:** Connect verifies the saved encrypted
-  configuration with one closed test connection before enabling access;
-  Disconnect only disables access; failures return safe configuration or
-  connection reasons; connections remain request-scoped with no pool.
-- **Phase 4 — System Health:** production services report web-server
-  ownership with no fabricated PID/port; database and encryption health use
-  explicit states; readiness adds the API availability check and honours cached
-  connectivity failures without opening SQL connections; backup health reuses
-  the existing backup service.
-- **Phase 5 — Admin Console cleanup:** filesystem and session-directory
-  diagnostics were removed from System Health; production configuration has no
-  Server tab and safely falls back to Database.
-
-The production documentation and validation milestone that followed these
-phases (the [Windows Server IIS deployment](Windows-IIS-Deployment.md) guide,
-consolidated hosting/security/database/health/backup documentation, and an
-updated roadmap and documentation tests) is also complete. Remaining
-verification work, such as live IIS and SQL Server validation on target hosts
-and security scanning, is planned under v2.1.
-
-## Testing
-
-- API contract testing
-- Query testing
-- Write-operation testing
-- Authentication testing
-- Authorization testing
-- Session testing
-- API-key testing
-- Security-boundary testing
-- Concurrency testing
-- Backup/recovery testing
-- Health testing
-- Error-handling testing
-- Production-template testing
-- Attack-oriented security testing
-- Cross-platform regression coverage
-
----
-
-# Historical Roadmap Reconciliation
-
-The original roadmap proposed several separate versions for CRUD, advanced
-SQL, security, performance, dashboard, reporting, multi-database support,
-developer experience, and enterprise capabilities.
-
-The implementation evolved differently.
-
-Features that were originally planned for separate versions but were later
-implemented are recorded under the actual version where they were delivered.
-
-## Originally Planned Features
-
-| Original Roadmap Item | Current Status |
-|---|---|
-| v1.1 CRUD Operations | Implemented in v2.0 |
-| INSERT | Implemented |
-| UPDATE | Implemented |
-| DELETE | Implemented |
-| UPSERT | Implemented |
-| v1.2 Advanced Database Features | Implemented across v1.0 and v2.0 |
-| Stored Procedures | Implemented |
-| UNION / UNION ALL | Implemented |
-| CASE | Implemented |
-| CTE | Implemented |
-| Window Functions | Implemented |
-| Advanced SQL Functions | Implemented / Expanded |
-| v2.0 Security | Implemented in v2.0 |
-| Login / Sessions | Implemented |
-| API Keys | Implemented |
-| RBAC / Authorization | Implemented |
-| Audit Logging | Implemented |
-| Query Timeout | Implemented |
-| Rate Limiting | Implemented |
-| Health Monitoring | Implemented |
-| Backup / Recovery | Implemented |
-| Production Deployment | Implemented |
-| v2.2 Performance Controls | Partially implemented; remaining items planned |
-| Multi-Database Support | Planned |
-| OpenAPI | Planned |
-| Postman Collection | Planned |
-| SDKs | Planned |
-| CLI Tooling | Planned |
-| Project Generator | Planned |
-| Webhooks / Callbacks | Planned |
-| Multi-Tenancy | Planned / Uncommitted |
-
----
-
-# v2.1 — Security Verification & Operational Hardening
-
-Status: Planned
-
-The core security architecture is already implemented in v2.0.
-This phase focuses on deeper verification and remaining operational security
-work.
-
-## v2.1.1 — Dependency Security Review
-
-Status: Completed
-
-The application declares no Composer, npm, vendored, or external-include
-dependencies; its dependency surface is the host PHP runtime, extensions,
-operating-system libraries, and ODBC stack. Outdated runtime components found in
-the development/security-review environment were updated and the backend
-regression suite passed. See the
-[Dependency security review](security/Dependency-Security-Review.md).
-
-## v2.1.2 — Static Security Analysis
-
-Status: Completed
-
-A manual static review of the backend, Admin Console, SQL Parser, deployment
-templates, and repository history found 20 findings (SSA-01 – SSA-20). The
-approved remediation scope, SSA-01 – SSA-12, is complete: deny-by-default
-routine and query-source registries, public-API removal of setup and identity
-management, SQL Resource runtime-filter source checks, production ODBC
-transport hardening, an unpaginated result-row limit, regression coverage, and
-documented or accepted limitations. The exposed administrator credential
-(SSA-05) was rotated and verified. Authored SQL Resource SQL is not validated
-table by table, the widget SQL Resources referenced by the frontend but absent
-from the backend remain unresolved, and SSA-13 – SSA-20 are deferred. See the
-[Static security analysis inventory](security/Static-Security-Analysis-Inventory.md).
-
-## v2.1.3 — Authorization & API Security Testing
-
-Status: Completed
-
-The public and Admin API authorization boundary was inventoried, and a
-64-test plan was executed:
-- **Findings:** 9 findings (AAPI-01 – AAPI-09).
-  - Resolved: Application Administrator takeover of backend-only accounts
-    (High), public management of System Administrator accounts (Medium),
-    CSRF for registered write routines, minimized backend identity profiles
-    with uniform not-found responses, rejection of the System Administrator
-    role for anonymous and legacy-key principals, and rejection of non-string
-    public actions.
-  - Accepted and documented, with regression tests: password changes without
-    the current password, API key roles independent of the owner, and public
-    JSON list bodies.
-- **Test coverage:** all 64 planned tests pass, 56 over HTTP and 8 at the
-  enforcement layer for documented architectural reasons. They cover the
-  public and Admin boundaries, sessions, CSRF, API keys, resource scopes,
-  request validation, and status codes.
-- **Verification:** mutation checks confirmed that the tests catch weakened
-  controls, and the backend regression suite and PHP lint pass.
-
-See the
-[Authorization & API security inventory](security/Authorization-API-Security-Inventory.md).
-
-## v2.1.4 — DAST & Penetration-Test Preparation
-
-Status: Partially Completed / Deferred
-
-A passive, unauthenticated DAST review of a local development deployment and a
-review of the production IIS and Nginx templates were performed:
-- **Findings:** 5 findings (DAST-01 – DAST-05).
-  - Resolved: the SQL Parser no longer discloses the PHP version in
-    `X-Powered-By` (DAST-01), and its development router serves only the
-    intended assets instead of executing any PHP file in its document root
-    (DAST-02). Both have regression tests and mutation checks.
-  - Accepted: DAST-03, DAST-04, and DAST-05 are informational observations
-    that affect development only.
-- **Regression coverage:** the existing automated regression suites were mapped
-  to the DAST areas. That coverage is not DAST and does not replace the
-  deferred testing.
-- **Penetration-test preparation:** completed. It covers scope, rules of
-  engagement, test accounts to provision, test areas, and known findings and
-  accepted risks.
-
-Deferred to the external penetration test, and not performed in this phase:
-- authenticated dynamic testing;
-- session dynamic testing;
-- rate-limit dynamic testing;
-- injection testing against a live or deployed environment;
-- TLS and deployed IIS or Nginx behavior.
-
-External penetration testing remains required for those areas. See the
-[DAST report](security/DAST-Report.md) and the
-[Penetration-test preparation](security/Penetration-Test-Preparation.md) handoff.
-
-## v2.1.5 — Security Architecture & Operational Hardening
-
-Status: Completed
-
-The review covered:
-
-- the security architecture and trust boundaries;
-- secret and key custody;
-- the production PHP runtime;
-- the IIS and Nginx templates and the deployment procedure;
-- filesystem least privilege;
-- the database, session, logging and auditing, backup, error-handling, and
-  health and monitoring designs;
-- operational hardening.
-
-It was a review of the repository; no live or deployed host was tested.
-- **Findings:** 8 findings (SAOH-01 – SAOH-08); no Critical or High finding.
-  - Resolved: runtime configuration moves out of the code tree so the PHP
-    worker can no longer modify the PHP allowlists in `Backend/config`
-    (Medium); the bundled development PHP runtimes stay read-only for the
-    production worker; and readiness at the internal IIS route
-    `/api/health/ready` reports "not ready" correctly instead of always 200.
-  - Accepted and documented: shared worker identity across boundaries,
-    backup-signing key custody, `db_datareader` breadth, external log
-    rotation, and single-host security state.
-- **Verification:** a new regression suite with mutation checks; the backend
-  regression suite and PHP lint pass.
-
-Target-host verification of ACLs, `php.ini`, and session storage remains
-operator-owned. The deferred v2.1.4 dynamic testing remains with the external
-penetration test. See the
-[Security architecture and operational hardening](security/Security-Architecture-and-Operational-Hardening.md)
-review.
-
-## v2.1.6 — Final Security Verification
-
-Status: Completed
-
-Final repository-level verification passed. It found no regression, no
-contradiction between the security documentation and the code, and no
-unresolved Critical or High finding.
-
-- **Tests:** the backend regression suite passes with and without a loaded
-  `php.ini`, as do the targeted security suites. All existing mutation checks
-  from v2.1.3, v2.1.4, and v2.1.5 are still caught.
-- **Static checks:** PHP lint and the documentation tests pass. A secret scan
-  of tracked files found only synthetic test values, example placeholders,
-  and the fixed login-timing placeholder hash.
-- **Documentation cross-check:** confirmed against the code for the Admin
-  loopback and `GENERIC_ADMIN_ENABLED` gates, the runtime configuration
-  directory, encryption-key handling, the query-source and routine
-  allowlists, the result-row limit, health readiness, SQL Parser routing,
-  session settings, backup signing, and production PHP settings.
-- **Findings:** every finding has a documented status.
-  - SSA-01 – SSA-12, AAPI-01 – AAPI-09, DAST-01 – DAST-02, and SAOH-01 –
-    SAOH-03 are resolved, cleared, documented, or accepted as recorded in
-    their reports.
-  - SSA-13 – SSA-20 remain deferred.
-  - AAPI-05 – AAPI-07, DAST-03 – DAST-05 (development only), and SAOH-04 –
-    SAOH-08 remain accepted.
-
-The external and deployed-host security testing deferred from v2.1.4 is still
-outstanding and was not performed here:
-- authenticated DAST;
-- session and rate-limit attack testing against a deployed environment;
-- live SQL injection testing;
-- TLS and deployed IIS and Nginx behavior;
-- the Admin loopback behind production hosting;
-- the external penetration test.
-
-See the [Penetration-test preparation](security/Penetration-Test-Preparation.md)
-handoff.
-
-## Security Verification
-
-- Dependency security review (completed in v2.1.1)
-- Static security analysis (completed in v2.1.2)
-- Authorization security testing (completed in v2.1.3)
-- API security testing (completed in v2.1.3)
-- DAST / security scanning (partially completed in v2.1.4; dynamic testing deferred to the external penetration test)
-- Penetration-test preparation (completed in v2.1.4)
-- Security architecture review (completed in v2.1.5)
-- Final security verification report (completed in v2.1.6; external penetration test still outstanding)
-
-## Optional Security Enhancements
-
-- Optional Admin MFA
-- Additional authentication hardening where required
-- Expanded security regression coverage
-
-## Operational Improvements
-
-- Log rotation and cleanup improvements
-- Additional production diagnostics
-- Additional operational validation
-- Live IIS/FastCGI, Nginx/PHP-FPM, TLS, and SQL Server validation on target
-  hosts (template and application behavior are already covered by tests)
-
----
-
-# v3.0 — Multi-Database Support
-
-Status: Planned
-
-The framework will evolve from its current SQL Server-oriented implementation
-toward a database-provider architecture.
-
-## Database Platform
-
-- Database Registry
-- Database Context
-- Database provider abstraction
-- Shared database configuration model
-- Database-specific connection handling
-- Database-aware metadata
-- Database-aware SQL generation
-
-## Planned Database Providers
-
-- Microsoft SQL Server
-- MySQL
-- PostgreSQL
-- MariaDB
-
-## Resource Integration
-
-- Database-aware Resource Mapping
-- Database-specific Resource discovery
-- Database-aware authorization
-- Database-aware metadata validation
-- Database-aware query capabilities
-
-## Admin Console
-
-- Database registry management
-- Database configuration
-- Database health status
-- Database lifecycle controls where supported
-
-## Testing
-
-- Provider-specific regression tests
-- Cross-database API contract tests
-- Metadata compatibility tests
-- Query capability tests
-- Authorization tests across database contexts
-
----
-
-# v3.1 — Developer Experience & API Integration
-
-Status: Planned
-
-This phase focuses on making the backend easier for external developers and
-applications to integrate.
-
-## API Documentation
-
-- OpenAPI specification
-- API reference documentation
-- Resource documentation
-- Authentication documentation
-- Error-response documentation
-
-## Developer Tools
-
-- Postman collection
-- API examples
-- Client integration examples
-- CLI tooling
-- Configuration/project initialization tooling
-
-## SDKs
-
-- SDK support for commonly used languages
-
-SDK scope will be defined when implementation begins.
-
----
-
-# v4.0 — Backend Platform & Enterprise Capabilities
-
-Status: Planned / Uncommitted
-
-Future backend capabilities may include the following.
-
-## Transactions
-
-- Explicit transaction APIs
-- Transaction lifecycle management
-- Transaction-safe write workflows
-
-## Performance
-
-- Query caching
-- Metadata caching
-- Query profiling
-- Performance diagnostics
-- Large-result handling strategies
-
-## Distributed Operations
-
-- Distributed rate limiting
-- Distributed session/runtime coordination
-- Scalable logging and operational controls
-
-## Integration
-
-- Webhooks
-- Callback mechanisms
-- Backend event system
-
-## Enterprise
-
-- Organization management
-- Multi-tenant architecture
-- Tenant-aware authorization
-- Enterprise administration
-- Advanced system monitoring
-
-These items are future direction and are not part of the current product
-contract until implemented, tested, and documented.
-
----
-
-# Out of Scope for This Backend
-
-The following are intentionally outside the scope of the Generic SQL API
-Framework:
-
-- Dashboard UI
-- Charts
-- KPI widgets
-- Frontend reporting screens
-- Report visualization
-- Frontend layout management
-- Frontend-specific analytics presentation
-
-These capabilities can be implemented in separate frontend projects that
-consume this API.
-
----
-
-# Roadmap Status
-
-| Version | Scope | Status |
-|---|---|---|
-| v1.0.0 | Core Generic SQL API Framework | Completed |
-| v2.0.0 | Platform Expansion & Security | Implemented / Current |
-| v2.0.0 Production Hardening | Production Phases 1–5 and production documentation | Completed |
-| v2.1 | Security Verification & Operational Hardening | Planned |
-| v2.1.1 | Dependency Security Review | Completed |
-| v2.1.2 | Static Security Analysis | Completed |
-| v2.1.3 | Authorization & API Security Testing | Completed |
-| v2.1.4 | DAST & Penetration-Test Preparation | Partially Completed / Deferred |
-| v2.1.5 | Security Architecture & Operational Hardening | Completed |
-| v2.1.6 | Final Security Verification | Completed |
-| v3.0 | Multi-Database Support | Planned |
-| v3.1 | Developer Experience & API Integration | Planned |
-| v4.0 | Backend Platform & Enterprise Capabilities | Planned / Uncommitted |
-
----
-
-# Roadmap Principles
-
-- The roadmap describes backend capabilities only.
-- Completed implementation is recorded according to the version in which it
-  was actually implemented.
-- Historical proposals are not treated as released versions.
-- Features that are not implemented remain explicitly marked as planned.
-- New features become part of the public contract only after implementation,
-  testing, and documentation are completed.
-- Frontend applications remain separate consumers of the Generic SQL API.
+| v1.0.0 | Core Generic SQL API Framework | Released |
+| v2.0.0 | Platform expansion and security | Released (2026-10-05) |
+| v2.1 | Security verification and operational hardening | Current — unreleased |
+| v3.0 | Multi-database support | Upcoming |
+| v3.1 | Developer experience and API integration | Upcoming |
+
+## Completed
+
+### v1.0.0 — Core Generic SQL API Framework
+
+JSON-driven SQL Server SELECT generation with validation, normalization,
+standard responses, CORS, logging, joins, grouping, CTEs, UNION, window
+functions, subqueries, routines, and metadata actions.
+
+### v2.0.0 — Platform expansion and security
+
+The Admin Console; session and API-key authentication; fixed roles and resource
+scopes; managed API keys; SQL Resource discovery; the Write API; the SQL Parser;
+runtime and performance controls; audit and operational logging; application
+backup and recovery; health and readiness; production error handling; IIS and
+Nginx deployment templates and guides; and the database-independent regression
+suite. See the [changelog](../CHANGELOG.md#200---2026-10-05).
+
+### v2.1.1 – v2.1.6 — Security verification
+
+Dependency review, static security analysis, authorization and API security
+testing, passive DAST and penetration-test preparation, architecture and
+operational hardening, and final repository-level verification are complete.
+Results and every finding are in
+[Security verification](security/Security-Verification.md).
+
+## Current
+
+### v2.1 — Security verification and operational hardening
+
+The v2.1 work is on the `dev` branch and has not been released.
+
+- **External penetration test** (deferred from v2.1.4): authenticated dynamic
+  testing, session and rate-limit testing over HTTPS, injection testing against
+  a SQL Server test database, TLS and deployed IIS or Nginx behavior, and the
+  Admin loopback boundary behind production hosting. The handoff is ready:
+  [Penetration-test preparation](security/Penetration-Test-Preparation.md).
+- **Target-host validation** of IIS/FastCGI, Nginx/PHP-FPM, TLS, ACLs, session
+  storage, and live SQL Server behavior.
+
+## Upcoming
+
+### v3.0 — Multi-database support
+
+Move from the SQL Server-only implementation to a database-provider
+architecture:
+
+- a database registry and per-request database context;
+- provider abstraction for connections, metadata, and SQL generation;
+- database-aware resources, authorization, and metadata validation;
+- Admin Console management of multiple databases;
+- planned providers: Microsoft SQL Server, MySQL, PostgreSQL, and MariaDB;
+- provider-specific and cross-database regression tests.
+
+### v3.1 — Developer experience and API integration
+
+- OpenAPI specification;
+- Postman collection and client integration examples;
+- CLI and project-initialization tooling;
+- SDKs for commonly used languages (scope defined when work begins).
+
+## Deferred
+
+Known items without a scheduled milestone:
+
+- Informational static-analysis findings SSA-13 – SSA-16 and SSA-18 – SSA-20,
+  and CSRF for read routines (SSA-17); see
+  [Security verification](security/Security-Verification.md#findings-register).
+- Per-role read-column authorization (ST-003) and a request filter-count limit
+  (ST-004).
+- Optional Admin Console MFA.
+- Log rotation and retention tooling; currently a deployment responsibility.
+- The widget SQL Resources referenced by the frontend but missing from
+  `queries/widgets/` (see [Limitations](Limitations.md#sql-resource-mode)).
+
+## Future direction (uncommitted)
+
+Explicit transactions, query and metadata caching, query profiling, distributed
+rate limiting and session state, webhooks and events, and multi-tenancy have been
+considered. None is scheduled.
+
+## Out of scope
+
+Dashboards, charts, KPI widgets, report screens, and other presentation features
+belong to separate frontend projects that consume this API.

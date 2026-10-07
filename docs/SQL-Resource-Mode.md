@@ -181,7 +181,8 @@ Supported operators are `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`,
 `IS NOT NULL`. Values become positional prepared parameters. Semantic `date`
 and `daterange` filters are validated; database metadata converts them to
 `YYYYMMDD` integers only for integer-backed source columns. Native date/time
-columns keep ISO values. Legacy `integer-date` mappings remain supported.
+columns keep ISO values. An `execution.filters` mapping can also force
+conversion with `valueType: "integer-date"`.
 
 AND may span output/source/HAVING stages. OR is accepted only when all requested
 filters resolve to one SQL stage; otherwise `INVALID_SQL_RUNTIME_FILTER` prevents
@@ -202,18 +203,14 @@ Authored OFFSET/FETCH remains exclusive: any runtime filters, sort, or paginatio
 produce `INVALID_SQL_PAGINATION`. Authored TOP/ORDER BY preservation and the
 complete-first-page TOP optimization remain unchanged.
 
-## Short-ID compatibility
+## Short IDs
 
-A short basename such as `item` is accepted only if
-exactly one discovered SQL file has that basename. If several directories contain
-`item.sql`, the caller must use the full relative ID. This eases migration without
-making resolution nondeterministic.
+A short basename such as `item` is accepted only if exactly one discovered SQL
+file has that basename. If several directories contain `item.sql`, the caller
+must use the full relative ID.
 
-SQL files do not require a runtime-filter marker: source predicates use
-depth-aware top-level WHERE insertion.
-
-See [SQL Resource configuration](SQL-Resource-Configuration.md) and
-[SQL Resource files](SQL-Resource-Files.md) for migration and authoring details.
+Adding and reviewing resource files is covered in
+[SQL Resource authoring](SQL-Resource-Authoring.md).
 
 ## SQL capabilities and security
 
@@ -227,7 +224,9 @@ This broader SQL belongs only in the file. Clients cannot send SQL text, paths,
 filenames, extensions, clauses, database credentials, or arbitrary expressions.
 Real-path containment, excluded directories, strict identifiers, constrained
 execution expressions, fixed operator/placement/direction enums, prepared values,
-and the read-only statement analyzer preserve the security boundary. Requests
-pass through configured session/API-key authentication, but generalized
-per-resource authorization is not yet implemented. Production network controls
-and least-privilege database permissions remain required.
+and the read-only statement analyzer preserve the security boundary. Callers
+need `sql.execute` with a matching role `sqlResources` scope, or frontend access
+(`frontend.read`, which is not narrowed by `sqlResources`). Runtime `source`
+filters resolve only against `config/query-sources.php`; the authored SQL itself
+is not checked against that registry. Least-privilege database permissions
+remain required.

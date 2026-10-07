@@ -1,8 +1,64 @@
 # Changelog
 
 All notable changes are recorded here. The project follows semantic versioning.
+Planned work is in [docs/Roadmap.md](docs/Roadmap.md).
 
-## [2.0.0] - Unreleased
+## [Unreleased]
+
+Security verification and operational hardening (roadmap v2.1.1 – v2.1.6).
+Findings and evidence are in
+[docs/security/Security-Verification.md](docs/security/Security-Verification.md).
+
+### Security
+
+- Dependency review (v2.1.1): the application has no Composer, npm, or vendored
+  dependencies; its dependency surface is the host PHP runtime, extensions,
+  operating-system libraries, and ODBC stack. The bundled Windows PHP runtime's
+  provenance and SHA-256 checksums are recorded.
+- Static security analysis (v2.1.2), findings SSA-01 – SSA-12:
+  - deny-by-default routine registry (`config/routine-resources.php`) and
+    query-source registry (`config/query-sources.php`) for JSON Query Mode,
+    metadata listings, and SQL Resource runtime source filters;
+  - first-run setup and backend user, API-key, and role management moved to the
+    loopback Admin API only;
+  - production ODBC driver selection limited to Driver 18/17 with no fallback
+    after TLS failures, and transport warnings in health and validation;
+  - `GENERIC_MAX_RESULT_ROWS` limit for unpaginated reads
+    (`413 RESULT_TOO_LARGE`);
+  - an administrator credential exposed in Git history was rotated.
+  SSA-13 – SSA-20 are deferred.
+- Authorization and API security testing (v2.1.3), findings AAPI-01 – AAPI-09:
+  - Application Administrators can no longer take over or alter backend-only
+    accounts, and System Administrator accounts can no longer be managed through
+    the public API;
+  - registered write routines require CSRF; frontend user management returns
+    minimized profiles and uniform not-found responses; the System Administrator
+    role is rejected for anonymous and legacy-key principals; non-string public
+    actions are rejected;
+  - a 64-test authorization and API coverage suite.
+- DAST and penetration-test preparation (v2.1.4): the SQL Parser no longer
+  discloses the PHP version, and its development router serves only its intended
+  assets. Authenticated dynamic testing is deferred to the external penetration
+  test.
+- Architecture and operational hardening (v2.1.5): deployment guidance moves
+  runtime configuration out of the code tree through `GENERIC_RUNTIME_CONFIG_DIR`
+  and keeps `Backend/config` and the bundled development runtimes read-only;
+  `validate-production.php` reports the runtime configuration location.
+- Final repository-level verification (v2.1.6): tests, mutation checks, lint,
+  and documentation checks pass, and every finding has a recorded status.
+
+### Fixed
+
+- Readiness at the internal IIS route `/api/health/ready` always returned `200`;
+  health probes are now recognized at any mount path.
+
+### Changed
+
+- Application version metadata reports `2.0.0`.
+- Documentation reorganized into current reference, roadmap, changelog, and a
+  consolidated security model and verification record.
+
+## [2.0.0] - 2026-10-05
 
 ### Added
 
@@ -66,8 +122,6 @@ All notable changes are recorded here. The project follows semantic versioning.
   production Admin Console has no Server configuration tab.
 - Production errors use a stable client-safe envelope and correlation ID while
   internal diagnostics remain in redacted logs.
-- Documentation is organized by current product behavior, release history,
-  future roadmap, and repository-specific maintenance guidance.
 
 ### Fixed
 
@@ -95,53 +149,8 @@ All notable changes are recorded here. The project follows semantic versioning.
 - Added attack-oriented tests for authentication, authorization, API keys,
   CSRF/CORS, SQL/CRUD injection, traversal, secrets, backups, health, logging,
   and error disclosure.
-- Documented the v2.1.1 dependency security review: the application has no
-  Composer/npm or vendored dependencies, and outdated PHP, OpenSSL, curl,
-  SQLite, and libxml2 runtime packages in the review environment were updated
-  with the backend regression suite passing afterwards.
-- Completed the v2.1.2 static security analysis and remediated, documented,
-  or accepted findings SSA-01 through SSA-12: deny-by-default routine and
-  query-source registries (reconciled with the sources used by the frontend),
-  Admin-only setup and identity/API-key/role management, registered-source
-  checks for SQL Resource runtime filters, production ODBC Driver 18/17
-  transport hardening and warnings, a `GENERIC_MAX_RESULT_ROWS` limit for
-  unpaginated reads, Windows PHP runtime provenance and checksums, and security
-  regression coverage. The exposed administrator credential (SSA-05) was
-  rotated and verified to no longer match the historical hash. Authored SQL
-  Resource SQL is not validated table by table, and SSA-13 through SSA-20
-  remain deferred.
-- Completed the v2.1.3 authorization and API security testing.
-  - Fixed: Application Administrators can no longer take over or alter
-    backend-only accounts, and System Administrator accounts can no longer be
-    managed through the public API (AAPI-01, AAPI-02).
-  - Also hardened: registered write routines require CSRF; frontend user
-    management minimizes backend identity profiles and gives uniform refusals
-    for missing accounts; the System Administrator role is rejected for
-    anonymous and legacy-key principals; non-string public actions are
-    rejected.
-  - Accepted and documented: password changes without the current password,
-    API key roles, and list bodies.
-  - All 64 planned authorization and API tests pass, 56 over HTTP and 8 at the
-    enforcement layer.
-- Completed the v2.1.5 security architecture and operational hardening review.
-  - Fixed: readiness at the internal IIS route `/api/health/ready` always
-    returned 200; health probes are now recognized at any mount path
-    (SAOH-03).
-  - Hardened: production guidance moves runtime configuration out of the code
-    tree through `GENERIC_RUNTIME_CONFIG_DIR`, so the PHP worker cannot modify
-    the PHP allowlists in `Backend/config`. The bundled development runtimes
-    stay read-only, and `validate-production.php` reports where runtime
-    configuration lives (SAOH-01, SAOH-02).
-  - Accepted and documented: shared worker identity, backup-signing key
-    custody, `db_datareader` breadth, external log rotation, and single-host
-    security state.
-- Completed the v2.1.6 final security verification at the repository level.
-  - Tests, mutation checks, lint, and documentation checks all pass.
-  - Every SSA, AAPI, DAST, and SAOH finding has a documented status.
-  - The external penetration test and deployed-host testing deferred from
-    v2.1.4 remain outstanding.
 
-## [1.0.0] - Initial release
+## [1.0.0] - 2026-07-27
 
 ### Added
 
@@ -158,5 +167,3 @@ All notable changes are recorded here. The project follows semantic versioning.
 
 - BETWEEN date strings can be converted to `YYYYMMDD` integers for
   integer-family date columns discovered through metadata.
-
-Future work is maintained in [docs/Roadmap.md](docs/Roadmap.md).

@@ -27,12 +27,12 @@ Unknown top-level properties are rejected for every action.
 Identifiers use `^[A-Za-z_][A-Za-z0-9_.]*$`: letters/underscore first, then letters, digits, underscores, or dot qualifiers. This is syntax validation; SELECT builders also check tables and columns against live metadata.
 
 The `sql` action overview is documented in [API](API.md#controlled-sql-resource-request).
-Backend developers should use [SQL Resource Configuration](SQL-Resource-Configuration.md)
-and [SQL Resource Files](SQL-Resource-Files.md) for discovery and file details.
+Backend developers should use [SQL Resource authoring](SQL-Resource-Authoring.md)
+for discovery and file details.
 Resource IDs use slash-separated segments matching
 `[A-Za-z0-9][A-Za-z0-9_-]*`. They resolve to discovered `.sql` files beneath the
-fixed root or to legacy entries. Sort/filter fields come from validated
-`execution` metadata or legacy allowlists; arbitrary SQL is never accepted.
+fixed root. Sort and filter fields come from validated `execution` metadata;
+arbitrary SQL is never accepted.
 
 These restrictions describe client-composed JSON. A discovered SQL Resource is
 backend-owned SQL and may use SQL Server functions, CTEs, joins, windows,

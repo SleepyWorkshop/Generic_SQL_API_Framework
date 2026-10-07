@@ -1,19 +1,24 @@
-# SQL → API JSON Generator
+# SQL Parser
 
-The SQL Parser Generator translates supported SQL into the framework's existing
+The SQL Parser (SQL → API JSON generator) translates supported SQL into the framework's existing
 Universal API JSON. It is an independent application and never executes pasted
 SQL or opens a database connection.
 
 ## Run it
 
-Start the backend with the repository launcher, sign in to Admin Console, and
-use System Health to start, stop, or restart SQL Parser. Its selected loopback
-port appears in System Health and System Info. Separate parser launch scripts
-are no longer part of the supported workflow. Process control does not create an
-application dependency: the parser does not use Admin authentication,
-configuration, sessions, API runtime, or database credentials. Requests are
-limited to 200,000 bytes, responses are not cached, pasted SQL is not logged,
-and the parser accepts no execution option.
+- **Development:** the launchers start the parser on a loopback port; System
+  Health starts, stops, or restarts it and shows the selected port.
+- **Production:** IIS or Nginx serves `sqlparser/index.php` and its assets on a
+  loopback or internal-only boundary (the `/sqlparser` IIS application or a
+  separate internal Nginx site). Admin System Health enables, disables, or
+  reloads it; a disabled parser returns `503 SERVICE_UNAVAILABLE`. Do not expose
+  it publicly, and consider a dedicated worker pool with no access to
+  application state.
+
+The parser does not use Admin authentication, configuration, sessions, the API
+runtime, or database credentials. Requests are limited to 200,000 bytes,
+responses are not cached, pasted SQL is not logged, and the parser accepts no
+execution option.
 
 ## Architecture
 
@@ -36,9 +41,8 @@ emitted.
 
 ## Parser choice
 
-No Composer dependency was added. The repository had no Composer setup, and the
-evaluated open-source PHP parsers focus on the MySQL dialect rather than claiming
-the SQL Server grammar needed here. The tool instead uses an isolated
+The parser has no third-party dependency: available open-source PHP SQL parsers
+target the MySQL dialect rather than SQL Server. The tool instead uses an isolated
 character-level lexer and recursive-descent/precedence parser that produces a
 real AST. Clause recognition is not implemented with SELECT/FROM regular
 expressions. Unsupported grammar fails explicitly rather than being guessed.
@@ -201,7 +205,7 @@ with `php -n`, so the second command verifies the extension-minimal path as well
 
 ## Relationship to the API
 
-SQL Parser has its own document root, router, request handler, and process. Admin
-Console controls only that process through fixed lifecycle operations. Neither
+SQL Parser has its own document root, router, and request handler. The Admin
+Console controls only its availability through fixed lifecycle operations. Neither
 Admin nor the normal API imports the parser generator, and the parser works
 without SQL Server, credentials, or `database/config/database.json`.

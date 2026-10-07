@@ -1,4 +1,10 @@
-# Production web-server hosting
+# Production security and deployment
+
+This is the production hosting reference for both supported deployment models:
+Windows with IIS and PHP FastCGI, and Linux with Nginx and PHP-FPM. The complete
+step-by-step Windows procedure is [Windows Server IIS deployment](Windows-IIS-Deployment.md);
+the security model behind these requirements is
+[Security model](security/Security-Model.md).
 
 Production uses a web-server and FastCGI worker model. IIS or Nginx terminates HTTPS, redirects production HTTP to HTTPS, and is authoritative for HSTS and browser security headers. Certificates, private keys, hostnames, and trust policy remain deployment-owned values and are not stored in the repository.
 
@@ -95,7 +101,7 @@ Apply least privilege to the PHP service identity:
 
 Do not place `.env`, keys, logs, JSON configuration, backups, or repository metadata under a static document root. The supplied configurations use fixed public roots and fixed FastCGI targets as defense in depth.
 
-Users, password and API-key hashes, roles, Admin settings, availability state, and their lock files are runtime configuration. Store them in a dedicated directory outside the code tree, named by `GENERIC_RUNTIME_CONFIG_DIR` for every boundary and every command-line script, rather than in `Backend/config`. That directory also contains the PHP allowlists the application executes (query sources, routines, write resources, SQL Resources) and `constants.php`. If the worker identity could write it, any file-write flaw, or anyone acting as that identity, could change those allowlists. The bundled development runtimes are code too and are not used by IIS or PHP-FPM.
+Users, password and API-key hashes, roles, Admin settings, availability state, and their lock files are runtime configuration. Store them in a dedicated directory outside the code tree, named by `GENERIC_RUNTIME_CONFIG_DIR` for every boundary and every command-line script, rather than in `Backend/config`. `Backend/config` holds the PHP registries the application executes (query sources, routines, write resources, SQL Resources) and `constants.php`; it must stay read-only to the worker so that a file-write flaw, or anyone acting as that identity, cannot change those registries. The bundled development runtimes are code too and are not used by IIS or PHP-FPM. Run `php scripts/validate-production.php` to confirm the runtime configuration directory is outside the code tree.
 
 ## PHP runtime requirements
 
@@ -214,7 +220,7 @@ GENERIC_SQL_API_ENCRYPTION_KEY=<secret supplied outside the repository>
 GENERIC_SQL_API_KEY=<legacy key only when that authentication path is used>
 ```
 
-Optional validated overrides such as `GENERIC_API_ALLOWED_ORIGINS`, session/login limits, and `DB_QUERY_TIMEOUT_SECONDS` retain their documented behavior. Prefer `config/admin.json` for validated runtime settings unless deployment automation intentionally owns an environment override.
+Optional validated overrides such as `GENERIC_API_ALLOWED_ORIGINS`, session/login limits, and `DB_QUERY_TIMEOUT_SECONDS` retain their documented behavior. Prefer the Admin Console runtime settings (stored in `admin.json` in the runtime configuration directory) unless deployment automation intentionally owns an environment override.
 
 The encryption key must be available to the PHP worker identity but stored separately from `database/config/database.json`. Never place credentials, keys, session data, or real production hostnames in repository templates.
 
@@ -249,7 +255,7 @@ messages.
 
 ## Session storage and lifetime
 
-Configure PHP `session.save_path` as a dedicated directory outside every frontend or backend web root. It must be readable and writable only by the PHP FastCGI/FPM worker identity and the operating-system account responsible for session cleanup; it must never be served by IIS/Nginx or included in application logs or backups without equivalent secret-data controls. All workers serving the same application instance must use the same local session directory. A future multi-host deployment would require an explicitly designed shared session store, which is not currently provided.
+Configure PHP `session.save_path` as a dedicated directory outside every frontend or backend web root. It must be readable and writable only by the PHP FastCGI/FPM worker identity and the operating-system account responsible for session cleanup; it must never be served by IIS/Nginx or included in application logs or backups without equivalent secret-data controls. All workers serving the same application instance must use the same local session directory. Multi-host deployment would require a shared session store, which is not provided.
 
 The application enforces cookie-only transport, strict mode, disabled transparent URL session IDs, and a garbage-collection lifetime equal to `runtime.session.absoluteTimeoutSeconds` before starting a session. The production INI contains the secure defaults as defense in depth. Verify the effective `session.save_path`, ownership, free space, and cleanup mechanism using an offline command under the actual worker identity. Some distributions use an operating-system cleanup job instead of request-probability garbage collection; its retention threshold must be at least the configured absolute timeout while still removing expired files.
 
@@ -281,30 +287,14 @@ Keep separate logs with separate rotation policy:
 
 Grant the PHP identity write access to application/PHP log targets and deny browser access. Rotate and retain logs according to volume and organizational policy. Existing application logging records parameter counts/types rather than values; operators must also avoid adding passwords, encryption keys, API keys, cookies, authorization headers, session identifiers, or raw credentials to web-server log formats.
 
-Security events use structured JSON Lines with request correlation, categorical
-outcomes, severity, and allowlisted actor/target metadata. See
-[Audit and security logging](Audit-and-Security-Logging.md) for the implemented
-taxonomy, fail-open behavior, file modes, concurrency boundary, and OS-owned
-rotation/retention requirements. No centralized collector or SIEM is configured.
-See [Operational logging](Operational-Logging.md) for subsystem coverage,
-correlation, redaction, and date-wise file handling.
+Audit taxonomy, redaction, file modes, and rotation responsibilities are in
+[Logging](Logging.md). No centralized collector or SIEM is configured.
 
-Application configuration ZIP scope, SHA-256 integrity, manifest authenticity,
-separate signing/database-key custody, Admin preview/confirmation, disposable
-sessions/runtime state, SQL Server-native backup ownership, and tested restore sequencing are documented in
-[Backup and recovery](Backup-and-Recovery.md). Backup bundles must remain outside
-all document roots and the repository; matching signing and encryption keys are
-protected and recovered through separate operational channels.
-
-Public liveness/readiness semantics, authenticated detailed diagnostics,
-database-health caching, safe dependency categories, and IIS/Nginx monitoring
-boundaries are documented in [Monitoring and health](Monitoring-and-Health.md).
-External availability monitoring and alerting remain deployment responsibilities.
-
-Canonical client-safe errors, request IDs, status mappings, output-buffer
-safety, server-side diagnostics, and fatal-handler limitations are documented
-in [Production error handling](Production-Error-Handling.md). Keep PHP diagnostic
-display disabled and configure IIS/Nginx to pass through application JSON errors.
+Backup scope, signing and key custody, and restore are in
+[Backup and recovery](Backup-and-Recovery.md); keep backup bundles outside all
+document roots and the repository. Liveness, readiness, and detailed health are
+in [Monitoring and health](Monitoring-and-Health.md). The error envelope and
+failure handling are in [Errors and validation](Errors-and-Validation.md).
 
 ## Deployment verification
 
@@ -325,7 +315,7 @@ display disabled and configure IIS/Nginx to pass through application JSON errors
 
 - **502/500 from IIS or Nginx:** verify the FastCGI executable/socket, service identity, PHP error log, and entry-point filesystem access.
 - **404 for a valid route:** confirm the expected application/site boundary and install IIS URL Rewrite where applicable.
-- **Admin returns 404:** access it from loopback, set `GENERIC_ADMIN_ENABLED=1` only for that Admin FastCGI boundary (the application no longer sets it itself), and verify the web-server loopback restriction.
+- **Admin returns 404:** access it from loopback, set `GENERIC_ADMIN_ENABLED=1` only for that Admin FastCGI boundary, and verify the web-server loopback restriction.
 - **ODBC unavailable:** enable PHP ODBC and install a driver supported by `SqlServerDriver` for the worker architecture.
 - **Encrypted configuration unavailable:** restore the external encryption key for the worker identity; never generate a replacement for existing ciphertext.
 - **Stale code after deployment:** recycle the IIS application pool or reload/restart PHP-FPM because production OPcache timestamp checks are disabled.
@@ -338,18 +328,148 @@ display disabled and configure IIS/Nginx to pass through application JSON errors
 - **Local CSRF mismatch:** use the same hostname form for the browser and API. `localhost` and `127.0.0.1` are different cookie hosts even when they resolve to the same machine.
 - **Wrong/expired certificate:** verify the active IIS binding or Nginx chain/key placeholders, SANs, renewal job, service read permissions, and successful reload.
 
-Live IIS/FastCGI, Schannel, Nginx/PHP-FPM, certificates, private-key permissions, renewal, client trust, DNS, firewall, and protocol negotiation must be verified on target hosts. Repository tests validate template structure, redirect guards, header policies, application fallbacks, and sensitive-path intent but cannot prove a live TLS deployment.
+Live IIS/FastCGI, Schannel, Nginx/PHP-FPM, certificates, private-key permissions, renewal, client trust, DNS, firewall, and protocol negotiation must be verified on target hosts. Repository tests validate template structure, redirect guards, header policies, application fallbacks, and sensitive-path intent but cannot prove a live TLS deployment. Review the accepted risks in [Security model](security/Security-Model.md#accepted-risks-and-deployment-responsibilities), especially resource-level rather than per-column read authorization and single-host state, before production use.
 
-The dated environment discovery, static results, non-executed live
-boundaries, and Windows/Linux operator commands are in
-[Windows and Linux production validation](Production-Validation.md). Run
-`php scripts/validate-production.php` for a non-mutating local report. A
-`VALIDATED` template result is never a substitute for target-host IIS/Nginx,
-FastCGI/FPM, certificate, identity, filesystem, SQL Server, or load validation.
+## Operator checklists
 
-Attack-oriented authentication, session, authorization, API-key,
-CSRF/CORS, SQL/CRUD, filesystem, backup, disclosure, and static-analysis results
-are in [Security testing](Security-Testing.md). Production deployment must review
-its documented residual risks, especially resource-level rather than per-column
-read authorization and single-host file-backed rate limits. Repository security
-tests do not replace an authorized staging penetration test or host dependency scan.
+Run `php scripts/validate-production.php` for a non-mutating discovery and
+static-validation report. It never installs services, changes configuration,
+connects to SQL Server, or prints secrets. A passing template check is never a
+substitute for the target-host checks below. Replace example paths and hosts,
+and never paste secrets into a command line or transcript.
+
+### Windows / IIS
+
+1. Record Windows and IIS capability, and confirm CGI/FastCGI, URL Rewrite, and
+   IP restrictions are installed:
+
+   ```powershell
+   Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion,OsBuildNumber
+   Get-WindowsFeature Web-Server,Web-CGI,Web-IP-Security
+   & "$env:windir\System32\inetsrv\appcmd.exe" list modules
+   ```
+
+2. Parse the templates before deployment:
+
+   ```powershell
+   Get-ChildItem .\deployment\iis\*.web.config.example |
+     ForEach-Object { [xml](Get-Content -Raw $_.FullName) | Out-Null }
+   ```
+
+3. Validate the installed FastCGI runtime, not the bundled development CLI:
+
+   ```powershell
+   C:\PHP\php-cgi.exe -c C:\PHP\php.ini -v
+   C:\PHP\php-cgi.exe -c C:\PHP\php.ini -m
+   C:\PHP\php-cgi.exe -c C:\PHP\php.ini -i |
+     Select-String 'display_errors|display_startup_errors|log_errors|expose_php|session.save_path|opcache.enable'
+   ```
+
+4. Use `icacls` to confirm the dedicated application-pool identity has the
+   permissions in [Filesystem layout and permissions](#filesystem-layout-and-permissions):
+   code and `Backend\config` read-only, configuration and key access restricted,
+   runtime, logs, and sessions writable, backups outside web roots, and no broad
+   `Everyone` or inherited write access.
+
+5. Validate IIS configuration and bindings:
+
+   ```powershell
+   & "$env:windir\System32\inetsrv\appcmd.exe" list apppool
+   & "$env:windir\System32\inetsrv\appcmd.exe" list site
+   & "$env:windir\System32\inetsrv\appcmd.exe" list config /section:system.webServer/fastCgi
+   netsh http show sslcert
+   ```
+
+6. With trusted DNS and certificates, test without bypassing certificate checks:
+
+   ```powershell
+   curl.exe -i https://reports.example.internal/health/live
+   curl.exe -i https://reports.example.internal/health/ready
+   curl.exe -i https://reports.example.internal/api/not-a-route
+   curl.exe -i -X GET https://reports.example.internal/api
+   curl.exe -i -H "Content-Type: application/json" --data-binary "{broken" https://reports.example.internal/api
+   ```
+
+   Verify status codes, JSON content type, request IDs on errors, HSTS and
+   security headers, and that no detailed IIS page or internal detail appears.
+   Test Admin login, CSRF, logout, and the SQL Parser interactively without
+   recording cookie or token values.
+
+7. Validate the Schannel protocol and cipher policy and the certificate SAN and
+   chain with approved Windows tooling. Recycle the application pool after
+   code, secret, `php.ini`, or OPcache changes.
+
+### Linux / Nginx / PHP-FPM
+
+Commands use example version numbers; substitute the installed PHP version.
+
+1. Record installed components and locate the real pool socket:
+
+   ```sh
+   nginx -V
+   php-fpm8.4 -v
+   php-fpm8.4 -tt
+   systemctl status nginx php8.4-fpm
+   grep -R '^[[:space:]]*listen[[:space:]]*=' /etc/php/*/fpm/pool.d
+   ```
+
+2. Replace every hostname, path, certificate, and socket placeholder, install the
+   header snippets, then validate before reloading:
+
+   ```sh
+   nginx -t
+   systemctl reload php8.4-fpm
+   systemctl reload nginx
+   ```
+
+3. Inspect the effective PHP-FPM configuration under the worker identity:
+
+   ```sh
+   sudo -u www-data php -c /etc/php/8.4/fpm/php.ini -r '
+   foreach (["display_errors","display_startup_errors","log_errors","expose_php","session.save_path","session.use_strict_mode","session.cookie_secure","opcache.enable"] as $k) echo $k,"=",ini_get($k),PHP_EOL;'
+   ```
+
+   Confirm the pool environment provides `GENERIC_APP_ENV=production`,
+   `GENERIC_RUNTIME_CONFIG_DIR`, and encryption-key access without printing the
+   key, accounting for the pool's `clear_env` policy.
+
+4. Inspect ownership and permissions with `namei -l` and `stat`. Code must be
+   read-only; configuration and key access restricted; runtime, log, and session
+   paths writable; backups outside web roots. Do not recursively `chmod` or
+   `chown` an unknown tree.
+
+5. Test real HTTPS without `-k`:
+
+   ```sh
+   curl --fail-with-body -i https://reports.example.internal/health/live
+   curl -i https://reports.example.internal/health/ready
+   curl -i https://reports.example.internal/api/not-a-route
+   curl -i -X GET https://reports.example.internal/api
+   curl -i -H 'Content-Type: application/json' --data-binary '{broken' https://reports.example.internal/api
+   openssl s_client -connect reports.example.internal:443 -servername reports.example.internal -verify_return_error </dev/null
+   ```
+
+   Confirm the TLS 1.2/1.3 policy, trusted chain and SAN, redirect, HSTS,
+   boundary CSP, JSON application errors, `no-store`, and no PHP warning, path,
+   SQL, or ODBC leakage.
+
+6. With a staging System Administrator, validate Admin authentication,
+   authorization, CSRF rejection and acceptance, secure host-only cookies,
+   session-ID regeneration, and logout invalidation. Confirm the API and SQL
+   Parser show externally managed infrastructure and that Enable/Disable/Reload
+   change only application availability.
+
+### SQL Server and operations
+
+Under the real worker identity and environment, run
+`php scripts/check-database.php` and the readiness endpoint. In an isolated
+staging configuration, verify invalid credentials, an unreachable server,
+encryption-key failure, and a controlled timeout, then restore the valid
+encrypted configuration and key. Check that clients see safe categories and
+request IDs and that server logs are redacted.
+
+Exercise a small number of simultaneous liveness, readiness, and representative
+authenticated requests to check worker responsiveness, body limits, PHP and
+proxy timeouts, file locks, and log writes. This is a smoke test, not a load test
+or capacity result. SQL Server backup and restore validation remains a separate
+operator responsibility.

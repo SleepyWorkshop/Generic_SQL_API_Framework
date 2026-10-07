@@ -1,184 +1,177 @@
 # Architecture
 
-Protected requests pass through authentication, common principal resolution, installation feature gates, centralized authorization, and the database availability gate before validation and execution. SQL and write-resource scope is enforced server-side before repository execution.
+This document explains how the backend is structured and how a request flows
+through it. Security boundaries are detailed in
+[Security model](security/Security-Model.md); the public contract is in
+[HTTP API](API.md).
 
-## Runtime flow
-
-The three request flows implemented today are:
+## Overview
 
 ```text
-Client
-  -> api/index.php (CORS, bounded JSON read, authentication/rate-limit middleware)
-  -> production application-runtime availability gate
-  -> QueryRequestValidator
-  -> QueryRequestNormalizer
-  -> QueryController -> QueryService -> QueryRepository -> specialized builders
-     OR SQLController -> SqlService -> SqlRepository -> approved SQL resource
-     OR WriteController -> WriteService -> WriteRepository -> write builders
-  -> QueryEngine
-  -> Database -> DriverFactory -> SqlServerDriver
-  -> PHP ODBC -> SQL Server
+Client (frontend, API client, operator browser)
+  ↓
+Web server / PHP runtime
+  production: IIS + PHP FastCGI, or Nginx + PHP-FPM
+  development: PHP built-in server started by the launchers
+  ↓
+HTTP boundaries
+  api/index.php, api/health.php    public API and health probes
+  admin/index.php, admin/api.php   loopback Admin Console and Admin API
+  sqlparser/index.php              SQL → JSON converter (no database)
+  ↓
+Middleware (app/Middleware)
+  availability, authentication, rate limiting, CSRF, logging,
+  authorization, database availability
+  ↓
+Request validation and normalization (app/Requests)
+  ↓
+Controllers → services → repositories and builders (app/)
+  ↓
+QueryEngine → Database → DriverFactory → SqlServerDriver → PHP ODBC
+  ↓
+Microsoft SQL Server
+
+Configuration and state (read by every layer above):
+  config/*.php                      shipped registries (read-only in production)
+  GENERIC_RUNTIME_CONFIG_DIR        users, roles, API keys, Admin settings, availability
+  database/config/database.json     encrypted database configuration
+  logs/, runtime/, storage/, backups/
 ```
 
-Validation and normalization occur in `api/index.php` before controller dispatch. The controller performs a final internal required-field check and delegates to the service. On return, `BaseController` calls `Response`, which converts engine results into the public JSON envelope. Expected request exceptions preserve their explicit status and safe code, database statement timeouts become a safe 504 `QUERY_ERROR`, dependency/configuration failures use safe categories, and unexpected failures become generic 500 `INTERNAL_ERROR` responses. Every error carries the request ID used by server logs; buffered diagnostic output is discarded before JSON emission.
+Microsoft SQL Server through ODBC is the only database provider. `DriverFactory`
+creates only `SqlServerDriver`; the other files in `database/drivers/` are empty
+stubs.
 
-## Layer responsibilities
+## Components
 
-| Layer | Current responsibility |
+| Component | Responsibility |
 |---|---|
-| `api/index.php` | CORS/preflight, configured body-size enforcement, JSON parsing, authentication/rate limiting, validation, normalization, routing, exception registration |
-| `QueryRequestValidator` | Dispatches validation for JSON-query, controlled SQL-resource, and CRUD actions |
-| `SqlRequestValidator` | Restricts SQL mode to a resource ID and supported filter/sort/pagination runtime shapes |
-| `WriteRequestValidator` | Enforces CRUD shapes, scalar values, write-filter operators, and mandatory UPDATE/DELETE targeting |
-| `WritePayloadValidator` | Resolves configured columns against live metadata and checks types, nullability, defaults, generated columns, and UPSERT keys |
-| `QueryRequestNormalizer` | Converts public JSON terminology and routes query, SQL-resource, and write actions |
-| Controllers | Query, SQL-resource, or write operation and shared response message; no SQL construction |
-| Services | Thin delegation to query or metadata repositories |
-| `QueryRepository` | Execution/orchestration facade for SELECT, set operations, and routines |
-| `SqlResourceDiscovery` | Recursively discovers safe path-derived IDs and enforces exclusions, collisions, and path containment |
-| `SqlResourceRegistry` | Resolves discovered IDs and converts validated execution metadata to the repository's internal filter/sort definition |
-| `SqlRepository` | Loads a discovered server-owned SELECT/CTE, preserves CTE scope around wrappers, safely applies runtime state, and reuses pagination/execution infrastructure |
-| `WriteResourceRegistry` | Maps exact approved write IDs to fixed schema/table and column/key allowlists; defaults to deny-all |
-| `WriteRepository` | Loads write metadata, validates payloads, chooses a write builder, executes prepared SQL, and formats operation results |
-| `ScopedMetadataRepository` | Adds request-local inferred CTE output metadata while delegating physical table/column checks to `MetadataRepository` |
-| Query builders | Validate database objects and construct SQL fragments/parameters |
-| `QueryEngine` | ODBC execution, result collection, timing, row counts, execution logs |
-| Database layer | Reads local JSON configuration, resolves plain or encrypted credentials, chooses the SQL Server driver, and opens/closes the ODBC connection |
-| `Response` | Stable success and error payload construction |
+| `api/index.php` | Public API front controller: CORS and preflight, bounded JSON body, middleware, setup/session/frontend-user actions, validation, normalization, controller dispatch |
+| `api/health.php` | Public liveness and readiness probes |
+| `admin/` | Admin Console UI and loopback Admin API: setup, configuration, users, API keys, health, availability, backups. See [Admin Console](Admin-Console.md) |
+| `sqlparser/` | Independent, non-executing SQL-to-JSON converter. See [SQL Parser](SQL-Parser-Generator.md) |
+| `app/Middleware/` | Authentication, rate limiting, frontend-user and Admin authorization, CSRF, logging, authorization, application and database availability |
+| `app/Requests/` | Public contract validators and the normalizer that maps public JSON to the private builder model |
+| `app/Controllers/`, `app/Services/` | Thin orchestration; no SQL construction |
+| `app/Repositories/` | Query, SQL Resource, write, metadata, and configuration repositories |
+| `app/Repositories/Query/` | SELECT builders (WHERE, JOIN, GROUP BY, HAVING, ORDER BY, pagination, windows, expressions, routines) |
+| `app/Repositories/Write/` | INSERT, UPDATE, DELETE, UPSERT, and write-filter builders |
+| `app/Resources/` | SQL Resource discovery, query-source, routine, and write-resource registries |
+| `app/Security/`, `app/Authorization/` | Password hashing, API keys, CSRF, rate limiters, database encryption, role model, principals |
+| `app/Configuration/`, `app/Runtime/` | Runtime configuration bootstrap; development process managers and production availability state |
+| `app/Health/`, `app/Backup/`, `app/Deployment/` | Health monitoring, application backup and restore, production validation |
+| `core/` | `QueryEngine` (prepared ODBC execution), `Database`, `Response`, `ExceptionHandler`, loggers, JSON file store, request ID |
+| `database/` | Driver factory and `SqlServerDriver` |
+| `queries/` | Discoverable SQL Resources and internal metadata SQL (`queries/system/`) |
+| `scripts/` | Runtime control, backup, bootstrap, database check, and production validation CLIs |
 
-## Modular query construction
+## Request flow
 
-`QueryRepository` is not a monolithic SQL builder. It owns a `SelectBuilder`, `RoutineBuilder`, and `SetOperationBuilder`, executes their output through `QueryEngine`, and attaches pagination totals.
+The public API applies its stages in this order. The order is security-relevant.
 
-`SqlRepository` is deliberately separate from the Universal JSON builders. Its
-base SQL is trusted application code selected through recursive discovery. The
-client cannot supply SQL or a file path. Optional
-execution metadata uses strict identifier/aggregate/placement grammar and forms
-the runtime allowlists; values are passed to `QueryEngine::executePrepared`.
-Both paths converge on the
-same `QueryEngine`, database connection, exception handling, and `Response`
-envelope. Server-owned SQL is parsed by SQL Server and does not pass through the
-JSON Query function/expression allowlists. A small statement analyzer retains
-the single-read-query guard, splits a top-level WITH prefix from its main SELECT,
-and prevents wrappers from moving CTE declarations into invalid derived-table
-positions. Existing `QueryController` behavior is unchanged.
+```text
+method, content type, CORS, bounded JSON body
+  → LoggingMiddleware (request ID)
+  → reject admin.*, setup.createAdmin, auth.users.*, auth.apiKeys.*, auth.roles.list (404)
+  → ApplicationRuntimeMiddleware (production availability gate)
+  → AuthenticationMiddleware → ApiRateLimitMiddleware
+  → FrontendUserAuthorizationMiddleware → CsrfProtectionMiddleware
+  → setup.*, auth.*, auth.frontendUsers.* are dispatched here
+  → AuthorizationMiddleware → DatabaseAvailabilityMiddleware
+  → QueryRequestValidator → QueryRequestNormalizer
+  → QueryController | SQLController | WriteController | MetadataController
+  → service → repository → builders → QueryEngine
+  → Response (success envelope) or ExceptionHandler (error envelope)
+```
 
-CRUD is a third path rather than an extension of `SelectBuilder`. Each request
-resolves a `WriteResourceRegistry` entry before database metadata is loaded.
-`WritePayloadValidator` canonicalizes only allowlisted columns and rejects values
-that do not match the live SQL Server column properties. `InsertBuilder`,
-`UpdateBuilder`, `DeleteBuilder`, `UpsertBuilder`, and `WriteFilterBuilder` then
-produce bracket-quoted server-owned identifiers and positional parameters.
+Three data paths share the same engine, connection handling, and response
+envelope:
 
-The DML `OUTPUT` is captured into a table variable and selected after the change.
-This provides an affected-row count, avoids relying on driver-specific
-`odbc_num_rows`, and remains usable when the target has enabled DML triggers.
-Only a configured, metadata-verified identity can be returned. UPDATE and DELETE
-cannot be built through the public path without at least one valid filter.
+- **JSON Query Mode.** `QueryRepository` is an execution facade over
+  `SelectBuilder`, `RoutineBuilder`, and `SetOperationBuilder`. Builders validate
+  identifiers against live metadata, render controlled expressions through
+  `SqlExpressionBuilder` and `QueryFunctionRegistry`, and emit positional
+  parameters. CTE projections become request-local virtual metadata
+  (`ScopedMetadataRepository`), and nested SELECT construction preserves the
+  outer alias scope.
+- **SQL Resource Mode.** `SqlResourceDiscovery` maps safe IDs to files under
+  `queries/`; `SqlResourceRegistry` turns validated `execution` metadata into
+  filter and sort definitions; `SqlRepository` loads the trusted SQL, splits a
+  top-level `WITH` prefix, applies runtime filters at the output, source, or
+  HAVING stage, and reuses pagination. It does not use the JSON Query expression
+  allowlists.
+- **Write API.** `WriteResourceRegistry` resolves the registered target before
+  metadata is loaded; `WritePayloadValidator` checks values against live column
+  metadata; the write builders produce bracket-quoted identifiers and
+  parameters, capture `OUTPUT` into a table variable for affected-row counts and
+  identities, and use one `MERGE ... WITH (HOLDLOCK)` for UPSERT. See
+  [Write API](Write-API.md).
 
-UPSERT uses one `MERGE ... WITH (HOLDLOCK)` statement. A two-statement
-UPDATE-then-INSERT sequence is not used because there is no API transaction in
-which to preserve its key-range lock. The configured keys must have a matching
-database unfiltered UNIQUE/PRIMARY KEY index, which is verified through live
-metadata. HOLDLOCK reduces the absent-row race,
-but does not remove SQL Server MERGE caveats or replace deployment-specific
-concurrency testing. Transactions remain unsupported by the public contract.
-
-Discovery does not parse projections. A metadata-free resource can execute
-unchanged; runtime output filters, sorting, and pagination declare stable aliases
-in `execution.columns`. Optional mappings bind logical fields to a validated
-output identifier, source identifier, or simple aggregate HAVING expression.
-`SqlResourceStatement` identifies only top-level clause boundaries, ignoring
-nested queries and window expressions. Ambiguous set-operation placement and OR
-logic spanning query stages are rejected.
-
-The SQL resource configuration owns only the discovery root and excluded
-directories. Per-resource columns, filters, value types, placement, and default
-sorting come from validated execution metadata.
-
-| Builder | Role |
-|---|---|
-| `SelectBuilder` | Orchestrates SELECT/CTE construction and delegates clauses; renders allow-listed field functions |
-| `WhereBuilder` | Validates filter columns/operators, builds prepared placeholders, subqueries, and AND/OR combination |
-| `JoinBuilder` | Builds INNER/LEFT/RIGHT equality joins and validates joined tables |
-| `GroupByBuilder` | Validates and renders grouping fields |
-| `HavingBuilder` | Builds parameterized aggregate comparisons joined with AND |
-| `OrderByBuilder` | Validates fields, aliases/directions, internal positions, and resolves real columns for window contexts |
-| `PaginationBuilder` | Counts rows and chooses OFFSET/FETCH (compatibility 110+) or a ROW_NUMBER fallback |
-| `WindowFunctionBuilder` | Builds the eight exposed window functions and delegates order validation |
-| `SqlExpressionBuilder` | Tracks table aliases and renders controlled values, arithmetic expressions, and conditions |
-| `RoutineBuilder` | Builds prepared procedure, scalar-function, and table-valued-function calls |
-| `SetOperationBuilder` | Combines built SELECT statements and merges their parameters |
-
-`OrderByBuilder` deliberately distinguishes top-level positional ordering from a window `ORDER BY`. SQL Server permits top-level `ORDER BY 1`, but rejects integer indexes inside `ROW_NUMBER() OVER (...)`. Window and legacy-pagination paths resolve positions to actual validated projections. The public validator rejects numeric sort fields entirely, so public clients always send logical fields.
-
-Nested SELECT construction snapshots and restores the expression alias scope, so a filter subquery cannot replace the outer query's aliases before GROUP BY or ORDER BY is built. CTE projections are registered as request-local virtual metadata: recursive branches can resolve their self-reference, outer clauses validate against projected names, and paginated count SQL receives the same `WITH` prefix as the data query.
+`OrderByBuilder` distinguishes top-level positional ordering from window
+`ORDER BY`: SQL Server rejects integer positions inside `OVER (...)`, so window
+and legacy-pagination paths resolve positions to real projections. Public
+clients cannot send numeric sort fields.
 
 ## Database and metadata
 
-Local launcher startup and Admin runtime ownership are deliberately separate from request execution. The development launchers bootstrap configuration, start API and SQL Parser through their existing managers, validate and enable application database availability, verify all three states, and start the loopback Admin Console. A component failure is reported without being represented as running, while Admin remains available for recovery. In development, System Health invokes the same fixed process-manager operations for API and SQL Parser. Managed process state records the PID, dynamically selected active port, and start time; status validation clears dead, foreign, or stale state and returns null operational fields when stopped. In production, IIS/Nginx and FastCGI/PHP-FPM own those processes while System Health changes only the persisted application availability state. Database controls always operate on the application availability gate, never the SQL Server service. Database status has no process identity and returns only safe configured server, explicit port, database name, and connection state.
+Each request constructs its own controllers, repositories, `QueryEngine`, and
+ODBC connection; there is no persistent connection, pool, global queue, or
+shared cancellation state. Metadata and data queries in one request share that
+request's connection. Statements are freed in `finally` on every path.
 
-`DriverFactory` currently creates only `SqlServerDriver`. A `Database` construction immediately connects, which is why production repositories are connection-backed. Query and write repositories pass their request-owned `QueryEngine` to `MetadataRepository`, so metadata and data use one connection in sequence instead of opening a second connection. Other requests construct different engines and connections. Statements are freed in `finally`, including after failures, and the engine closes its connection at the end of its lifetime. `MetadataRepository` queries `INFORMATION_SCHEMA` for query validation and integer-backed date handling. CRUD additionally queries `sys.columns`, `sys.tables`, `sys.schemas`, and `sys.types` for length, precision/scale, nullability, identity, computed, generated/hidden, and default flags.
+`MetadataRepository` reads `INFORMATION_SCHEMA` for query validation and
+integer-backed date handling; writes also read `sys.columns`, `sys.tables`,
+`sys.schemas`, and `sys.types` for length, precision, nullability, identity,
+computed, generated, and default flags.
 
-Database configuration protection is a configuration-layer concern:
+Pagination runs a count query, then checks the database compatibility level:
+110 or newer uses `OFFSET/FETCH`; older levels use a `ROW_NUMBER()` wrapper. A
+complete first-page SQL Resource whose authored `TOP` fits the page skips the
+count.
+
+Database configuration is resolved by `DatabaseConfigurationResolver`:
 
 ```text
 database/config/database.json
-  -> DatabaseConfigurationResolver
-  -> plaintext object: use unchanged
-     OR encrypted envelope: authenticate and decrypt the complete configuration with AES-256-GCM
-        using GENERIC_SQL_API_ENCRYPTION_KEY
-  -> SqlServerDriver
-  -> odbc_connect
+  → plaintext object (compatibility), or
+    AES-256-GCM envelope decrypted in memory with GENERIC_SQL_API_ENCRYPTION_KEY
+  → SqlServerDriver → odbc_connect
 ```
 
-The centralized resolver obtains a Base64-encoded 32-byte key from the process environment only for an encrypted configuration. It validates and authenticates the versioned envelope, decodes the complete configuration in memory, and passes that structure to the existing SQL Server connection path. Plaintext and legacy password-only configurations remain readable for compatibility. Failures use safe messages, and credential exception traces are omitted from logs so configuration and key material are not exposed. This layer does not add an endpoint or change the public request/response contract.
+See [Database configuration](Database-Configuration.md).
 
-Pagination normally performs a count query when both page values are present, then asks SQL Server for its compatibility level. Compatibility level 110 or newer uses `OFFSET/FETCH`; older levels wrap the projection and use `ROW_NUMBER()`. A complete first-page SQL resource whose authored `TOP` limit fits the requested page has a tested fast path that executes directly and infers the total from returned rows.
+## Timeouts and cancellation
 
-## Request isolation and cancellation
+The statement timeout (default 45 seconds, `query.timeoutSeconds`, overridable by
+`DB_QUERY_TIMEOUT_SECONDS`) is applied through ODBC `SQL_QUERY_TIMEOUT`. Drivers
+that report the option as unsupported are logged once per engine and execution
+continues. PHP's `max_execution_time` (60 seconds in the production INI) is the
+portable request guard; the shutdown handler converts it to `504 QUERY_ERROR`.
 
-Controllers, services, repositories, `QueryEngine`, and the ODBC connection are constructed within each PHP request. The application contains no global query queue, cancellation flag, or SQL execution lock, so cancellation state is not shared between users. Concurrent execution depends on the hosting process model: a production FastCGI/Apache/IIS deployment can use independent workers, while PHP's built-in development server is single-threaded by default and can make a second request wait behind a slow first request.
+A browser abort does not cancel SQL Server work: PHP exposes no safe
+cancellation while `odbc_execute` is blocked. The request finishes or times out,
+and the client must discard obsolete results.
 
-The supported production process models are IIS with PHP FastCGI on Windows and Nginx with PHP-FPM on Linux. Web-server/FastCGI workers own production concurrency and infrastructure lifecycle. When `GENERIC_APP_ENV=production`, the existing Admin actions become application controls: Start enables a runtime, Stop disables it, and Restart records an application reload while leaving IIS, Nginx, FastCGI, and PHP-FPM untouched. Disabled API or parser requests fail with a sanitized `503 SERVICE_UNAVAILABLE`; independent liveness routes and the Admin control plane remain available. Production health reports external infrastructure ownership separately from application runtime state and never fabricates PID, port, or start-time data. Development retains the fixed local child-process managers and their real Start/Stop/Restart behavior. API, loopback Admin, and SQL Parser remain separate routing boundaries with fixed public entry points.
+Each request has a request ID. Logs record request phases (validation,
+normalization, SQL generation, connection, preparation, execution, fetch,
+response) with SQL literals redacted and only parameter counts and types. See
+[Logging](Logging.md).
 
-Production availability is stored in ignored `config/application-runtime-state.json`. `JsonFileStore` provides atomic replacement and I/O locking; a lifecycle-operation lock serializes read-modify-write changes across workers. The state is enabled by default for backward compatibility, persists across ordinary PHP requests and host restarts, and is not a distributed multi-host control plane. It is intentionally excluded from application backups because it is host-specific operational state; a restored installation bootstraps fresh enabled defaults and operators establish the desired availability after validation.
+## Process model and state
 
-In production, IIS/Nginx terminates TLS, performs fixed-host HTTP-to-HTTPS redirects, and owns HSTS plus boundary-specific browser security headers for both static and FastCGI responses. PHP continues to own content types, cache controls, CORS, cookies, CSRF, and response bodies, and emits its existing browser headers only as a local-development fallback. The application does not trust forwarded protocol/host headers; direct templates pass authoritative HTTPS state to FastCGI, while any external TLS-terminating proxy must be explicitly trusted and own redirect behavior.
+In production, IIS/FastCGI or Nginx/PHP-FPM own listeners, workers, and
+concurrency. Setting `GENERIC_APP_ENV=production` turns the Admin lifecycle
+actions into application availability controls stored in
+`application-runtime-state.json`; disabled API or SQL Parser requests return
+`503 SERVICE_UNAVAILABLE`. In development, the launchers and Admin Console run
+real local processes with PHP's built-in server. See [Admin Console](Admin-Console.md).
 
-A browser abort stops waiting for the HTTP response, but this synchronous PHP ODBC execution path exposes no safe statement-cancellation hook while `odbc_execute` is blocked. Client disconnect therefore must not be described as guaranteed SQL Server cancellation. The PHP request and ODBC resources finish or time out normally; the frontend must discard any obsolete result. No speculative cross-request SQL cancellation is implemented.
+Runtime JSON files are written through `JsonFileStore` with I/O locks and atomic
+replacement; read-modify-write operations take additional operation locks.
+Sessions, rate-limit counters, and runtime state are local files, so all workers
+must share one host and a reliable local filesystem. Same-session requests can
+serialize on PHP's session lock.
 
-## Timing and timeout model
-
-Each request has a random correlation ID. Dated logs distinguish request receipt, validation, normalization, SQL generation, connection setup, statement preparation, execution, row fetching, response construction, and request total. Query entries label pagination counts, compatibility metadata, and main data queries separately. Logs include normalized SQL with literals redacted plus parameter count/types, never parameter values or credentials.
-
-The default database statement timeout is 45 seconds and is stored in the
-validated runtime configuration. `DB_QUERY_TIMEOUT_SECONDS` remains a bounded
-deployment override. `QueryEngine` requests ODBC `SQL_QUERY_TIMEOUT`
-before execution. Drivers that support the statement attribute enforce it;
-drivers returning the ODBC unsupported-capability result are logged once per
-engine and execution continues instead of failing every valid query. The PHP
-`max_execution_time` of 60 seconds remains the portable request guard, and the
-shutdown handler converts that fatal timeout to a safe 504 `QUERY_ERROR`.
-Neither setting controls browser, proxy, load-balancer, or login timeouts.
-
-This timeout controls duration and failure behavior; it does not make an inefficient query fast. The observed expensive grouped aggregates and derived-table counts still need SQL Server execution-plan, index, statistics, and blocking analysis using the new phase logs.
-
-## Test boundary
-
-Security authorization is resource-level. Stored users/API keys produce the
-server-side principal; request fields named `backendRole`, `frontendRole`, or
-`frontendAccess` never contribute permissions. Read-column authorization is not
-a separate policy layer: sensitive reads must be exposed through least-privilege
-views or SQL resources and restricted with resource scopes. CRUD has a distinct
-server-owned write-column allowlist. The ten audited trust boundaries, attack
-tests, findings, and residual risks are recorded in
-[Security testing](Security-Testing.md).
-
-Database-independent tests instantiate builders with fake `QueryEngine` and `MetadataRepository` subclasses whose constructors do not connect. They test public validation -> normalization -> SQL/parameter generation and response formatting, CRUD type/resource/filter/key safety, affected-row and identity mapping, count/data sequencing, independent executor state, parameter isolation, timeout conversion, cleanup, and recovery after failure. A live SQL Server remains necessary for real DML, constraints, triggers, MERGE concurrency, execution plans, and ODBC timeout integration, but not for normal CI.
-
-See [API](API.md), [JSON request reference](JSON-Request-Reference.md),
-[SQL resource configuration](SQL-Resource-Configuration.md),
-[SQL resource files](SQL-Resource-Files.md),
-[write resource configuration](Write-Resource-Configuration.md), and
-[Database configuration](Database-Configuration.md).
+In production, IIS or Nginx terminates TLS and sets HSTS and browser security
+headers. PHP owns content type, cache control, CORS, cookies, CSRF, and response
+bodies. Forwarded protocol and host headers are never trusted.

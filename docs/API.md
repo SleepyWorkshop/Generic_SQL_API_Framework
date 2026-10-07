@@ -115,9 +115,8 @@ validated; values remain prepared parameters.
 basename preserves short IDs such as `item` and `customer`, but the relative ID
 is preferred and required when basenames are ambiguous.
 
-See [SQL Resource Mode](SQL-Resource-Mode.md),
-[SQL Resource Configuration](SQL-Resource-Configuration.md), and
-[SQL Resource Files](SQL-Resource-Files.md).
+See [SQL Resource Mode](SQL-Resource-Mode.md) and
+[SQL Resource authoring](SQL-Resource-Authoring.md).
 
 
 ### CRUD write requests
@@ -177,7 +176,7 @@ must be present and non-null. The implementation is one SQL Server `MERGE` with
 `HOLDLOCK`; a matching unfiltered UNIQUE/PRIMARY KEY index is verified from live
 metadata. It does not
 open a transaction, and SQL Server MERGE-specific operational caveats still
-apply. See [Write Resource Configuration](Write-Resource-Configuration.md).
+apply. See [Write API](Write-API.md).
 
 ## Success response
 
@@ -189,6 +188,7 @@ All controllers use the same envelope:
   "message": "Data Loaded Successfully",
   "data": [{ "ItemCode": "A001", "ItemName": "Example" }],
   "meta": {
+    "requestId": "7f4dd403d84c99e1",
     "page": 1,
     "pageSize": 25,
     "totalRows": 37,
@@ -222,6 +222,7 @@ A successful INSERT with a configured identity is represented as:
   "message": "Data Inserted Successfully",
   "data": [{ "operation": "insert", "affectedRows": 1, "generatedId": 42 }],
   "meta": {
+    "requestId": "7f4dd403d84c99e1",
     "page": null,
     "pageSize": null,
     "totalRows": 0,
@@ -234,8 +235,8 @@ A successful INSERT with a configured identity is represented as:
 
 ## Error responses
 
-The complete code/status/handling table and current security boundary are in
-[Validation, errors, and security](Validation-and-Errors.md).
+The complete code, status, and handling table is in
+[Errors and validation](Errors-and-Validation.md).
 
 Malformed JSON is HTTP 400:
 
@@ -244,7 +245,8 @@ Malformed JSON is HTTP 400:
   "success": false,
   "message": "Invalid JSON request.",
   "error": { "code": "INVALID_JSON", "details": [] },
-  "data": []
+  "data": [],
+  "meta": { "requestId": "7f4dd403d84c99e1" }
 }
 ```
 
@@ -260,7 +262,8 @@ Contract validation failures are HTTP 400 and include one or more path/message d
       { "path": "pagination.page", "message": "Must be a positive integer." }
     ]
   },
-  "data": []
+  "data": [],
+  "meta": { "requestId": "7f4dd403d84c99e1" }
 }
 ```
 
@@ -271,7 +274,8 @@ Unhandled builder, metadata, connection, or execution failures are HTTP 500:
   "success": false,
   "message": "Query execution failed.",
   "error": { "code": "QUERY_ERROR", "details": [] },
-  "data": []
+  "data": [],
+  "meta": { "requestId": "7f4dd403d84c99e1" }
 }
 ```
 

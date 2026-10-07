@@ -11,9 +11,10 @@ require_once __DIR__ . '/../app/Services/ApiKeyService.php';
 
 /*
  * HTTP coverage for the v2.1.3 authorization and API security test plan
- * (docs/security/Authorization-API-Security-Inventory.md, Section 16). Each
- * block is labelled with the plan IDs it implements. Plan items that other
- * suites already cover are listed in the inventory coverage matrix.
+ * (64 tests; recorded in docs/security/Security-Verification.md). Each block
+ * is labelled with the plan IDs it implements; plan items covered at the
+ * enforcement layer live in other suites. The boundaries under test are
+ * described in docs/security/Security-Model.md.
  *
  * The database is left unavailable (the runtime default), so a data request
  * that passes authentication, CSRF, and authorization ends at
@@ -736,7 +737,7 @@ try {
     }
     coverageAssert($warnings === [], 'Requests produced PHP warnings: ' . implode(' | ', array_slice($warnings, 0, 3)));
 
-    // P3-01: every security status in the inventory's status table was observed
+    // P3-01: every security status in the plan's status table was observed
     // with its exact code. SERVICE_UNAVAILABLE needs production hosting and is
     // asserted by ProductionApplicationAvailabilityTest.
     foreach (['403 CORS_ORIGIN_DENIED', '405 METHOD_NOT_ALLOWED', '415 UNSUPPORTED_MEDIA_TYPE', '413 REQUEST_TOO_LARGE', '400 INVALID_JSON',

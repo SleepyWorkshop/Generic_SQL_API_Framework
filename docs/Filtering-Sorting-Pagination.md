@@ -91,7 +91,7 @@ The frontend shape stays simple:
 ```
 
 The logical field must be declared by the SQL action's validated `execution`
-metadata or by a legacy resource definition. Execution columns provide output
+metadata. Execution columns provide output
 fields automatically; explicit mappings select `output`, `source`, or `having`.
 Source mappings accept only an optionally qualified identifier, and HAVING accepts
 only the documented single aggregate form. Values always remain prepared.
@@ -154,7 +154,7 @@ conversion; otherwise SQL Server handles parameter conversion.
 Direction defaults to ASC and may be ASC or DESC. Numeric positions such as
 `"field": "1"` are rejected. JSON Query sorting accepts a validated source field
 or selected top-level alias. SQL Resource sorting accepts only output aliases in
-`execution.columns` or a legacy columns allowlist and uses the applicable
+`execution.columns` and uses the applicable
 `defaultSort` when the request omits it.
 Writes, routines, metadata, and public set operations have no sort property.
 

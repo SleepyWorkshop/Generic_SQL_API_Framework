@@ -19,8 +19,8 @@ $applicationRuntimeExample = json_decode((string)file_get_contents($root . '/con
 
 repositoryDocumentationAssert(
     ($application['app_name'] ?? null) === 'Generic SQL API Framework'
-        && ($application['version'] ?? null) === '2.0.0-dev',
-    'Application identity does not represent the unreleased v2 development line.'
+        && ($application['version'] ?? null) === '2.0.0',
+    'Application identity does not represent the released v2.0.0 version.'
 );
 repositoryDocumentationAssert(
     $adminExample === RuntimeConfiguration::adminDefaults()
@@ -38,84 +38,76 @@ repositoryDocumentationAssert(
     ],
     'Tracked application runtime example does not match bootstrap defaults.'
 );
+// Released versions are dated; post-release work stays under [Unreleased].
+$unreleasedPosition = strpos($changelog, "## [Unreleased]");
+$v2Position = strpos($changelog, '## [2.0.0] - 2026-10-05');
 repositoryDocumentationAssert(
-    str_contains($changelog, '## [2.0.0] - Unreleased')
-        && str_contains($changelog, '## [1.0.0] - Initial release')
-        && !preg_match('/## \[1\.[1-9][^]]*\]/', $changelog),
+    $unreleasedPosition !== false && $v2Position !== false && $unreleasedPosition < $v2Position
+        && str_contains($changelog, '## [1.0.0] - 2026-07-27')
+        && !str_contains($changelog, '## [2.0.0] - Unreleased')
+        && !preg_match('/## \[(?:1\.[1-9]|2\.[1-9])[^]]*\]/', $changelog),
     'Changelog release status is inconsistent.'
 );
 repositoryDocumentationAssert(
-    str_contains($readme, 'last released version is **v1.0.0**')
-        && str_contains($readme, '**v2.0.0 development line, which is unreleased**')
+    str_contains($readme, 'The current release is **v2.0.0**')
+        && !preg_match('/development line|v2\.0\.0[^.\n]*unreleased/i', $readme)
         && preg_match('/Phase [1-4](?:\.[0-9]+)?\s+[—-].*implemented/i', $readme) !== 1,
     'README contains an incorrect release status or phase diary.'
 );
-// Planned work stays explicitly planned under the versioned roadmap structure.
-foreach ([
-    'v2.1 — Security Verification & Operational Hardening',
-    'v3.0 — Multi-Database Support',
-    'v3.1 — Developer Experience & API Integration',
-] as $plannedMilestone) {
-    repositoryDocumentationAssert(
-        preg_match('/^# ' . preg_quote($plannedMilestone, '/') . '\R+Status: Planned$/mu', $roadmap) === 1,
-        "Roadmap does not list {$plannedMilestone} as planned."
-    );
-}
 
-// The completed production hardening phases are recorded with their scope.
-repositoryDocumentationAssert(
-    preg_match('/^## Production Hardening\R+Status: Completed$/m', $roadmap) === 1,
-    'Roadmap does not record the completed production hardening milestone.'
-);
-foreach ([
-    1 => 'Production configuration and IIS ownership',
-    2 => 'API and SQL Parser application availability',
-    3 => 'Application database availability',
-    4 => 'Production System Health',
-    5 => 'Admin Console cleanup',
-] as $phase => $scope) {
+// The roadmap separates completed, current, upcoming, and deferred work and
+// records the real release state of each milestone.
+foreach (['## Completed', '## Current', '## Upcoming', '## Deferred'] as $section) {
     repositoryDocumentationAssert(
-        str_contains($roadmap, "| Phase {$phase} | {$scope} | Completed |")
-            && preg_match('/^- \*\*Phase ' . $phase . ' — [^*]+:\*\* \S/m', $roadmap) === 1,
-        "Roadmap does not describe completed Phase {$phase} ({$scope})."
+        preg_match('/^' . preg_quote($section, '/') . '$/m', $roadmap) === 1,
+        "Roadmap is missing section: {$section}."
     );
 }
-repositoryDocumentationAssert(
-    str_contains($roadmap, 'production documentation and validation milestone')
-        && str_contains($roadmap, '](Windows-IIS-Deployment.md)')
-        && str_contains($roadmap, 'is also complete')
-        && is_file($root . '/docs/Windows-IIS-Deployment.md'),
-    'Roadmap does not record completion of the production documentation milestone.'
-);
-// v2.1.1 is completed and backed by its review record; the review must keep
-// application and runtime dependencies separate and avoid overclaiming.
-$dependencyReviewPath = $root . '/docs/security/Dependency-Security-Review.md';
-repositoryDocumentationAssert(is_file($dependencyReviewPath), 'Dependency security review is missing.');
-$dependencyReview = (string)file_get_contents($dependencyReviewPath);
-repositoryDocumentationAssert(
-    preg_match('/^## v2\.1\.1 — Dependency Security Review\R+Status: Completed$/m', $roadmap) === 1
-        && str_contains($roadmap, '| v2.1.1 | Dependency Security Review | Completed |')
-        && str_contains($roadmap, '](security/Dependency-Security-Review.md)'),
-    'Roadmap does not record completed v2.1.1 Dependency Security Review.'
-);
 foreach ([
-    'Purpose', 'Scope', 'Review environment', 'Application dependency inventory',
-    'Runtime dependency inventory', 'Initial findings', 'Remediation',
-    'Post-remediation verification', 'Remaining runtime considerations',
-    'Limitations', 'Final assessment',
-] as $section) {
-    repositoryDocumentationAssert(
-        preg_match('/^## ' . preg_quote($section, '/') . '$/m', $dependencyReview) === 1,
-        "Dependency security review is missing section: {$section}."
-    );
+    '| v1.0.0 | Core Generic SQL API Framework | Released |',
+    '| v2.0.0 | Platform expansion and security | Released (2026-10-05) |',
+    '| v2.1 | Security verification and operational hardening | Current — unreleased |',
+    '| v3.0 | Multi-database support | Upcoming |',
+    '| v3.1 | Developer experience and API integration | Upcoming |',
+] as $milestone) {
+    repositoryDocumentationAssert(str_contains($roadmap, $milestone), "Roadmap does not record milestone: {$milestone}");
 }
 repositoryDocumentationAssert(
-    str_contains($dependencyReview, 'Review status: **Completed**')
-        && str_contains($dependencyReview, 'No external vulnerability scanner')
-        && str_contains($dependencyReview, 'does not prove')
+    preg_match('/\bPhase [0-9]/', $roadmap) !== 1 && is_file($root . '/docs/Windows-IIS-Deployment.md'),
+    'Roadmap contains a phase diary or the Windows deployment guide is missing.'
+);
+
+// Security documentation: one current model, one verification record with the
+// complete findings register, and the penetration-test handoff.
+foreach (['Security-Model.md', 'Security-Verification.md', 'Penetration-Test-Preparation.md', 'Windows-PHP-Runtime.sha256'] as $securityDocument) {
+    repositoryDocumentationAssert(is_file($root . '/docs/security/' . $securityDocument), "Security document is missing: {$securityDocument}.");
+}
+$verification = (string)file_get_contents($root . '/docs/security/Security-Verification.md');
+foreach (['Current status', 'Verification history', 'Findings register', 'Runtime dependencies', 'Deferred security work'] as $section) {
+    repositoryDocumentationAssert(
+        preg_match('/^## ' . preg_quote($section, '/') . '$/m', $verification) === 1,
+        "Security verification is missing section: {$section}."
+    );
+}
+foreach (['ST' => [1, 7, '%03d'], 'SSA' => [1, 20, '%02d'], 'AAPI' => [1, 9, '%02d'], 'DAST' => [1, 5, '%02d'], 'SAOH' => [1, 8, '%02d']] as $prefix => [$first, $last, $format]) {
+    for ($number = $first; $number <= $last; $number++) {
+        $finding = $prefix . '-' . sprintf($format, $number);
+        repositoryDocumentationAssert(str_contains($verification, "| {$finding} |"), "Findings register is missing {$finding}.");
+    }
+}
+repositoryDocumentationAssert(
+    preg_match('/^\| ST-003 \|[^\n]*\*\*Open/m', $verification) === 1
+        && preg_match('/^\| ST-004 \|[^\n]*\*\*Open/m', $verification) === 1,
+    'Findings register does not record ST-003 and ST-004 as open.'
+);
+$verificationText = (string)preg_replace('/\s+/', ' ', $verification);
+repositoryDocumentationAssert(
+    str_contains($verificationText, 'no Composer, npm, vendored')
+        && str_contains($verificationText, 'not a vulnerability scan')
+        && str_contains($verificationText, 'external penetration test has not been performed')
         && !is_file($root . '/composer.json')
         && !is_file($root . '/package.json'),
-    'Dependency security review status, limitations, or dependency inventory is inconsistent.'
+    'Security verification dependency scope, limitations, or dependency inventory is inconsistent.'
 );
 
 foreach (['Filesystem health', 'Session health'] as $removedCheck) {
@@ -132,7 +124,7 @@ $markdownAnchors = static function (string $path) use ($markdownSlug): array {
     preg_match_all('/^#{1,6}\s+(.+?)\s*#*$/m', (string)file_get_contents($path), $headings);
     return array_map($markdownSlug, $headings[1]);
 };
-foreach (array_merge([$root . '/README.md', $root . '/CHANGELOG.md'], glob($root . '/docs/*.md') ?: [], glob($root . '/docs/security/*.md') ?: []) as $document) {
+foreach (array_merge([$root . '/README.md', $root . '/CHANGELOG.md', $root . '/CONTRIBUTING.md'], glob($root . '/docs/*.md') ?: [], glob($root . '/docs/security/*.md') ?: []) as $document) {
     preg_match_all('/\]\(([^)\s]*)\)/', (string)file_get_contents($document), $links);
     foreach ($links[1] as $link) {
         if ($link === '' || preg_match('#^[a-z][a-z0-9+.-]*:#i', $link) === 1) continue;
@@ -166,6 +158,31 @@ foreach ([
     'queries/system/Databases.sql',
     'docs/SQL-Parser-Backend-Capability-Audit.md',
     'index.php',
+    'docs/CHANGELOG.md',
+    'docs/CONTRIBUTING.md',
+    'docs/Introduction.md',
+    'docs/Hosting.md',
+    'docs/Production-Validation.md',
+    'docs/Security-Testing.md',
+    'docs/Set-Operations.md',
+    'docs/Admin-Console-and-Configuration.md',
+    'docs/Admin-Runtime-and-Features.md',
+    'docs/API-Keys.md',
+    'docs/Authentication-and-User-Management.md',
+    'docs/Authorization-and-Roles.md',
+    'docs/Audit-and-Security-Logging.md',
+    'docs/Operational-Logging.md',
+    'docs/Validation-and-Errors.md',
+    'docs/Production-Error-Handling.md',
+    'docs/CRUD.md',
+    'docs/Write-Resource-Configuration.md',
+    'docs/SQL-Resource-Configuration.md',
+    'docs/SQL-Resource-Files.md',
+    'docs/security/Authorization-API-Security-Inventory.md',
+    'docs/security/DAST-Report.md',
+    'docs/security/Static-Security-Analysis-Inventory.md',
+    'docs/security/Security-Architecture-and-Operational-Hardening.md',
+    'docs/security/Dependency-Security-Review.md',
 ] as $obsolete) {
     repositoryDocumentationAssert(!file_exists($root . '/' . $obsolete), "Obsolete file remains: {$obsolete}");
 }

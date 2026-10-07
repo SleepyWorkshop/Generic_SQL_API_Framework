@@ -232,8 +232,39 @@ full-partition frame internally.
 
 ## Set operations
 
-UNION and UNION ALL are separate top-level actions, not properties of SELECT.
-See [Set operations](Set-Operations.md).
+UNION and UNION ALL are separate top-level actions, `union` and `unionAll`, not
+properties of SELECT:
+
+```json
+{
+  "action": "unionAll",
+  "queries": [
+    {
+      "source": { "table": "CurrentItems" },
+      "fields": ["ItemCode", "Description"]
+    },
+    {
+      "source": { "table": "ArchivedItems" },
+      "fields": ["ItemCode", "Description"]
+    }
+  ]
+}
+```
+
+`union` removes duplicate rows; `unionAll` keeps them. Each `queries[]` member is
+a JSON Query SELECT body without an `action` property.
+
+- The list must be non-empty, and explicit projections must have the same field
+  count. Wildcards are resolved through live metadata before execution; SQL
+  Server checks type compatibility.
+- Branches cannot contain `sort`, `pagination`, or `with`, and the combined
+  request has no top-level sort or pagination.
+- Success uses `Data Loaded Successfully`. Invalid shape or count is
+  `INVALID_REQUEST`; metadata, build, and execution failures are `QUERY_ERROR`.
+
+INTERSECT and EXCEPT exist only inside the builder and have no public action.
+Use a SQL Resource for server-owned INTERSECT, EXCEPT, or more complex set
+operations.
 
 ## Date, string, mathematical, and aggregate expressions
 

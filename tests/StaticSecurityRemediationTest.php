@@ -22,7 +22,7 @@ require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
 
 /*
  * Regression coverage for the v2.1.2 static security remediation
- * (docs/security/Static-Security-Analysis-Inventory.md).
+ * (docs/security/Security-Verification.md).
  */
 
 function remediationAssert(bool $condition, string $message): void

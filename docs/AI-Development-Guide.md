@@ -32,8 +32,10 @@ stubs, not evidence of multi-database support.
 | `app/Resources/` | SQL/write resource discovery and lookup |
 | `core/QueryEngine.php` | Prepared ODBC execution, timing, timeout, and cleanup |
 | `database/drivers/SqlServerDriver.php` | Connection construction and SQL Server driver behavior |
-| `config/*.example.json` | Secret-free bootstrap templates |
-| `config/sql-resources.php` | Discovery settings and optional execution metadata |
+| `config/*.example.json` | Secret-free reference templates for runtime configuration |
+| `config/sql-resources.php` | SQL Resource discovery root and exclusions |
+| `config/query-sources.php` | Deny-by-default table/view registry for JSON Query Mode and metadata |
+| `config/routine-resources.php` | Deny-by-default routine registry |
 | `config/write-resources.php` | Deny-by-default write registry |
 | `queries/system/` | Internal metadata SQL; excluded from public discovery but runtime-required |
 | `queries/reports/`, `queries/widgets/` | Dynamically discovered reviewed SQL resources |
@@ -46,11 +48,14 @@ The application API order is security-significant:
 
 ```text
 method/content type/CORS/body checks
+  -> LoggingMiddleware
+  -> 404 for admin.*, setup.createAdmin, auth.users.*, auth.apiKeys.*, auth.roles.list
+  -> ApplicationRuntimeMiddleware
   -> AuthenticationMiddleware
   -> ApiRateLimitMiddleware
-  -> administrator/frontend authorization boundaries
+  -> FrontendUserAuthorizationMiddleware
   -> CsrfProtectionMiddleware
-  -> LoggingMiddleware
+  -> (setup.*, auth.*, auth.frontendUsers.* dispatch here)
   -> AuthorizationMiddleware
   -> DatabaseAvailabilityMiddleware
   -> QueryRequestValidator
@@ -59,8 +64,11 @@ method/content type/CORS/body checks
   -> Response or ExceptionHandler
 ```
 
-Setup and authentication actions branch before query validation. Administrator
-actions are rejected by the public API and dispatched only by `admin/api.php`.
+Setup, session, and frontend-user actions branch before query authorization.
+Administrator and backend identity actions are rejected by the public API and
+dispatched only by `admin/api.php`, whose order is: body checks -> logging -> action allowlist ->
+`LocalAdminMiddleware` -> authentication -> rate limit ->
+`AdminAuthorizationMiddleware` -> CSRF -> validator and controller.
 Moving middleware can change security semantics; update attack-oriented tests
 when such a change is intentional.
 
@@ -86,13 +94,16 @@ when such a change is intentional.
 
 ## Configuration and generated state
 
-`RuntimeConfiguration` creates ignored JSON files from tracked examples. JSON
-writes use `JsonFileStore` locking and atomic replacement. Preserve schema
-validation and explicit migrations when changing a stored shape.
+`RuntimeConfiguration` creates missing runtime JSON files from built-in
+defaults in the directory named by `GENERIC_RUNTIME_CONFIG_DIR` (default
+`config/`; production keeps it outside the code tree). The tracked
+`config/*.example.json` files are secret-free reference templates. JSON writes
+use `JsonFileStore` locking and atomic replacement. Preserve schema validation
+and explicit migrations when changing a stored shape.
 
 Do not casually edit or commit:
 
-- `config/admin.json`, `auth.json`, `authorization.json`, `api-keys.json`,
+- `admin.json`, `auth.json`, `authorization.json`, `api-keys.json`,
   `installation.json`, `database-state.json`, or `application-runtime-state.json`;
 - `database/config/database.json`;
 - `runtime/secrets/`, `runtime/api/`, `runtime/sqlparser/`, or `runtime/health/`;
@@ -130,8 +141,10 @@ logs, backups without explicit protected handling, fixtures, or commits.
    by dispatching early without a documented reason.
 7. Return the standard `Response` envelope and stable error codes.
 8. Add positive, negative, authorization, disclosure, and regression coverage.
-9. Update `Action-Reference.md`, request/response docs, and capability/limitation
-   docs as applicable.
+9. Update `Action-Reference.md`, the request/response and error docs, the
+   capability matrix, and limitations as applicable. Admin actions belong in
+   `Admin-Console.md`; session and user actions in
+   `Authentication-and-Authorization.md`.
 
 ## Adding a SQL resource
 
@@ -166,7 +179,7 @@ Name them after behavior, not roadmap phases. Reuse fakes that avoid constructor
 opening ODBC connections. Worker scripts support deterministic concurrency tests
 and are not standalone suites.
 
-Run at minimum:
+Run at minimum (details in [Testing](Testing.md)):
 
 ```bash
 php tests/run.php
@@ -200,6 +213,15 @@ pre-existing user changes.
 - deleting dynamically discovered SQL or generated-state templates based only on
   missing static filename references.
 
-Use [Security Testing](Security-Testing.md), [Production Security and
-Deployment](Production-Security-and-Deployment.md), and [Limitations](Limitations.md)
-to keep known trust boundaries and residual risks explicit.
+Use [Security model](security/Security-Model.md), [Production security and
+deployment](Production-Security-and-Deployment.md), and [Limitations](Limitations.md)
+to keep trust boundaries and residual risks explicit. Record new security
+findings in [Security verification](security/Security-Verification.md).
+
+## Documentation rules
+
+- Reference documents describe current behavior only. Planned work goes in
+  [Roadmap](Roadmap.md); released changes go in `CHANGELOG.md` (under
+  `[Unreleased]` until a release is tagged).
+- Each topic has one authoritative document; link to it instead of repeating it.
+- Verify every technical claim against the code before documenting it.

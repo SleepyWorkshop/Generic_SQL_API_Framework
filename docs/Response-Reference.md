@@ -14,6 +14,7 @@ have a separate stable envelope.
     { "ItemCode": "A001", "ItemName": "Blue Pen" }
   ],
   "meta": {
+    "requestId": "7f4dd403d84c99e1",
     "page": 1,
     "pageSize": 25,
     "totalRows": 37,
@@ -28,6 +29,7 @@ have a separate stable envelope.
 | `success` | boolean | Always `true` in this envelope. |
 | `message` | string | Controller-specific success message. |
 | `data` | array | Result rows. It is always an array. |
+| `meta.requestId` | string | Request correlation ID, also sent as `X-Request-ID`. |
 | `meta.page` | integer/null | Requested `pagination.page`, otherwise `null`. |
 | `meta.pageSize` | integer/null | Requested `pagination.pageSize`, otherwise `null`. |
 | `meta.totalRows` | integer | Count supplied by pagination, otherwise returned-row count. |
@@ -71,6 +73,7 @@ Success messages are exact:
     }
   ],
   "meta": {
+    "requestId": "7f4dd403d84c99e1",
     "page": null,
     "pageSize": null,
     "totalRows": 0,
@@ -88,21 +91,7 @@ be present. Write data has one operation summary even though `rowsReturned` is 0
 
 ## Error
 
-```json
-{
-  "success": false,
-  "message": "Invalid request.",
-  "error": {
-    "code": "INVALID_REQUEST",
-    "details": [
-      { "path": "pagination.page", "message": "Must be a positive integer." }
-    ]
-  },
-  "data": []
-}
-```
-
-Errors never include `meta`. `data` is always an empty array. `details` is an
-array and may be empty. Database exception text and stack traces are not returned
-to the client. See [Validation, errors, and security](Validation-and-Errors.md)
-for status codes and handling guidance.
+Errors use a separate envelope with `success: false`, an empty `data` array,
+`error.code`, an `error.details` array, and `meta.requestId`. The envelope,
+every error code, and client handling guidance are in
+[Errors and validation](Errors-and-Validation.md).

@@ -1,24 +1,27 @@
 # Monitoring and health
 
-The monitoring implementation extends the runtime lifecycle health model with HTTP
-signals and authenticated diagnostics; it does not provide alerting, metrics
-storage, tracing, process supervision, or an external monitoring platform.
+The backend exposes public liveness and readiness probes and an authenticated
+detailed health check. It does not provide alerting, metrics storage, tracing,
+process supervision, or an external monitoring platform.
 
 ## Endpoints and access boundaries
 
 | Signal | Endpoint/action | Access | HTTP behavior | Cost |
 |---|---|---|---|---|
 | API liveness | `GET /health/live` | Public | `200` when PHP can respond | Constant-time; no configuration, filesystem, encryption, or SQL checks |
-| Managed-process compatibility | `GET /health` | Loopback built-in API/parser lifecycle | Existing `200` response including managed port/start metadata | Same lightweight liveness path |
+| Development process probe | `GET /health` | Used by the development process managers | `200` including version, port, and start metadata | Same lightweight liveness path |
 | API readiness | `GET /health/ready` | Public | `200` when ready, otherwise `503` | Local configuration/runtime/application checks plus any cached connectivity result; no SQL connection |
 | Detailed health | Admin action `admin.health` | Authenticated System Administrator (`admin.manage`) | Existing Admin JSON envelope | Local checks, managed-process probes, and a short-cached database test |
 
 The probes are identified by their final path segments, so the internal IIS
 routes `/api/health/live` and `/api/health/ready` behave exactly like
-`/health/live` and `/health/ready`. Only the bare development `/health` path
-returns managed-process metadata.
+`/health/live` and `/health/ready`. Any other path that reaches `health.php`
+returns the development process metadata. The Nginx example routes only the two
+probes; the IIS API application also allows direct `health.php` requests, which
+therefore return that metadata (SSA-14 in
+[Security verification](security/Security-Verification.md)).
 
-The public responses contain only a status, safe category, service/version, and
+The probe responses contain only a status, safe category, service/version, and
 the four readiness check results. They never return paths, credentials, keys,
 connection strings, exception messages, SQL, environment values, sessions,
 headers, or process command lines. Safe GET probes do not require CSRF tokens;
@@ -136,16 +139,15 @@ Server are four separate health layers. The production example maps only
 `/health/live` and `/health/ready` to the health entry point. The application
 does not inspect or control systemd, PHP-FPM workers, or Nginx.
 
-The PHP built-in server uses `api/router.php`; `/health` remains compatible with
-the existing process manager, while `/health/live` and `/health/ready` expose
-the new semantics.
+In development the PHP built-in server uses `api/router.php`; `/health` serves
+the process managers, while `/health/live` and `/health/ready` behave as in
+production.
 
 ## External monitoring boundary
 
 An uptime monitor, reverse proxy, or load balancer may call liveness/readiness.
-Detailed diagnostics remain an Admin-only operator surface. A future adapter
-could translate these signals for another monitoring product, but the framework
-does not implement Prometheus, alerting, centralized collection, tracing, or a
+Detailed diagnostics remain an Admin-only operator surface. The framework does
+not implement Prometheus, alerting, centralized collection, tracing, or a
 Windows/Linux monitoring agent.
 
 Production validation must exercise the deployed IIS or Nginx routes, service
@@ -154,8 +156,8 @@ database authentication failures, cache behavior across real workers, proxy
 timeouts, and monitoring cadence. Local regression tests do not validate a
 live SQL Server or multi-worker shared-filesystem deployment.
 
-The workspace result and exact target-host procedures are recorded
-in [Windows and Linux production validation](Production-Validation.md). In
+Target-host procedures are in
+[Production security and deployment](Production-Security-and-Deployment.md#operator-checklists). In
 production, API and SQL Parser infrastructure is explicitly externally managed
 while application availability remains Admin-controlled. A disabled runtime is
 an intentional application state, not a claim that IIS/Nginx/FastCGI or PHP-FPM

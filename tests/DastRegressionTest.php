@@ -3,7 +3,8 @@
 require_once __DIR__ . '/../app/Configuration/RuntimeConfiguration.php';
 
 /*
- * Regression tests for the v2.1.4 DAST findings (docs/security/DAST-Report.md).
+ * Regression tests for the v2.1.4 DAST findings (docs/security/Security-Verification.md;
+ * deferred dynamic testing in docs/security/Penetration-Test-Preparation.md).
  * The SQL Parser runs on the PHP built-in server with expose_php forced on, so
  * the PHP version header is only absent when the application removes it.
  *

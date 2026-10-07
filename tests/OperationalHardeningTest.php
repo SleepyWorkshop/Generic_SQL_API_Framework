@@ -5,7 +5,7 @@ require_once __DIR__ . '/../app/Deployment/ProductionValidator.php';
 
 /*
  * Regression coverage for the v2.1.5 security architecture and operational
- * hardening findings (docs/security/Security-Architecture-and-Operational-Hardening.md).
+ * hardening findings (docs/security/Security-Verification.md).
  *
  * SAOH-01: runtime state must live outside the code tree so the PHP worker never
  *          needs write access to Backend/config, which holds executable PHP

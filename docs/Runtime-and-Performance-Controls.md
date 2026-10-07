@@ -1,10 +1,10 @@
 # Runtime and performance controls
 
-Operational controls are stored under `runtime` in `config/admin.json` schema version 6. A System Administrator can edit them in **Configuration → Runtime & Performance**. The backend validates the complete runtime object before the existing atomic JSON writer replaces the file. A failed validation or write leaves the previous configuration intact.
+Operational controls are stored under `runtime` in `admin.json` (schema version 6) in the runtime configuration directory. A System Administrator can edit them in **Configuration → Runtime & Performance**. The backend validates the complete runtime object before the existing atomic JSON writer replaces the file. A failed validation or write leaves the previous configuration intact.
 
-Schema versions 1–5 migrate in place to version 6. Existing server, CORS, and authentication values are preserved and missing runtime/backup sections receive validated defaults. Runtime settings are loaded for new requests, so no API, SQL Parser, or Admin restart is required.
+Older schema versions migrate in place, preserving existing values and adding validated defaults. Settings apply to new requests; no API, SQL Parser, or Admin restart is required.
 
-## Implemented settings
+## Settings
 
 | Setting | Default | Valid range | Enforcement |
 |---|---:|---:|---|
@@ -32,7 +32,7 @@ The API limiter distinguishes authenticated sessions, supplied API keys after su
 
 Login protection continues to key failures by source address plus normalized username, uses the same response for known and unknown accounts, clears state after successful authentication, and rejects disabled accounts. Exceeding the configured login threshold returns HTTP 429 with `LOGIN_RATE_LIMITED`.
 
-The local file-backed implementation is suitable for the supported single-host runtime. It is not a distributed/global limiter across multiple application hosts or containers. Centralized rate-limit infrastructure belongs to a later deployment phase.
+The local file-backed implementation is suitable for the supported single-host runtime. It is not a distributed limiter across multiple application hosts or containers.
 
 ## Query timeout limitations
 
@@ -42,22 +42,12 @@ Every request owns its non-persistent ODBC connection and statements. Statement 
 
 Local file-backed API and login counters use per-identity exclusive locks and atomic complete-record replacement. Concurrent increments are preserved, login reset takes the same lock, and malformed records recover as a new empty window. This guarantee applies only to workers sharing one reliable local filesystem, not to multi-host deployments.
 
-## Audit decisions
+## Fixed values
 
-| Value | Previous location/default | Current behavior |
-|---|---|---|
-| SQL query timeout | `config/performance.php`, 45 seconds | Configurable and enforced per statement |
-| Login threshold/window/lockout | `SecurityConfiguration`, 5 / 900 / 300 | Configurable; existing limiter retained |
-| Session idle/absolute lifetime | `SecurityConfiguration`, 1,800 / 28,800 | Configurable; fixation and invalidation rules unchanged |
-| Page size | Positive integer only | Default and maximum configurable when pagination is requested |
-| JSON body size | No API/Admin application limit | Configurable at both front controllers |
-| General API rate limit | Not implemented | Configurable local file-backed limiter added |
-| SQL parser body limit | Parser-specific 200,000-byte protocol boundary | Kept parser-owned; not exposed as an API runtime control |
-| Expression recursion depth | Validator safety bound of 32 | Kept in code as a parser/security invariant |
-| CSRF retry count | One frontend compatibility retry | Kept in client code; not a server runtime threshold |
-| Frontend cache TTL/refresh intervals | Frontend/report definitions | Kept frontend-owned; not backend operational controls |
-| API-key count | No artificial limit | No limit introduced |
-| Connections/concurrent requests | Hosting process model | Local process contention is regression-tested; production IIS/FastCGI/Nginx/PHP-FPM capacity still requires load testing |
-| Cryptography, token entropy, identifiers, authorization | Security code and fixed role model | Never configurable |
+These are deliberately not runtime settings: the SQL Parser's 200,000-byte
+request limit, the expression recursion depth of 32, and all cryptography,
+token entropy, identifier rules, and authorization. There is no API-key count
+limit. Worker counts and concurrent connections are owned by IIS/FastCGI or
+PHP-FPM and must be sized by load testing.
 
 The bundled PHP development server has no production-grade worker or connection controls. Windows ODBC and Linux unixODBC behavior remains driver-dependent; no cursor-library or platform-specific connection change is introduced by these controls.

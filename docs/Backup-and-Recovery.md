@@ -23,7 +23,10 @@ config/api-keys.json
 database/config/database.json
 ```
 
-The database document must remain an AES-256-GCM encrypted envelope. Password
+These are logical paths: the `config/*.json` entries are read from and
+restored to the runtime configuration directory (`GENERIC_RUNTIME_CONFIG_DIR`),
+and `database/config/database.json` to its fixed location. The database document
+must remain an AES-256-GCM encrypted envelope. Password
 hashes and API-key secret hashes are configuration state, but plaintext
 passwords and one-time raw API-key secrets are never stored and therefore cannot
 enter a backup. The manifest contains the recovery-point ID, UTC creation time,
@@ -117,8 +120,8 @@ invoke the scheduled CLI, which records `trigger=scheduled` and
 `createdBy=scheduler`. The application does not run a PHP daemon and saving a
 schedule does not install an operating-system task.
 
-The Admin **Automatic Backups** settings are stored in schema-version 6
-`config/admin.json`: `enabled` is boolean, `frequency` is `hourly`, `daily`, or
+The Admin **Automatic Backups** settings are stored in `admin.json` (schema
+version 6) in the runtime configuration directory: `enabled` is boolean, `frequency` is `hourly`, `daily`, or
 `weekly`, `time` is `HH:MM`, and `retention` is an integer from 1 through 365.
 The page reports the latest scheduled attempt and the next configured run.
 

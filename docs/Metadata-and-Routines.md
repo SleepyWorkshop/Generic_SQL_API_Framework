@@ -28,6 +28,7 @@ Example response:
     { "COLUMN_NAME": "ItemCode", "DATA_TYPE": "varchar", "IS_NULLABLE": "NO" }
   ],
   "meta": {
+    "requestId": "7f4dd403d84c99e1",
     "page": null, "pageSize": null, "totalRows": 1,
     "rowsReturned": 1, "executionTime": 1.1
   }
@@ -38,10 +39,12 @@ Only `metadata.columns` accepts `source`, requiring `source.table`. The shared
 validator technically permits `source.alias`, but normalization discards it; omit
 it. Other metadata actions accept no fields beyond `action`.
 
-Frontends can use these endpoints to populate table/column pickers, but should not
-assume they authorize subsequent access. Metadata requires the server-owned
-`metadata.read` permission, but catalog objects are not individually scoped;
-subsequent query/write/routine authorization is evaluated independently.
+Frontends can use these endpoints to populate table/column pickers. Metadata
+requires `metadata.read` (or frontend access), and results are limited to the
+registered sources and routines the caller may use (see
+[Routine registry](#routine-registry)). Listing an object does not authorize
+other actions on it; query, write, and routine authorization are evaluated
+independently.
 
 ## Routine API
 
