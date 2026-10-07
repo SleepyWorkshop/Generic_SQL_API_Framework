@@ -502,6 +502,45 @@ penetration test. See the
 [Security architecture and operational hardening](security/Security-Architecture-and-Operational-Hardening.md)
 review.
 
+## v2.1.6 — Final Security Verification
+
+Status: Completed
+
+Final repository-level verification passed. It found no regression, no
+contradiction between the security documentation and the code, and no
+unresolved Critical or High finding.
+
+- **Tests:** the backend regression suite passes with and without a loaded
+  `php.ini`, as do the targeted security suites. All existing mutation checks
+  from v2.1.3, v2.1.4, and v2.1.5 are still caught.
+- **Static checks:** PHP lint and the documentation tests pass. A secret scan
+  of tracked files found only synthetic test values, example placeholders,
+  and the fixed login-timing placeholder hash.
+- **Documentation cross-check:** confirmed against the code for the Admin
+  loopback and `GENERIC_ADMIN_ENABLED` gates, the runtime configuration
+  directory, encryption-key handling, the query-source and routine
+  allowlists, the result-row limit, health readiness, SQL Parser routing,
+  session settings, backup signing, and production PHP settings.
+- **Findings:** every finding has a documented status.
+  - SSA-01 – SSA-12, AAPI-01 – AAPI-09, DAST-01 – DAST-02, and SAOH-01 –
+    SAOH-03 are resolved, cleared, documented, or accepted as recorded in
+    their reports.
+  - SSA-13 – SSA-20 remain deferred.
+  - AAPI-05 – AAPI-07, DAST-03 – DAST-05 (development only), and SAOH-04 –
+    SAOH-08 remain accepted.
+
+The external and deployed-host security testing deferred from v2.1.4 is still
+outstanding and was not performed here:
+- authenticated DAST;
+- session and rate-limit attack testing against a deployed environment;
+- live SQL injection testing;
+- TLS and deployed IIS and Nginx behavior;
+- the Admin loopback behind production hosting;
+- the external penetration test.
+
+See the [Penetration-test preparation](security/Penetration-Test-Preparation.md)
+handoff.
+
 ## Security Verification
 
 - Dependency security review (completed in v2.1.1)
@@ -511,7 +550,7 @@ review.
 - DAST / security scanning (partially completed in v2.1.4; dynamic testing deferred to the external penetration test)
 - Penetration-test preparation (completed in v2.1.4)
 - Security architecture review (completed in v2.1.5)
-- Final security verification report
+- Final security verification report (completed in v2.1.6; external penetration test still outstanding)
 
 ## Optional Security Enhancements
 
@@ -685,6 +724,7 @@ consume this API.
 | v2.1.3 | Authorization & API Security Testing | Completed |
 | v2.1.4 | DAST & Penetration-Test Preparation | Partially Completed / Deferred |
 | v2.1.5 | Security Architecture & Operational Hardening | Completed |
+| v2.1.6 | Final Security Verification | Completed |
 | v3.0 | Multi-Database Support | Planned |
 | v3.1 | Developer Experience & API Integration | Planned |
 | v4.0 | Backend Platform & Enterprise Capabilities | Planned / Uncommitted |

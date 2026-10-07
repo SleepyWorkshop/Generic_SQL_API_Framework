@@ -135,6 +135,11 @@ All notable changes are recorded here. The project follows semantic versioning.
   - Accepted and documented: shared worker identity, backup-signing key
     custody, `db_datareader` breadth, external log rotation, and single-host
     security state.
+- Completed the v2.1.6 final security verification at the repository level.
+  - Tests, mutation checks, lint, and documentation checks all pass.
+  - Every SSA, AAPI, DAST, and SAOH finding has a documented status.
+  - The external penetration test and deployed-host testing deferred from
+    v2.1.4 remain outstanding.
 
 ## [1.0.0] - Initial release
 
