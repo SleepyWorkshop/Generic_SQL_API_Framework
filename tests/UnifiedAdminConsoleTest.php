@@ -271,7 +271,7 @@ try {
         && str_contains($adminJavaScript, 'Sign in to continue to your workspace.'), 'Generic Admin login copy is missing.');
     preg_match('/function loginView\(\).*?content\.innerHTML = (`.*?`);/s', $adminJavaScript, $loginViewMatch);
     unifiedAdminAssert(isset($loginViewMatch[1])
-        && str_contains($loginViewMatch[1], 'Generic SQL API')
+        && str_contains($loginViewMatch[1], 'Generic SQL REST API')
         && !str_contains($loginViewMatch[1], 'brand-mark'), 'Admin login branding still renders the G logo or omits the application name.');
     unifiedAdminAssert(str_contains($adminJavaScript, 'data-password-toggle'), 'Admin login password visibility control is missing.');
     unifiedAdminAssert(!str_contains($adminJavaScript, '2.0.0-dev')

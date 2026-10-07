@@ -148,7 +148,7 @@ found. Details are in [Security verification](Security-Verification.md).
 
 - **Open:** ST-003 (no API-level table or column authorization; the database
   login's grants are the data boundary) and ST-004 (no filter-count limit).
-- **Superseded by design (v2.2):** SSA-01, SSA-03, and SSA-07. There are no
+- **Superseded by design (v2.1.0):** SSA-01, SSA-03, and SSA-07. There are no
   table, write, or routine registries; report only a way past the compensating
   controls (catalog confirmation, system-object rejection, permission checks).
 - **Deferred informational:** SSA-13 – SSA-16 and SSA-18 – SSA-20. SSA-14 means `health.php` paths other than the

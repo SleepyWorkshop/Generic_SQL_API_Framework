@@ -1,71 +1,168 @@
-# Generic SQL API Framework
+# Generic SQL REST API Framework
 
-Generic SQL API Framework is a PHP backend that exposes a Microsoft SQL Server
-database through one validated JSON API. Clients describe reads, reviewed
-reports, writes, routine calls, and metadata lookups as JSON; the backend
-validates them against a fixed contract and server-owned allowlists, builds
-parameterized SQL, and returns a standard JSON envelope. Clients never send raw
-SQL, and no per-resource controller is needed.
+A generic PHP REST API framework for SQL databases, providing secure JSON-based
+database access through authentication, API permissions, dynamic queries, CRUD
+operations, filtering, sorting, pagination, and database-enforced access
+control.
 
-It is for teams that build reporting frontends and internal tools on SQL Server
-and want one secured, configurable data API instead of hand-written endpoints.
-Dashboards and report screens live in separate frontend projects.
+This is **not an application-specific API**. It is a reusable backend layer that
+sits between client applications (reporting frontends, inventory, POS, ERP, or
+any other SQL application) and a SQL database. Clients describe what they need
+as JSON; the framework authenticates the caller, checks its API permissions,
+validates the request, builds parameterized SQL, and returns a standard JSON
+response. Client applications do not need backend code or backend registrations
+for their tables.
+
+**Database support:** Microsoft SQL Server through PHP ODBC is the only
+implemented database provider. Multi-database support is planned for v3.0.0.
 
 ## Release status
 
-The latest completed release is **v2.1.0**, the security verification and
-operational hardening milestone that followed **v2.0.0** (2026-10-05). The `dev`
-branch is the **v2.2** development line (`2.2.0-dev`): generic authorization and
-data-access simplification, listed under `[Unreleased]` in
-[CHANGELOG.md](CHANGELOG.md). Planned work is in the [Roadmap](docs/Roadmap.md).
+| Version | Status |
+|---|---|
+| v1.0.0 | Completed (2026-07-27) |
+| v2.0.0 | Completed (2026-10-05) |
+| **v2.1.0** | **Completed — current version** |
+| v3.0.0 | Unreleased / upcoming |
 
-## Capabilities
+Release history is in [CHANGELOG.md](CHANGELOG.md); planned work is in the
+[Roadmap](docs/Roadmap.md).
 
-- **JSON Query Mode:** validated SELECT with joins, grouping, HAVING, sorting,
-  pagination, CTEs, UNION/UNION ALL, window functions, CASE, arithmetic, and an
-  allowlist of SQL Server functions, on any table or view of the configured
-  database.
-- **SQL Resource Mode:** reviewed `.sql` files under `queries/`, discovered
-  automatically and executed by ID with validated runtime filters, sorting, and
-  pagination.
-- **Write API:** single-object INSERT, UPDATE, DELETE, and UPSERT on any user
-  table, validated against live column metadata.
-- **Routines and metadata:** stored procedures, scalar and table-valued
-  functions called by name, and table, column, view, procedure, and schema
-  metadata.
-- **Security:** `none`, `session`, `api_key`, or `session+api_key`
-  authentication; one role-and-permission authorization path for every caller,
-  with no application-specific table or resource registration; managed
-  one-time-reveal API keys; CSRF; exact-origin CORS; login and API rate limits;
-  encrypted database configuration; audit logging.
-- **Operations:** a loopback Admin Console for setup, configuration, users, API
-  keys, health, availability, and application backups; liveness and readiness
-  probes; production-safe errors with request IDs.
+## What it provides
+
+- **REST-style HTTP/JSON API.** One `POST` endpoint (`api/index.php`) accepts a
+  JSON object whose `action` selects the operation; every response uses the
+  same JSON envelope with a request ID.
+- **Authentication:** sessions, managed API keys (`X-API-Key`), a legacy shared
+  key, or anonymous mode, configured as `none`, `session`, `api_key`, or
+  `session+api_key`.
+- **Role-based API permissions:** fixed roles that grant operation permissions.
+- **JSON queries** (`select`, `union`, `unionAll`): joins, grouping, HAVING,
+  CTEs, window functions, CASE, arithmetic, and an allowlist of SQL Server
+  functions, over any table or view of the configured database.
+- **SQL Resources** (`sql`): server-authored `.sql` files under `queries/`,
+  discovered automatically and executed by ID with validated runtime controls.
+- **Generic CRUD** (`insert`, `update`, `delete`, `upsert`) on any user table.
+- **Routines:** stored procedures (`procedure`), scalar functions (`function`),
+  and table-valued functions (`tableFunction`), called by name.
+- **Metadata:** tables, columns, views, procedures, and schema listings.
+- **Filtering, sorting, and pagination** for queries and SQL Resources.
+- **Request validation and SQL safety:** strict request schemas, identifier
+  validation, catalog checks, and prepared parameters for every value.
+- **Admin Console and Admin API:** a loopback-only management plane for setup,
+  database configuration, users, roles, API keys, runtime settings, System
+  Health, availability controls, and application configuration backups.
+- **Health endpoints:** public `/health/live` and `/health/ready`.
 - **SQL Parser:** a separate, non-executing tool that converts supported SQL
-  into API request JSON.
-
-**Database support:** Microsoft SQL Server through PHP ODBC is the only
-supported provider. Other files in `database/drivers/` are empty stubs.
+  into request JSON.
 
 ## Architecture
 
 ```text
-Client
-  → IIS + PHP FastCGI  |  Nginx + PHP-FPM  |  PHP built-in server (development)
-  → api/index.php  (public API)    admin/api.php  (loopback Admin)    sqlparser/
-  → middleware: availability, authentication, rate limit, CSRF, authorization
-  → validator → normalizer → controller → service → repository → builders
-  → QueryEngine → ODBC → SQL Server
+Client application
+        |
+        v
+Generic SQL REST API
+        |
+        +-- Authentication       (who is calling?)
+        +-- API permissions      (which operation may this principal perform?)
+        +-- Request validation   (is the request well-formed?)
+        +-- SQL safety           (identifiers, catalog checks, parameters)
+        |
+        v
+Database connection (PHP ODBC)
+        |
+        v
+Database login permissions   (which objects and operations the login may use)
+        |
+        v
+SQL database
 ```
 
-| HTTP surface | Entry point | Access |
-|---|---|---|
-| Public API | `api/index.php` | Configured API authentication and role authorization |
-| Health probes | `api/health.php` | Public, minimal `/health/live` and `/health/ready` |
-| Admin Console and API | `admin/index.php`, `admin/api.php` | Loopback only, System Administrator session, CSRF |
-| SQL Parser | `sqlparser/index.php` | Loopback or internal only; no database access |
+**The API controls** who is calling, whether the caller is authenticated, which
+API operation the principal may perform, whether the request is valid, and
+whether the generated SQL is safe.
 
-A minimal request:
+**The database controls** which database, schemas, tables, views, columns
+(where the database supports column permissions), and routines the configured
+login can use, and whether it may INSERT, UPDATE, or DELETE.
+
+The API does not keep a second copy of database-object permissions. There are no
+application-specific table, write-target, or routine registrations.
+
+Production runs under IIS with PHP FastCGI or Nginx with PHP-FPM. See
+[Architecture](docs/Architecture.md).
+
+## Authorization
+
+Sessions, API keys, the legacy key, and anonymous mode all resolve to the same
+`Principal`, and one authorization step decides every request from that
+principal's role permissions. The authentication method never changes the
+decision.
+
+| Permission | Allows |
+|---|---|
+| `data.read` | `select`, `union`, `unionAll` |
+| `data.write` | `insert`, `update`, `delete`, `upsert` |
+| `sql.execute` | `sql` (SQL Resources) |
+| `metadata.read` | `metadata.*` |
+| `routine.execute` | `function`, `tableFunction` |
+| `routine.execute` + `data.write` | `procedure` (stored procedures may modify data) |
+| `frontend.read` | Reads, SQL Resources, and metadata for frontend users |
+| `frontend.users.manage` | Frontend user management |
+| `admin.manage` | The Admin API |
+
+Roles: Read Only, Data Operator, System Administrator, Application
+Administrator (frontend), and the API-key-only API Administrator. See
+[Authentication and authorization](docs/Authentication-and-Authorization.md).
+
+The **Admin API** (`admin/api.php`) is a separate management plane: it is
+reachable only from loopback, only with `GENERIC_ADMIN_ENABLED=1` on the Admin
+worker, and only for a System Administrator session. Data permissions such as
+`data.read` or `data.write` never grant access to it.
+
+## The database as the data access boundary
+
+The configured database login is the data access boundary. For example:
+
+```text
+API principal (data.read, data.write)
+        |
+        v
+Generic SQL REST API
+        |
+        v
+DB login: generic
+        +-- SELECT Customers   allowed
+        +-- SELECT Orders      allowed
+        +-- UPDATE Orders      allowed
+        +-- DELETE Orders      denied by the database
+        +-- SELECT Salaries    denied by the database
+        |
+        v
+SQL database
+```
+
+API permissions and database permissions have different jobs. The API decides
+which kinds of operation a principal may request; the database decides which
+objects that request can actually reach. Grant the login only what client
+applications should be able to use.
+
+**Shared database login.** When many API users share one database login, the
+database sees one identity. If Alice, Bob, and John all go through
+`generic_db_user`, each of them can reach exactly what `generic_db_user` can;
+the database cannot tell them apart. When per-user row or object isolation is
+required, add a mechanism for it, such as separate database logins for separate
+client applications, database row-level security, or application-level
+authorization. This is an architectural consideration of the design, not a
+defect.
+
+## Queries and SQL Resources
+
+JSON queries work on any table or view that the database catalog confirms;
+system objects and other databases never resolve. Filtering, sorting, and
+pagination are generic request features validated for safety; they are not
+authorization rules.
 
 ```json
 {
@@ -78,11 +175,62 @@ A minimal request:
 }
 ```
 
-Requests are `POST` with `Content-Type: application/json`. API keys are sent
-only as `X-API-Key: gsk_...`. See [Architecture](docs/Architecture.md) and the
-[HTTP API](docs/API.md).
+SQL Resources are server-authored SQL files. `config/sql-resources.php` sets the
+discovery root (`queries/`) and the excluded directories (by default `system`).
+It is not an authorization registry: any caller with `sql.execute` or
+`frontend.read` can run every discovered resource. See
+[SQL Resource Mode](docs/SQL-Resource-Mode.md).
 
-## Deployment models
+## Generic CRUD
+
+Write requests name a database table instead of an application-specific
+resource:
+
+```json
+{
+  "action": "insert",
+  "table": "dbo.Customers",
+  "data": { "CustomerCode": "C001", "Name": "John" }
+}
+```
+
+- Any user table the configured login can use is a valid target; unknown
+  tables, system schemas, and cross-database names are rejected.
+- Columns, types, nullability, and generated columns come from live database
+  metadata; identity columns are detected and returned as `generatedId`.
+- UPDATE and DELETE require a non-empty filter.
+- UPSERT `keys` must match the table's primary key or an unfiltered unique
+  index.
+- Only INSERT, UPDATE, DELETE, and MERGE statements are generated; DDL is
+  never generated.
+
+See [Write API](docs/Write-API.md).
+
+## Routines
+
+Routines are called by name and must exist as a user routine of the requested
+kind in the configured database. Functions and table-valued functions need
+`routine.execute`; stored procedures need `routine.execute` and `data.write`
+because they may modify data, and session callers must send a CSRF token. See
+[Metadata and routines](docs/Metadata-and-Routines.md).
+
+## Security
+
+- Authentication with hardened sessions and one-time-reveal, hash-only API keys.
+- Role-based API permissions through a single authorization path.
+- CSRF protection for session-authenticated changes; exact-origin CORS.
+- Strict request validation, SQL identifier validation, catalog checks, and
+  prepared/parameterized SQL execution.
+- Database-level permissions as the data access boundary.
+- AES-256-GCM encrypted database configuration with an externally supplied key.
+- Login and API rate limits, result-size limits, and production-safe errors.
+- A separate, loopback-only management plane.
+- Audit and operational logging, and health endpoints.
+
+The security model and verification history are in
+[docs/security/](docs/security/Security-Model.md).
+
+## Deployment
 
 | Model | Use | Guide |
 |---|---|---|
@@ -93,24 +241,23 @@ only as `X-API-Key: gsk_...`. See [Architecture](docs/Architecture.md) and the
 Production requires PHP 8.2 or newer with ODBC, OpenSSL, session, JSON, and
 OPcache; a Microsoft ODBC Driver for SQL Server; `GENERIC_APP_ENV=production`;
 `GENERIC_RUNTIME_CONFIG_DIR` outside the code tree; and
-`GENERIC_SQL_API_ENCRYPTION_KEY` supplied through the worker environment. The
-Admin Console and SQL Parser must never be exposed publicly. Application backups
-cover configuration only; SQL Server backup is an operator responsibility.
+`GENERIC_SQL_API_ENCRYPTION_KEY` supplied through the worker environment. Never
+expose the Admin Console or SQL Parser publicly. Application backups cover
+configuration only; SQL Server backup is an operator responsibility.
 
 ## Where to start
 
-- **Frontend or API client developers:** [HTTP API](docs/API.md),
+- **Client developers:** [HTTP API](docs/API.md),
   [Action reference](docs/Action-Reference.md), and
   [Frontend integration](docs/Frontend-Integration.md).
-- **Operators:** [Local development](docs/Local-Development.md) to try it, then
-  the deployment guide for your platform and
-  [Admin Console](docs/Admin-Console.md).
+- **Operators:** [Local development](docs/Local-Development.md), the deployment
+  guide for your platform, and [Admin Console](docs/Admin-Console.md).
 - **Security reviewers:** [Security model](docs/security/Security-Model.md) and
   [Security verification](docs/security/Security-Verification.md).
 - **Maintainers and coding agents:** [AI development guide](docs/AI-Development-Guide.md),
   [Testing](docs/Testing.md), and [CONTRIBUTING.md](CONTRIBUTING.md).
 
-The full [documentation map](docs/README.md) lists every document.
+The [documentation map](docs/README.md) lists every document.
 
 ## Tests
 
@@ -129,7 +276,7 @@ See [Testing](docs/Testing.md).
 | `api/`, `admin/`, `sqlparser/` | HTTP entry points and the Admin and SQL Parser UIs |
 | `app/` | Middleware, request validation, controllers, services, repositories, builders, security, runtime, health, backup |
 | `core/`, `database/` | Query engine, responses, logging, and the SQL Server driver |
-| `config/` | Shipped registries and `*.example.json` templates |
+| `config/` | Application settings, SQL Resource discovery settings, and `*.example.json` templates |
 | `queries/` | SQL Resources and internal metadata SQL (`queries/system/`) |
 | `deployment/` | IIS, Nginx, and production PHP templates |
 | `scripts/` | Runtime control, backup, database check, and production validation CLIs |

@@ -1,6 +1,6 @@
 # Security verification
 
-This is the security verification record for the Generic SQL API Framework
+This is the security verification record for the Generic SQL REST API Framework
 backend: what was verified, how, every finding with its current status, and
 the security work that remains. Current controls are described in
 [Security model](Security-Model.md); the outstanding external test is scoped in
@@ -12,11 +12,11 @@ is reproduced here.
 ## Current status
 
 - No Critical or High finding is open.
-- v2.2 (in development) removed the v2.1.2 registry controls for SSA-01, SSA-03,
-  and SSA-07 by design: authorization is now role permission only, and the
-  database login's permissions are the data boundary. Their status below is
-  **Superseded**, with the controls that replace them. See
-  [v2.2 authorization change](#v22-authorization-change).
+- The completed v2.1.0 architecture replaced the v2.1.2 registry controls for
+  SSA-01, SSA-03, and SSA-07 by design: authorization is role permission only,
+  and the database login's permissions are the data boundary. Their status
+  below is **Superseded**, with the controls that replace them. See
+  [Generic authorization model](#generic-authorization-model-v210).
 - Every finding below has a recorded status. Open items are design limitations,
   hardening opportunities, or accepted risks, each documented in
   [Security model](Security-Model.md#accepted-risks-and-deployment-responsibilities)
@@ -71,7 +71,7 @@ opportunity), **Deferred** (not in an approved remediation scope yet).
 |---|---|---|---|---|
 | ST-001 | Medium | Unauthenticated or invalid-key requests returned `401` before the API rate limiter, bypassing the limit | Fixed | The anonymous address identity is consumed before `401`. `SecurityTestingTest` |
 | ST-002 | Low | CORS origin validation accepted userinfo, query, or fragment unless all were present | Fixed | Each forbidden URL component is rejected independently. `SecurityTestingTest` |
-| ST-003 | Medium | No per-role read-column authorization | **Open — design limitation** | Authorization is role permission only (v2.2): a principal with `data.read` can read every column of every table or view the database login can read. Restrict exposure with the login's grants and least-privilege views or SQL Resources; API-level resource or column isolation would be a new public-contract feature and is not planned for v2.2. |
+| ST-003 | Medium | No per-role read-column authorization | **Open — design limitation** | Authorization is role permission only (v2.1.0): a principal with `data.read` can read every column of every table or view the database login can read. Restrict exposure with the login's grants and least-privilege views or SQL Resources; API-level resource or column isolation would be a new public-contract feature and is not planned for v2.2. |
 | ST-004 | Low | No independent filter-count limit | **Open — hardening opportunity** | Still no separate limit in the validators. Bounded by the request body limit, API rate limit, query timeout, and worker limits. Measure representative filter usage before adding one. |
 | ST-005 | Low | Rate-limit state is single-host | Accepted | Exact only for workers sharing one local filesystem; see SAOH-08 |
 | ST-006 | Informational | Plaintext database configuration remains readable for compatibility | Accepted | Production must save or migrate to the encrypted envelope |
@@ -81,13 +81,13 @@ opportunity), **Deferred** (not in an approved remediation scope yet).
 
 | ID | Severity | Finding | Status | Resolution / regression coverage |
 |---|---|---|---|---|
-| SSA-01 | High | Routine actions could execute any stored procedure or function | Superseded (v2.2) | The v2.1.2 routine registry was removed. Routines must exist as user routines of the requested kind in the configured database; `sys`/`INFORMATION_SCHEMA` schemas, cross-database names, and `sp_`/`xp_` system procedures are rejected; procedures require `routine.execute` plus `data.write` and CSRF; the login's `EXECUTE` grants bound the rest. `StaticSecurityRemediationTest`, `AuthorizationAndApiKeyTest` |
+| SSA-01 | High | Routine actions could execute any stored procedure or function | Superseded (v2.1.0) | The v2.1.2 routine registry was removed. Routines must exist as user routines of the requested kind in the configured database; `sys`/`INFORMATION_SCHEMA` schemas, cross-database names, and `sp_`/`xp_` system procedures are rejected; procedures require `routine.execute` plus `data.write` and CSRF; the login's `EXECUTE` grants bound the rest. `StaticSecurityRemediationTest`, `AuthorizationAndApiKeyTest` |
 | SSA-02 | High | First-run administrator creation was public on the API | Fixed | `setup.createAdmin` is Admin-API-only and gated. `StaticSecurityRemediationTest` |
-| SSA-03 | Medium | JSON Query Mode could read any object the SQL login could read | Superseded (v2.2) | The v2.1.2 query-source registry was removed by design: `data.read` reaches every user table or view the login can read. Sources must be confirmed by the database catalog, so system objects and other databases never resolve. Data exposure is bounded by the login's grants (ST-003). `StaticSecurityRemediationTest` |
+| SSA-03 | Medium | JSON Query Mode could read any object the SQL login could read | Superseded (v2.1.0) | The v2.1.2 query-source registry was removed by design: `data.read` reaches every user table or view the login can read. Sources must be confirmed by the database catalog, so system objects and other databases never resolve. Data exposure is bounded by the login's grants (ST-003). `StaticSecurityRemediationTest` |
 | SSA-04 | Medium | User and API-key administration exposed on the public API | Fixed | `auth.users.*`, `auth.apiKeys.*`, `auth.roles.list` are Admin-API-only. `StaticSecurityRemediationTest` |
 | SSA-05 | High | An administrator password hash was present in pushed Git history | Cleared | The credential was rotated on 2026-10-06 and verified not to match the historical hash. History was not rewritten. |
-| SSA-06 | Low | `frontend.read` is not narrowed by SQL Resource scopes | Obsolete (v2.2) | Per-role SQL Resource scopes no longer exist; `sql.execute` and `frontend.read` both run any discovered resource. `StaticSecurityRemediationTest`, `AuthorizationApiCoverageTest` |
-| SSA-07 | Low | SQL Resource runtime filters could test non-exposed columns | Superseded (v2.2) | Runtime mappings must reference a top-level source of the authored statement and catalog-confirmed columns; the query-source check was removed with the registry. A caller with `sql.execute` can filter on columns of the resource's top-level tables. `StaticSecurityRemediationTest`, `SqlResourceFilteringTest` |
+| SSA-06 | Low | `frontend.read` is not narrowed by SQL Resource scopes | Obsolete (v2.1.0) | Per-role SQL Resource scopes no longer exist; `sql.execute` and `frontend.read` both run any discovered resource. `StaticSecurityRemediationTest`, `AuthorizationApiCoverageTest` |
+| SSA-07 | Low | SQL Resource runtime filters could test non-exposed columns | Superseded (v2.1.0) | Runtime mappings must reference a top-level source of the authored statement and catalog-confirmed columns; the query-source check was removed with the registry. A caller with `sql.execute` can filter on columns of the resource's top-level tables. `StaticSecurityRemediationTest`, `SqlResourceFilteringTest` |
 | SSA-08 | Low | Loopback and rate-limit identity rely on `REMOTE_ADDR` | Documented | Same-host proxies in front of the entry points are forbidden by the deployment guide |
 | SSA-09 | Low | ODBC driver auto-detection could fall back to legacy drivers | Fixed | Production uses only ODBC Driver 18/17 and reports weakened transport. `StaticSecurityRemediationTest` |
 | SSA-10 | Informational | Some query literals are inlined with quote doubling | No change | No exploitable path; edge-case tests added. `StaticSecurityRemediationTest` |
@@ -97,7 +97,7 @@ opportunity), **Deferred** (not in an approved remediation scope yet).
 | SSA-14 | Informational | `health.php` paths other than `/health/live` and `/health/ready` return version, port, and start time; IIS allows direct `/api/health.php` | Deferred | Unchanged; Nginx maps only the two probes |
 | SSA-15 | Informational | Login throttling is per address plus username only | Deferred | Unchanged; the API rate limit partly offsets it |
 | SSA-16 | Informational | Anonymous `auth.csrf` calls create sessions on demand | Deferred | Unchanged; bounded by the API rate limit |
-| SSA-17 | Informational | CSRF did not cover routine actions | Fixed (v2.2) | Every stored procedure call requires CSRF for session callers; scalar and table-valued functions cannot modify data and stay unprotected, like `select`. `ApiSecurityHardeningTest` |
+| SSA-17 | Informational | CSRF did not cover routine actions | Fixed (v2.1.0) | Every stored procedure call requires CSRF for session callers; scalar and table-valued functions cannot modify data and stay unprotected, like `select`. `ApiSecurityHardeningTest` |
 | SSA-18 | Informational | AES-GCM envelopes carry no associated data | Deferred | Unchanged |
 | SSA-19 | Informational | Dynamic controller dispatch in `api/index.php` | Deferred | Reached only with normalizer-fixed values |
 | SSA-20 | Informational | CI uses tag-pinned actions and only PHP 8.2 | Deferred | Unchanged |
@@ -108,7 +108,7 @@ opportunity), **Deferred** (not in an approved remediation scope yet).
 |---|---|---|---|---|
 | AAPI-01 | High | Application Administrators could take over or alter backend-only accounts | Fixed | Frontend user management refuses backend identities for every actor. `AuthorizationBoundaryTest`, `FrontendUserMutationAuthorizationTest` |
 | AAPI-02 | Medium | System Administrator identities were manageable through the public API | Fixed | Same control. `AuthorizationBoundaryTest`, `FrontendUserMutationAuthorizationTest` |
-| AAPI-03 | Low | Routine actions were not CSRF-protected | Fixed | Write routines required CSRF from v2.1.3; since v2.2 every stored procedure does. `ApiSecurityHardeningTest` |
+| AAPI-03 | Low | Routine actions were not CSRF-protected | Fixed | Write routines required CSRF from v2.1.3; under the final v2.1.0 model every stored procedure does. `ApiSecurityHardeningTest` |
 | AAPI-04 | Low | Username enumeration and System Administrator profile disclosure to frontend administrators | Fixed | Minimized profiles and uniform not-found responses; `409` on duplicate create/rename accepted. `ApiSecurityHardeningTest` |
 | AAPI-05 | Informational | Password changes do not require the current password | Accepted | No self-service or recovery flow; changes are administrator resets. `ApiSecurityHardeningTest` |
 | AAPI-06 | Informational | API key privileges are independent of the owner's role | Accepted | Owner must exist and be enabled. `ApiSecurityHardeningTest` |
@@ -139,10 +139,10 @@ opportunity), **Deferred** (not in an approved remediation scope yet).
 | SAOH-07 | Informational | Log rotation, retention, and central collection are external | Accepted | Deployment responsibility |
 | SAOH-08 | Informational | Security state is single-host | Accepted | Keep one application host |
 
-### v2.2 authorization change
+### Generic authorization model (v2.1.0)
 
-v2.2 replaces mandatory application-specific registries with generic
-authorization. It is a design decision, not a verification activity, and is
+The completed v2.1.0 architecture replaces the mandatory application-specific
+registries with generic authorization. It is a design decision, not a verification activity, and is
 covered by the regression suite (`AuthorizationAndApiKeyTest`,
 `AuthorizationApiCoverageTest`, `CrudOperationsTest`,
 `StaticSecurityRemediationTest`, `ApiSecurityHardeningTest`).

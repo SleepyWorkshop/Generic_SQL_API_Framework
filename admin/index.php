@@ -35,7 +35,7 @@ $adminUrl = static fn (string $path): string => htmlspecialchars($adminBasePath 
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Generic SQL API · Administration</title>
+    <title>Generic SQL REST API · Administration</title>
     <link rel="stylesheet" href="<?= $adminUrl('assets/admin.css') ?>">
     <link rel="stylesheet" href="<?= $adminUrl('assets/service-controls.css') ?>">
 </head>
@@ -43,7 +43,7 @@ $adminUrl = static fn (string $path): string => htmlspecialchars($adminBasePath 
 <div class="shell">
     <aside class="sidebar" id="sidebar" aria-label="Administration navigation">
         <div class="sidebar-header">
-            <span class="sidebar-brand">Generic SQL API</span>
+            <span class="sidebar-brand">Generic SQL REST API</span>
             <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Collapse navigation" aria-expanded="true" aria-controls="navigation"><span aria-hidden="true">☰</span></button>
         </div>
         <nav id="navigation" hidden>

@@ -322,7 +322,7 @@ are in [Security verification](Security-Verification.md).
 - **No API-level resource isolation.** Authorization is role permission only;
   per-table, per-column, per-routine, and per-SQL-Resource restrictions are left
   to the database login's permissions (ST-003; SSA-01, SSA-03, SSA-07 superseded
-  in v2.2).
+  in v2.1.0).
 - **Password change** does not require the current password (there is no
   self-service or recovery flow; changes are administrator resets); a managed
   API key keeps the role it was created with even if its owner is demoted,

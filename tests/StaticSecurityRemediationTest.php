@@ -320,7 +320,7 @@ try {
         (new LocalAdminMiddleware())->handle(['action' => $action]);
     }
 
-    // SSA-01 (V2.2): routines are not registered. A routine name resolves only to
+    // SSA-01 (v2.1.0 generic authorization): routines are not registered. A routine name resolves only to
     // a user routine of the matching type in the configured database's catalog,
     // and argument counts follow its declared parameters.
     $routineMetadata = new RemediationMetadata();
@@ -382,7 +382,7 @@ try {
     remediationRejects(fn () => $routineAuthorization->handle($routineRequest('function', 'dbo.Score')),
         'AUTHORIZATION_DENIED', 'Frontend access authorized a routine.');
 
-    // SSA-03 (V2.2): JSON Query Mode has no table registry. Any table or view the
+    // SSA-03 (v2.1.0 generic authorization): JSON Query Mode has no table registry. Any table or view the
     // configured database's catalog confirms is readable with data.read, in
     // every query position; names the catalog does not confirm (system objects,
     // other databases, unknown names) never reach SQL execution.
@@ -449,7 +449,7 @@ try {
     remediationAssert(array_column($metadata->getProcedures()['data'], 'ROUTINE_NAME') === ['ReadReport', 'sp_secret', 'Other'], 'Procedure metadata was filtered by a registry.');
     remediationAssert($metadata->getColumns('Secret')['data'] !== [] && $metadata->tableExists('Secret'), 'Column metadata required a registration.');
 
-    // SSA-07 (V2.2): SQL Resource runtime mappings resolve against the authored
+    // SSA-07 (v2.1.0 generic authorization): SQL Resource runtime mappings resolve against the authored
     // statement's top-level sources and the catalog. A qualifier that names no
     // top-level source (for example a derived table) cannot be placed.
     $resourceDirectory = $directory . '/resources';
@@ -571,7 +571,7 @@ try {
         && !str_contains($caseQuery['sql'], "OR '1'") && !str_contains($caseQuery['sql'], "\0"),
         'Public CASE values were inlined instead of bound.');
 
-    // SQL Resources (V2.2): sql.execute or frontend access runs any discovered
+    // SQL Resources (v2.1.0 generic authorization): sql.execute or frontend access runs any discovered
     // resource; there are no per-role SQL Resource scopes. Callers without
     // either permission are denied.
     remediationAssert(!array_key_exists('sqlResources', (new AuthorizationRepository())->load()['roles']['read-only']),

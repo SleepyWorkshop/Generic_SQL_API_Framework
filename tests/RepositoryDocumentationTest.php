@@ -18,9 +18,9 @@ $databaseStateExample = json_decode((string)file_get_contents($root . '/config/d
 $applicationRuntimeExample = json_decode((string)file_get_contents($root . '/config/application-runtime-state.example.json'), true, 512, JSON_THROW_ON_ERROR);
 
 repositoryDocumentationAssert(
-    ($application['app_name'] ?? null) === 'Generic SQL API Framework'
-        && ($application['version'] ?? null) === '2.2.0-dev',
-    'Application identity does not represent the v2.2 development version.'
+    ($application['app_name'] ?? null) === 'Generic SQL REST API Framework'
+        && ($application['version'] ?? null) === '2.1.0-dev',
+    'Application identity does not represent the completed v2.1.0 release.'
 );
 repositoryDocumentationAssert(
     $adminExample === RuntimeConfiguration::adminDefaults()
@@ -43,7 +43,7 @@ repositoryDocumentationAssert(
         === RuntimeConfiguration::authorizationDefaults(),
     'Tracked authorization example does not match bootstrap defaults.'
 );
-// Releases appear newest first; v2.2 development work stays under [Unreleased].
+// Releases appear newest first; future v3 work stays under [Unreleased].
 preg_match_all('/^## \[([^\]]+)\](.*)$/m', $changelog, $releases);
 repositoryDocumentationAssert(
     $releases[1] === ['Unreleased', '2.1.0', '2.0.0', '1.0.0']
@@ -51,30 +51,35 @@ repositoryDocumentationAssert(
     'Changelog release status is inconsistent.'
 );
 repositoryDocumentationAssert(
-    str_contains($readme, 'The latest completed release is **v2.1.0**')
-        && str_contains($readme, '`2.2.0-dev`')
-        && !preg_match('/v2\.[01]\.0[^.\n]*unreleased/i', $readme)
+    str_starts_with($readme, "# Generic SQL REST API Framework\n")
+        && str_contains($readme, '| **v2.1.0** | **Completed — current version** |')
+        && str_contains($readme, '| v3.0.0 | Unreleased / upcoming |')
+        && !preg_match('/v[12]\.[01]\.0[^.\n]*unreleased/i', $readme)
         && preg_match('/Phase [1-4](?:\.[0-9]+)?\s+[—-].*implemented/i', $readme) !== 1,
     'README contains an incorrect release status or phase diary.'
 );
 
-// The roadmap separates completed, current, upcoming, and deferred work and
-// records the real release state of each milestone.
-foreach (['## Completed', '## Current', '## Upcoming', '## Deferred'] as $section) {
+// The roadmap separates completed, upcoming, and deferred work and records the
+// real release state of each milestone.
+foreach (['## Completed', '## Upcoming', '## Deferred'] as $section) {
     repositoryDocumentationAssert(
         preg_match('/^' . preg_quote($section, '/') . '$/m', $roadmap) === 1,
         "Roadmap is missing section: {$section}."
     );
 }
 foreach ([
-    '| v1.0.0 | Core Generic SQL API Framework | Released |',
-    '| v2.0.0 | Platform expansion and security | Released (2026-10-05) |',
-    '| v2.1.0 | Security verification and operational hardening | Completed |',
-    '| v2.2 | Generic authorization and data-access simplification | Current — in development |',
-    '| v3.0 | Multi-database support | Upcoming |',
+    '| v1.0.0 | Core Generic SQL REST API Framework | Completed (2026-07-27) |',
+    '| v2.0.0 | Platform expansion and security | Completed (2026-10-05) |',
+    '| v2.1.0 | Security verification, operational hardening, and generic authorization | Completed |',
+    '| v3.0.0 | Multi-database support | Unreleased / upcoming |',
     '| v3.1 | Developer experience and API integration | Upcoming |',
 ] as $milestone) {
     repositoryDocumentationAssert(str_contains($roadmap, $milestone), "Roadmap does not record milestone: {$milestone}");
+}
+// v2.1.0 is the completed line and v3.0.0 the next major version; there is no
+// separate v2.2 milestone or 2.2.0 development version.
+foreach (['README.md' => $readme, 'CHANGELOG.md' => $changelog, 'docs/Roadmap.md' => $roadmap] as $document => $text) {
+    repositoryDocumentationAssert(preg_match('/\b2\.2\.0\b|\bv2\.2\b/i', $text) !== 1, "{$document} describes a v2.2 milestone.");
 }
 repositoryDocumentationAssert(
     preg_match('/\bPhase [0-9]/', $roadmap) !== 1 && is_file($root . '/docs/Windows-IIS-Deployment.md'),
@@ -187,7 +192,7 @@ foreach ([
     'docs/security/Static-Security-Analysis-Inventory.md',
     'docs/security/Security-Architecture-and-Operational-Hardening.md',
     'docs/security/Dependency-Security-Review.md',
-    // v2.2 removed the application-specific registries.
+    // v2.1.0 removed the application-specific registries.
     'config/query-sources.php',
     'config/write-resources.php',
     'config/routine-resources.php',

@@ -161,7 +161,7 @@ final class AdminService
         $databaseAvailable = $this->databaseAvailability->available();
         $database = $databaseAvailable ? $this->databaseHealth() : ['status' => 'disconnected'];
         return [
-            'application' => 'Generic SQL API Framework',
+            'application' => 'Generic SQL REST API Framework',
             'status' => 'running',
             'platform' => $runtime['operatingSystem'] . ' ' . $runtime['architecture'],
             'phpRuntime' => $runtime['phpRuntime'] . ' · PHP ' . $runtime['phpVersion'],

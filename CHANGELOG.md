@@ -5,13 +5,23 @@ Planned work is in [docs/Roadmap.md](docs/Roadmap.md).
 
 ## [Unreleased]
 
-Generic authorization and data-access simplification (roadmap v2.2). The API no
-longer needs application-specific table, write-resource, or routine
-registrations; authorization is decided by role permissions alone, and the
-database login's permissions are the data boundary.
+No changes yet. The next major version is v3.0.0; see the
+[Roadmap](docs/Roadmap.md).
+
+## [2.1.0]
+
+Security verification, operational hardening, and the generic authorization
+model. The API no longer needs application-specific table, write-target, or
+routine registrations: authorization is decided by role permissions, and the
+database login's permissions are the data access boundary. Security findings
+and evidence are in
+[docs/security/Security-Verification.md](docs/security/Security-Verification.md).
 
 ### Changed
 
+- The project is named **Generic SQL REST API Framework** (previously Generic
+  SQL API Framework). Endpoints, configuration keys, environment variables,
+  and deployment identifiers are unchanged.
 - Authorization is permission-only and identical for sessions, managed API keys,
   the legacy key, and anonymous mode: `data.read` for queries, `data.write` for
   writes, `sql.execute` for SQL Resources, `metadata.read` for metadata,
@@ -29,39 +39,29 @@ database login's permissions are the data boundary.
   procedures require `data.write` and, for session callers, CSRF; functions
   require neither.
 - JSON Query Mode reads any table or view the database catalog confirms;
-  metadata listings are no longer filtered.
-- A SQL Resource runtime mapping whose qualifier is not a top-level source now
-  returns `400 INVALID_SQL_RUNTIME_FILTER` instead of
-  `403 RESOURCE_ACCESS_DENIED`. `RESOURCE_ACCESS_DENIED` and
+  metadata listings are not filtered.
+- A SQL Resource runtime mapping whose qualifier is not a top-level source
+  returns `400 INVALID_SQL_RUNTIME_FILTER`. `RESOURCE_ACCESS_DENIED` and
   `INVALID_WRITE_RESOURCE` are no longer returned; unknown write tables return
   `400 INVALID_WRITE_TABLE`.
 - `config/authorization.example.json` reflects schema version 4.
-- Application version metadata reports `2.2.0-dev`.
+- Application version metadata reports `2.1.0-dev`.
+- Documentation reorganized into current reference, roadmap, changelog, and a
+  consolidated security model and verification record.
 
 ### Removed
 
 - `config/query-sources.php`, `config/write-resources.php` (including the
   `crud-test` sample), and `config/routine-resources.php`, with
   `QuerySourcePolicy`, `QuerySourceRegistry`, `WriteResourceRegistry`, and
-  `RoutineResourceRegistry`.
+  `RoutineResourceRegistry`. These registries were introduced during the v2.1.2
+  static analysis and replaced by the generic authorization model before
+  release.
 
-### Security
+### Fixed
 
-- Table and routine names must be `Name` or `Schema.Name`; `sys` and
-  `INFORMATION_SCHEMA` objects, cross-database names, and `sp_`/`xp_` system
-  procedures are rejected, and every table, column, and routine must exist in
-  the configured database's catalog. Identifier validation, prepared
-  parameters, request schema validation, CSRF, result-size limits, and Admin API
-  separation are unchanged.
-- The v2.1.2 registry controls for SSA-01, SSA-03, and SSA-07 are replaced by
-  role permissions plus database-login permissions; see
-  [docs/security/Security-Verification.md](docs/security/Security-Verification.md).
-
-## [2.1.0]
-
-Security verification and operational hardening (roadmap v2.1.1 – v2.1.6).
-Findings and evidence are in
-[docs/security/Security-Verification.md](docs/security/Security-Verification.md).
+- Readiness at the internal IIS route `/api/health/ready` always returned `200`;
+  health probes are now recognized at any mount path.
 
 ### Security
 
@@ -70,9 +70,6 @@ Findings and evidence are in
   operating-system libraries, and ODBC stack. The bundled Windows PHP runtime's
   provenance and SHA-256 checksums are recorded.
 - Static security analysis (v2.1.2), findings SSA-01 – SSA-12:
-  - deny-by-default routine registry (`config/routine-resources.php`) and
-    query-source registry (`config/query-sources.php`) for JSON Query Mode,
-    metadata listings, and SQL Resource runtime source filters;
   - first-run setup and backend user, API-key, and role management moved to the
     loopback Admin API only;
   - production ODBC driver selection limited to Driver 18/17 with no fallback
@@ -80,15 +77,16 @@ Findings and evidence are in
   - `GENERIC_MAX_RESULT_ROWS` limit for unpaginated reads
     (`413 RESULT_TOO_LARGE`);
   - an administrator credential exposed in Git history was rotated.
-  SSA-13 – SSA-20 are deferred.
+  SSA-13 – SSA-20 are deferred. The registry controls added for SSA-01, SSA-03,
+  and SSA-07 were superseded by the generic authorization model.
 - Authorization and API security testing (v2.1.3), findings AAPI-01 – AAPI-09:
   - Application Administrators can no longer take over or alter backend-only
     accounts, and System Administrator accounts can no longer be managed through
     the public API;
-  - registered write routines require CSRF; frontend user management returns
-    minimized profiles and uniform not-found responses; the System Administrator
-    role is rejected for anonymous and legacy-key principals; non-string public
-    actions are rejected;
+  - write routines require CSRF (every stored procedure, under the final
+    model); frontend user management returns minimized profiles and uniform
+    not-found responses; the System Administrator role is rejected for anonymous
+    and legacy-key principals; non-string public actions are rejected;
   - a 64-test authorization and API coverage suite.
 - DAST and penetration-test preparation (v2.1.4): the SQL Parser no longer
   discloses the PHP version, and its development router serves only its intended
@@ -100,17 +98,12 @@ Findings and evidence are in
   `validate-production.php` reports the runtime configuration location.
 - Final repository-level verification (v2.1.6): tests, mutation checks, lint,
   and documentation checks pass, and every finding has a recorded status.
-
-### Fixed
-
-- Readiness at the internal IIS route `/api/health/ready` always returned `200`;
-  health probes are now recognized at any mount path.
-
-### Changed
-
-- Application version metadata reports `2.0.0`.
-- Documentation reorganized into current reference, roadmap, changelog, and a
-  consolidated security model and verification record.
+- Generic authorization model: table and routine names must be `Name` or
+  `Schema.Name`; `sys` and `INFORMATION_SCHEMA` objects, cross-database names,
+  and `sp_`/`xp_` system procedures are rejected, and every table, column, and
+  routine must exist in the configured database's catalog. Identifier
+  validation, prepared parameters, request schema validation, CSRF, result-size
+  limits, and Admin API separation are unchanged.
 
 ## [2.0.0] - 2026-10-05
 

@@ -89,6 +89,9 @@ final class ApplicationBackupManager
                     'formatVersion' => self::FORMAT_VERSION,
                     'recoveryPointId' => $this->validateOrCreateRecoveryPointId($recoveryPointId),
                     'createdAt' => gmdate(DATE_ATOM),
+                    // Stable archive-format identifier checked on restore; it is
+                    // intentionally not the display name, so renames never break
+                    // existing recovery points.
                     'application' => ['name' => 'Generic SQL API Framework', 'version' => $this->applicationVersion],
                     'scope' => 'application-configuration',
                     'trigger' => $trigger,

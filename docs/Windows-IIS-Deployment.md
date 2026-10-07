@@ -1,6 +1,6 @@
 # Windows Server IIS deployment
 
-This is the step-by-step procedure for installing the Generic SQL API Framework
+This is the step-by-step procedure for installing the Generic SQL REST API Framework
 on a fresh Windows Server with IIS, PHP FastCGI, the Microsoft ODBC Driver for
 SQL Server, and HTTPS. It is the authoritative **procedure**; the documents it
 links to remain authoritative for the underlying behavior:
@@ -333,12 +333,12 @@ values override earlier ones). If the project is not on the server yet, copy it
 first (section 8.2). Then add the host-specific paths below them:
 
 ```powershell
-Add-Content -Path C:\PHP\php.ini -Value "`r`n; --- Generic SQL API production settings ---"
+Add-Content -Path C:\PHP\php.ini -Value "`r`n; --- Generic SQL REST API production settings ---"
 Get-Content C:\GenericReporting\Backend\deployment\php-production-security.ini | Add-Content -Path C:\PHP\php.ini
 ```
 
 ```ini
-; --- Generic SQL API host-specific paths ---
+; --- Generic SQL REST API host-specific paths ---
 session.save_path = "C:\GenericReporting\sessions"
 error_log = "C:\GenericReporting\php-logs\php-errors.log"
 ```
