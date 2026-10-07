@@ -98,8 +98,9 @@ this document or the repository, and rotate or delete them after the test.
 | Lockout account | Any non-administrator role | Backend | Login lockout verification only |
 
 The test database must contain synthetic data only, and include the tables,
-views, routines, write resources, and SQL Resources needed to exercise the
-query-source, routine, and write-resource registries and role scopes.
+views, procedures, functions, and SQL Resources needed to exercise every
+action. Give the test database login deliberately limited grants so testers can
+confirm that the login's permissions bound what each role reaches.
 
 ## Existing automated coverage
 
@@ -128,11 +129,11 @@ column is the gap this test should cover.
 |---|---|
 | Authentication | Login, logout, failure responses, lockout, username enumeration, cookie flags over HTTPS |
 | Sessions | Fixation, rotation on login, idle and absolute timeouts, revocation after role, access, or password changes |
-| Authorization | Vertical and horizontal escalation across roles and domains; frontend administrators against backend identities; resource scopes |
+| Authorization | Vertical and horizontal escalation across roles and domains; frontend administrators against backend identities; identical decisions for sessions and API keys |
 | API keys | Role confinement, disabled and revoked keys, key versus session precedence, owner state |
-| CSRF | Session-authenticated writes, write routines, and frontend-user actions without or with a wrong token; cross-origin requests |
+| CSRF | Session-authenticated writes, stored procedures, and frontend-user actions without or with a wrong token; cross-origin requests |
 | CORS | Origin allowlist, credentials, preflight |
-| Injection | Query expressions, filters, sorting, pagination, writes, routine parameters, SQL Resource runtime filters |
+| Injection | Query expressions, filters, sorting, pagination, write table and column names, routine names and parameters, SQL Resource runtime filters; attempts to reach `sys` objects, other databases, or system procedures |
 | Request validation | Content type, body size, JSON shape, unknown properties, type confusion |
 | Error handling | No stack traces, paths, SQL text, or configuration in production responses |
 | Admin boundary | Loopback enforcement, `GENERIC_ADMIN_ENABLED`, proxy and header-spoofing attempts |
@@ -145,14 +146,15 @@ column is the gap this test should cover.
 Report these only if a new impact or a bypass of the documented control is
 found. Details are in [Security verification](Security-Verification.md).
 
-- **Open:** ST-003 (no read-column authorization) and ST-004 (no filter-count
-  limit).
-- **Deferred informational:** SSA-13 – SSA-16, SSA-18 – SSA-20, and the
-  read-routine part of SSA-17. SSA-14 means `health.php` paths other than the
+- **Open:** ST-003 (no API-level table or column authorization; the database
+  login's grants are the data boundary) and ST-004 (no filter-count limit).
+- **Superseded by design (v2.2):** SSA-01, SSA-03, and SSA-07. There are no
+  table, write, or routine registries; report only a way past the compensating
+  controls (catalog confirmation, system-object rejection, permission checks).
+- **Deferred informational:** SSA-13 – SSA-16 and SSA-18 – SSA-20. SSA-14 means `health.php` paths other than the
   two probes, including direct `/api/health.php` under IIS, return version,
   port, and start time.
-- **Accepted:** SSA-06 (frontend access not narrowed by SQL Resource scopes);
-  AAPI-05 – AAPI-07; development-only DAST-03 – DAST-05; SAOH-04 – SAOH-08.
+- **Accepted:** AAPI-05 – AAPI-07; development-only DAST-03 – DAST-05; SAOH-04 – SAOH-08.
 - **By design:** authored SQL Resource SQL is not checked table by table; rate
   limiting and login lockout are exact only for workers sharing one local
   filesystem; `/health/ready` is public; the Admin Console has no MFA.

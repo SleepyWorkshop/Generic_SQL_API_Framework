@@ -2,41 +2,32 @@
 
 require_once __DIR__ . '/ApiRequestException.php';
 
+/**
+ * Validates a write request against the live column metadata of its target
+ * table. Every existing column may be filtered on; every column that is not
+ * database-generated may be written. Values are type-checked and stay bound
+ * parameters.
+ */
 class WritePayloadValidator
 {
-    public function validate(array $request, array $resource, array $metadataRows): array
+    public function validate(array $request, array $target, array $metadataRows): array
     {
-        $metadata = $this->indexMetadata($metadataRows, $resource);
-        $this->validateResourceMetadata($resource, $metadata);
+        $metadata = $this->indexMetadata($metadataRows);
 
         $validated = $request;
         if (isset($request['data'])) {
-            $validated['data'] = $this->validateData(
-                $request['data'],
-                $resource,
-                $metadata,
-                $request['action']
-            );
+            $validated['data'] = $this->validateData($request['data'], $metadata, $request['action']);
         }
         if (isset($request['filters'])) {
-            $validated['filters'] = $this->validateFilters(
-                $request['filters'],
-                $resource,
-                $metadata
-            );
+            $validated['filters'] = $this->validateFilters($request['filters'], $metadata);
         }
         if ($request['action'] === 'upsert') {
-            $validated['keys'] = $this->validateKeys(
-                $request['keys'] ?? null,
-                $validated['data'],
-                $resource,
-                $metadata
-            );
+            $validated['keys'] = $this->validateKeys($request['keys'], $validated['data'], $metadata);
         }
         return $validated;
     }
 
-    private function indexMetadata(array $rows, array $resource): array
+    private function indexMetadata(array $rows): array
     {
         $indexed = [];
         foreach ($rows as $row) {
@@ -58,45 +49,21 @@ class WritePayloadValidator
             ];
         }
         if ($indexed === []) {
-            throw new RuntimeException(
-                "Configured write target is unavailable: {$resource['resource']}"
+            throw new ApiRequestException(
+                'Invalid write table.',
+                'INVALID_WRITE_TABLE',
+                [['path' => 'table', 'message' => 'Table does not exist in the configured database.']]
             );
         }
         return $indexed;
     }
 
-    private function validateResourceMetadata(array $resource, array $metadata): void
-    {
-        foreach (array_merge($resource['columns'], $resource['filterColumns']) as $column) {
-            if (!isset($metadata[strtolower($column)])) {
-                throw new RuntimeException(
-                    "Configured write column is unavailable: {$resource['resource']}"
-                );
-            }
-        }
-        $identity = $resource['identityColumn'];
-        if ($identity !== null) {
-            $column = $metadata[strtolower($identity)] ?? null;
-            if ($column === null || !$column['identity']) {
-                throw new RuntimeException(
-                    "Configured identity column is not an identity: {$resource['resource']}"
-                );
-            }
-        }
-    }
-
-    private function validateData(array $data, array $resource, array $metadata, string $action): array
+    private function validateData(array $data, array $metadata, string $action): array
     {
         $canonical = [];
         foreach ($data as $requestedColumn => $value) {
-            $column = $this->allowedColumn($requestedColumn, $resource['columns']);
-            if ($column === null) {
-                $this->invalidColumn('data.' . $requestedColumn, 'Column is not writable for this resource.');
-            }
-            $properties = $metadata[strtolower($column)];
-            if ($properties['identity'] || $properties['computed']
-                || $properties['generated'] || $properties['hidden']
-                || in_array($properties['type'], ['timestamp', 'rowversion'], true)) {
+            $properties = $this->column($metadata, (string)$requestedColumn, 'data.' . $requestedColumn);
+            if ($this->isGenerated($properties)) {
                 $this->invalidColumn('data.' . $requestedColumn, 'Database-generated columns cannot be written.');
             }
             if (array_key_exists($properties['name'], $canonical)) {
@@ -111,22 +78,12 @@ class WritePayloadValidator
 
         if (in_array($action, ['insert', 'upsert'], true)) {
             foreach ($metadata as $properties) {
-                $required = !$properties['nullable'] && !$properties['identity']
-                    && !$properties['computed'] && !$properties['generated']
-                    && !$properties['hidden'] && !$properties['hasDefault']
-                    && !in_array($properties['type'], ['timestamp', 'rowversion'], true);
-                if (!$required) continue;
-                $allowed = $this->allowedColumn($properties['name'], $resource['columns']);
-                if ($allowed === null) {
-                    throw new RuntimeException(
-                        "Write resource omits a required target column: {$resource['resource']}"
-                    );
-                }
-                if (!array_key_exists($properties['name'], $canonical)) {
+                $required = !$properties['nullable'] && !$properties['hasDefault'] && !$this->isGenerated($properties);
+                if ($required && !array_key_exists($properties['name'], $canonical)) {
                     throw new ApiRequestException(
                         'Missing required field.',
                         'MISSING_REQUIRED_FIELD',
-                        [['path' => 'data.' . $allowed, 'message' => 'This database field is required.']]
+                        [['path' => 'data.' . $properties['name'], 'message' => 'This database field is required.']]
                     );
                 }
             }
@@ -134,16 +91,11 @@ class WritePayloadValidator
         return $canonical;
     }
 
-    private function validateFilters(array $filters, array $resource, array $metadata): array
+    private function validateFilters(array $filters, array $metadata): array
     {
         $validated = [];
         foreach ($filters as $index => $filter) {
-            $requestedField = $filter['field'];
-            $field = $this->allowedColumn($requestedField, $resource['filterColumns']);
-            if ($field === null) {
-                $this->invalidColumn("filters.{$index}.field", 'Column is not filterable for this resource.');
-            }
-            $properties = $metadata[strtolower($field)];
+            $properties = $this->column($metadata, (string)$filter['field'], "filters.{$index}.field");
             $operator = strtoupper($filter['operator']);
             $item = ['field' => $properties['name'], 'operator' => $operator];
             if (array_key_exists('value', $filter)) {
@@ -177,31 +129,16 @@ class WritePayloadValidator
         return $validated;
     }
 
-    private function validateKeys(?array $requestedKeys, array $data, array $resource, array $metadata): array
+    /**
+     * UPSERT keys come from the request. They must name existing columns, each
+     * needs a non-null value, and the repository then requires a matching
+     * primary key or unfiltered unique index.
+     */
+    private function validateKeys(array $requestedKeys, array $data, array $metadata): array
     {
-        if ($resource['keys'] === []) {
-            throw new ApiRequestException(
-                'Invalid UPSERT key.',
-                'INVALID_UPSERT_KEY',
-                [['path' => 'keys', 'message' => 'UPSERT is not enabled for this resource.']]
-            );
-        }
-        if ($requestedKeys !== null) {
-            $requested = array_map('strtolower', $requestedKeys);
-            $configured = array_map('strtolower', $resource['keys']);
-            sort($requested);
-            sort($configured);
-            if ($requested !== $configured) {
-                throw new ApiRequestException(
-                    'Invalid UPSERT key.',
-                    'INVALID_UPSERT_KEY',
-                    [['path' => 'keys', 'message' => 'Keys must exactly match the resource UPSERT key set.']]
-                );
-            }
-        }
         $canonical = [];
-        foreach ($resource['keys'] as $key) {
-            $name = $metadata[strtolower($key)]['name'];
+        foreach ($requestedKeys as $index => $key) {
+            $name = $this->column($metadata, (string)$key, "keys.{$index}")['name'];
             if (!array_key_exists($name, $data) || $data[$name] === null) {
                 throw new ApiRequestException(
                     'Invalid UPSERT key.',
@@ -219,6 +156,22 @@ class WritePayloadValidator
             );
         }
         return $canonical;
+    }
+
+    private function column(array $metadata, string $requested, string $path): array
+    {
+        $properties = $metadata[strtolower($requested)] ?? null;
+        if ($properties === null) {
+            $this->invalidColumn($path, 'Column does not exist in the target table.');
+        }
+        return $properties;
+    }
+
+    private function isGenerated(array $properties): bool
+    {
+        return $properties['identity'] || $properties['computed']
+            || $properties['generated'] || $properties['hidden']
+            || in_array($properties['type'], ['timestamp', 'rowversion'], true);
     }
 
     private function validateValue($value, array $column, string $path)
@@ -301,14 +254,6 @@ class WritePayloadValidator
         ) !== 1) return false;
         [$year, $month, $day] = array_map('intval', explode('-', substr($value, 0, 10)));
         return checkdate($month, $day, $year);
-    }
-
-    private function allowedColumn(string $requested, array $allowed): ?string
-    {
-        foreach ($allowed as $column) {
-            if (strcasecmp($column, $requested) === 0) return $column;
-        }
-        return null;
     }
 
     private function rowValue(array $row, string $key)

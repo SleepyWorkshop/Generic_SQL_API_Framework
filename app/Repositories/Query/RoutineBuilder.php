@@ -1,8 +1,9 @@
 <?php
 
 /**
- * Builds routine calls from resolved RoutineResourceRegistry entries. The
- * schema and name are server-owned identifiers; arguments are always bound.
+ * Builds routine calls from routines resolved by RoutineResolver. The schema
+ * and name are validated identifiers confirmed against database metadata;
+ * arguments are always bound.
  */
 class RoutineBuilder
 {
@@ -36,7 +37,7 @@ class RoutineBuilder
     {
         foreach (['schema', 'name'] as $part) {
             if (!is_string($routine[$part] ?? null) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $routine[$part]) !== 1) {
-                throw new RuntimeException('Invalid registered routine identifier.');
+                throw new RuntimeException('Invalid routine identifier.');
             }
         }
         return '[' . $routine['schema'] . '].[' . $routine['name'] . ']';

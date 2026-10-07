@@ -12,15 +12,14 @@ Planned work is tracked separately in [Roadmap](Roadmap.md).
   can manage frontend-only access but cannot assign backend roles.
 - CORS uses exact validated backend origins; it is not itself access control.
 - The endpoint accepts POST and OPTIONS only.
-- JSON Query Mode reads only tables/views registered in `config/query-sources.php`
-  (deny-by-default, optional per-role restriction); routines run only when
-  registered in `config/routine-resources.php`. Registries are server-owned files.
-- Metadata actions list only registered query sources and registered procedures.
-- Frontend access (`frontend.read`) is not narrowed by SQL Resource `sqlResources`
-  scopes; only backend roles are (accepted, SSA-06).
-- There is no per-role read-column authorization; any column of an authorized
-  table, view, or SQL Resource is readable (ST-003). Expose sensitive columns
-  only through least-privilege views or SQL Resources.
+- Authorization is by role permission only. There is no per-table, per-column,
+  per-routine, or per-SQL-Resource authorization in the API: a principal with
+  `data.read` can query any table or view of the configured database that the
+  database login can read, and `data.write` can change any table the login can
+  write (ST-003). Restrict data exposure with the database login's own
+  permissions, least-privilege views, and SQL Resources.
+- The data API addresses only user objects of the configured database: system
+  schemas, cross-database names, and system procedures are rejected.
 - There is no separate limit on the number of filters per request; it is bounded
   by the request body limit (ST-004).
 - Unpaginated reads are limited to `GENERIC_MAX_RESULT_ROWS` rows (default 10,000)
@@ -71,12 +70,9 @@ Use SQL Resource Mode for approved complex read-only SQL beyond these boundaries
   pagination. Resource authors must choose fixed pagination or runtime controls.
 - Server-owned specialized SQL is still constrained by actual SQL Server version,
   compatibility, permissions, object schema, and resource transformation rules.
-- The SQL inside a resource file is not checked table by table against the
-  query-source registry; only runtime `source` filters are.
 - **Known gap:** the bundled frontend references widget SQL Resources that are
   not present in `queries/widgets/` (9 of 26 exist). Those widgets fail with
-  `INVALID_SQL_RESOURCE` until their SQL is added; tables used by their runtime
-  source filters must then be registered in `config/query-sources.php`.
+  `INVALID_SQL_RESOURCE` until their SQL is added.
 
 ## Write API
 
@@ -93,10 +89,10 @@ Use SQL Resource Mode for approved complex read-only SQL beyond these boundaries
 
 ## Routines, metadata, and responses
 
-- Routines run only when registered in `config/routine-resources.php` (the
-  shipped registry is empty). Parameters are positional, with the exact count
-  fixed by the registry. Named or output parameters, signature discovery,
-  result-set choice, and runtime filter/sort/page are absent.
+- Routines are called by name and must exist in the configured database.
+  Parameters are positional; named or output parameters, result-set choice, and
+  runtime filter/sort/page are absent. Stored procedures require `data.write`
+  because the API cannot tell whether a procedure changes data.
 - `source.alias` passes the shared validator for routines and metadata.columns but
   is discarded by normalization and has no effect.
 - Query responses do not contain result-column type/schema metadata. Use

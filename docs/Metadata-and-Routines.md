@@ -40,16 +40,15 @@ validator technically permits `source.alias`, but normalization discards it; omi
 it. Other metadata actions accept no fields beyond `action`.
 
 Frontends can use these endpoints to populate table/column pickers. Metadata
-requires `metadata.read` (or frontend access), and results are limited to the
-registered sources and routines the caller may use (see
-[Routine registry](#routine-registry)). Listing an object does not authorize
-other actions on it; query, write, and routine authorization are evaluated
-independently.
+requires `metadata.read` (or frontend access) and returns the user tables,
+views, columns, and procedures of the configured database that its login can
+see. Listing an object does not authorize other actions on it; query, write, and
+routine authorization are evaluated independently.
 
-## Routine API
+## Routines
 
-Routine names are identifier-validated and can be schema-qualified. Parameters
-are positional prepared values. Send a JSON list; omission defaults to `[]`.
+Routines are called by name; there is no routine registration. Parameters are
+positional prepared values. Send a JSON list; omission defaults to `[]`.
 
 Stored procedure:
 
@@ -92,37 +91,33 @@ The generated concept is `SELECT * FROM dbo.RowsForYear(?)`; message:
 
 The shared source shape permits an optional alias, but it is ignored. Routine
 actions do not accept filters, sorting, pagination, named parameters, output
-parameter declarations, result-set selection, or transaction controls. The API
-does not inspect routine signatures. Unknown or mismatched signatures of a
-registered routine surface as generic `QUERY_ERROR`.
+parameter declarations, result-set selection, or transaction controls.
 
-## Routine registry
+### Name and signature validation
 
-Routines are deny-by-default. Only entries in `config/routine-resources.php`
-can be called, and only through the action matching their `type`:
+- The name is `Name` (schema `dbo`) or `Schema.Name`. Three-part or
+  cross-database names, brackets, the `sys` and `INFORMATION_SCHEMA` schemas,
+  and names starting with `sp_` or `xp_` are rejected before any database
+  lookup (`INVALID_ROUTINE`).
+- The name must match a user-defined routine of the requested kind in the
+  configured database's `INFORMATION_SCHEMA.ROUTINES` (procedure, scalar
+  function, or table-valued function); otherwise `INVALID_ROUTINE`. System
+  procedures are not listed there and cannot be called.
+- Functions require exactly their declared number of parameters. Procedures
+  accept at most that number, so trailing parameters can use their defaults.
+  Otherwise `INVALID_ROUTINE_PARAMETERS`.
+- The SQL identifier is built from the validated, bracket-quoted schema and
+  name (`EXEC [dbo].[RunReport] ?, ?`); values are always bound.
 
-```php
-'dbo.RunReport' => [
-    'type' => 'procedure',          // procedure | function | tableFunction
-    'schema' => 'dbo',
-    'name' => 'RunReport',
-    'access' => 'read',             // write additionally requires data.write
-    'parameters' => 2,              // exact positional argument count
-    'roles' => ['read-only', 'data-operator'],
-],
-```
+### Authorization
 
-Clients send the registry key (`source.procedure` / `source.function`). The SQL
-identifier is always built from the registry's `schema` and `name`
-(`EXEC [dbo].[RunReport] ?, ?`) in the configured database; client text never
-becomes a SQL identifier, and system or cross-database routines are unreachable
-unless an operator registers them. A caller needs `routine.execute`, one of the
-entry's `roles`, and `data.write` for `access: write`. `frontend.read` does not
-authorize routines. Unregistered IDs return `INVALID_ROUTINE`; a wrong argument
-count returns `INVALID_ROUTINE_PARAMETERS`; roles outside the entry return
-`RESOURCE_ACCESS_DENIED`. The shipped registry is empty.
+| Action | Required permissions | CSRF (session callers) |
+|---|---|:-:|
+| `function`, `tableFunction` | `routine.execute` | no |
+| `procedure` | `routine.execute` and `data.write` | yes |
 
-`metadata.procedures` lists only registered procedures. `metadata.tables`,
-`metadata.views`, `metadata.schema`, and `metadata.columns` list only query
-sources registered in `config/query-sources.php` (see
-[JSON Query Mode](Query-Mode.md#query-source-registry)).
+SQL Server functions cannot modify data; stored procedures can, so they require
+the write permission and CSRF like other writes. `frontend.read` never
+authorizes routines. Session and API-key callers follow the same rules. The
+database login's `EXECUTE` permissions remain the final boundary: grant it only
+on the routines clients should call.

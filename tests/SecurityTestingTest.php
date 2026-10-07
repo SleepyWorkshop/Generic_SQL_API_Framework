@@ -15,7 +15,7 @@ require_once __DIR__ . '/../app/Requests/QueryRequestValidator.php';
 require_once __DIR__ . '/../app/Requests/AdminRequestValidator.php';
 require_once __DIR__ . '/../app/Resources/SqlResourceDiscovery.php';
 require_once __DIR__ . '/../app/Resources/SqlResourceStatement.php';
-require_once __DIR__ . '/../app/Resources/WriteResourceRegistry.php';
+require_once __DIR__ . '/../app/Resources/DatabaseObjectName.php';
 require_once __DIR__ . '/../app/Repositories/MetadataRepository.php';
 require_once __DIR__ . '/../app/Repositories/Query/WhereBuilder.php';
 require_once __DIR__ . '/../app/Repositories/Write/InsertBuilder.php';
@@ -260,27 +260,25 @@ try {
     securityTestingAssert(!is_file($sessions . '/sess_' . $logoutId), 'Logout left reusable server-side session state.');
     securityTestingCloseSession($sessionName);
 
-    // Role boundaries, cross-role access, object protection, and resource scopes.
-    $roleConfiguration = RuntimeConfiguration::authorizationDefaults();
-    $roleConfiguration['roles'][RoleModel::READ_ONLY]['sqlResources'] = ['reports/allowed'];
-    $roleConfiguration['roles'][RoleModel::DATA_OPERATOR]['writeResources'] = ['customers'];
-    (new AuthorizationRepository())->save($roleConfiguration);
+    // Role boundaries, cross-role access, and object protection. Authorization
+    // is permission-only: there are no per-role resource scopes.
+    (new AuthorizationRepository())->save(RuntimeConfiguration::authorizationDefaults());
     $authorization = new AuthorizationService(new AuthorizationRepository(), $logger);
     $reader = new Principal(str_repeat('1', 32), 'Read.User', 'session', RoleModel::READ_ONLY, false, null, true);
     $operator = new Principal(str_repeat('2', 32), 'Data.Operator', 'session', RoleModel::DATA_OPERATOR, false, null, true);
     $systemAdministrator = new Principal(str_repeat('3', 32), 'System.Admin', 'session', RoleModel::SYSTEM_ADMINISTRATOR, true, RoleModel::APPLICATION_ADMINISTRATOR, true);
     $applicationAdministrator = new Principal(str_repeat('4', 32), 'Application.Admin', 'session', null, true, RoleModel::APPLICATION_ADMINISTRATOR, true);
     $authorization->authorize($reader, 'data.read');
-    $authorization->authorize($reader, 'sql.execute', 'reports/allowed', 'sql');
-    securityTestingFailure(fn () => $authorization->authorize($reader, 'data.write', 'customers', 'write'), 'RESOURCE_ACCESS_DENIED', 403);
-    securityTestingFailure(fn () => $authorization->authorize($reader, 'sql.execute', 'reports/guessed', 'sql'), 'RESOURCE_ACCESS_DENIED', 403);
-    $authorization->authorize($operator, 'data.write', 'customers', 'write');
-    securityTestingFailure(fn () => $authorization->authorize($operator, 'data.write', 'administration', 'write'), 'RESOURCE_ACCESS_DENIED', 403);
+    $authorization->authorize($reader, 'sql.execute');
+    $authorization->authorize($reader, 'routine.execute');
+    securityTestingFailure(fn () => $authorization->authorize($reader, 'data.write'), 'AUTHORIZATION_DENIED', 403);
+    $authorization->authorize($operator, 'data.write');
     securityTestingFailure(fn () => $authorization->authorize($operator, 'admin.manage'), 'AUTHORIZATION_DENIED', 403);
     $authorization->authorize($systemAdministrator, 'admin.manage');
     $authorization->authorize($applicationAdministrator, 'frontend.users.manage');
     securityTestingFailure(fn () => $authorization->authorize($applicationAdministrator, 'admin.manage'), 'AUTHORIZATION_DENIED', 403);
-    securityTestingFailure(fn () => $authorization->authorize($applicationAdministrator, 'data.write', 'customers', 'write'), 'RESOURCE_ACCESS_DENIED', 403);
+    securityTestingFailure(fn () => $authorization->authorize($applicationAdministrator, 'data.write'), 'AUTHORIZATION_DENIED', 403);
+    securityTestingFailure(fn () => $authorization->authorize($applicationAdministrator, 'routine.execute'), 'AUTHORIZATION_DENIED', 403);
     $persistedApplicationAdmin = $repository->findUser('Application.Admin');
     $persistedApplicationPrincipal = new Principal(
         $persistedApplicationAdmin['id'], $persistedApplicationAdmin['username'], 'session', null,
@@ -382,21 +380,26 @@ try {
         ['action' => 'sql', 'resource' => 'reports/allowed', 'execution' => ['filters' => ['Bad' => ['placement' => 'source', 'expression' => 'Id OR 1=1']]]],
     ] as $request) securityTestingFailure(fn () => $queryValidator->validate($request), 'INVALID_REQUEST');
 
-    $writeDefinition = ['customers' => [
-        'schema' => 'dbo', 'table' => 'Customers', 'actions' => ['insert', 'update', 'delete', 'upsert'],
-        'columns' => ['CustomerCode', 'Name'], 'filterColumns' => ['Id', 'CustomerCode'],
-        'keys' => ['CustomerCode'], 'identityColumn' => 'Id',
-    ]];
-    $writeResource = (new WriteResourceRegistry($writeDefinition))->resolve('customers');
-    foreach (['../customers', 'dbo.Customers', 'customers;DROP', 'C:\\customers'] as $resource) {
-        securityTestingFailure(fn () => (new WriteResourceRegistry($writeDefinition))->resolve($resource), 'INVALID_WRITE_RESOURCE');
+    // Write targets are client-named tables, so the name itself is the attack
+    // surface: only `Table` or `Schema.Table` identifiers outside system
+    // schemas are accepted, and they are always bracket-quoted.
+    $writeResource = ['name' => 'dbo.Customers', 'schema' => 'dbo', 'table' => 'Customers', 'identityColumn' => 'Id'];
+    foreach (['../customers', 'customers;DROP', 'C:\\customers', 'master.dbo.Customers', '[dbo].[Customers]', 'dbo .Customers', ''] as $table) {
+        securityTestingFailure(fn () => $queryValidator->validate([
+            'action' => 'insert', 'table' => $table, 'data' => ['Name' => 'x'],
+        ]), 'INVALID_REQUEST');
     }
+    foreach (['sys.objects', 'SYS.sql_logins', 'INFORMATION_SCHEMA.TABLES'] as $table) {
+        securityTestingFailure(fn () => DatabaseObjectName::parse($table, 'table', 'INVALID_WRITE_TABLE', 'Invalid write table.'), 'INVALID_WRITE_TABLE');
+    }
+    securityTestingAssert(DatabaseObjectName::parse('Customers', 'table', 'INVALID_WRITE_TABLE', 'x') === ['schema' => 'dbo', 'name' => 'Customers'],
+        'Unqualified tables no longer default to dbo.');
     securityTestingFailure(fn () => $queryValidator->validate([
-        'action' => 'insert', 'resource' => 'customers', 'data' => ['Name]; DROP TABLE Users;--' => 'x'],
+        'action' => 'insert', 'table' => 'Customers', 'data' => ['Name]; DROP TABLE Users;--' => 'x'],
     ]), 'INVALID_REQUEST');
     foreach ([
-        fn () => $queryValidator->validate(['action' => 'update', 'resource' => 'customers', 'data' => ['Name' => 'x']]),
-        fn () => $queryValidator->validate(['action' => 'delete', 'resource' => 'customers', 'filters' => []]),
+        fn () => $queryValidator->validate(['action' => 'update', 'table' => 'Customers', 'data' => ['Name' => 'x']]),
+        fn () => $queryValidator->validate(['action' => 'delete', 'table' => 'Customers', 'filters' => []]),
     ] as $unsafeWrite) securityTestingFailure($unsafeWrite, 'UNSAFE_WRITE');
     $insert = (new InsertBuilder())->build($writeResource, ['CustomerCode' => 'C1', 'Name' => $injection]);
     $update = (new UpdateBuilder())->build($writeResource, ['Name' => $injection], [['field' => 'Id', 'operator' => '=', 'value' => 7]], 'AND');

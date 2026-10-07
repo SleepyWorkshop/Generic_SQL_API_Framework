@@ -180,6 +180,44 @@ class MetadataRepository
         );
     }
 
+    /**
+     * Return the type and declared parameter count of a user-defined routine in
+     * the configured database, or null when it does not exist. System routines
+     * are not listed by INFORMATION_SCHEMA.ROUTINES.
+     */
+    public function getRoutine(string $schema, string $name): ?array
+    {
+        $sql = "
+            SELECT
+                r.ROUTINE_TYPE AS RoutineType,
+                r.DATA_TYPE AS DataType,
+                (
+                    SELECT COUNT(*)
+                    FROM INFORMATION_SCHEMA.PARAMETERS p
+                    WHERE p.SPECIFIC_SCHEMA = r.SPECIFIC_SCHEMA
+                        AND p.SPECIFIC_NAME = r.SPECIFIC_NAME
+                        AND p.ORDINAL_POSITION > 0
+                ) AS ParameterCount
+            FROM INFORMATION_SCHEMA.ROUTINES r
+            WHERE r.ROUTINE_SCHEMA = ? AND r.ROUTINE_NAME = ?
+        ";
+        $result = $this->queryEngine->executePrepared(
+            $sql,
+            [$schema, $name],
+            ['queryPhase' => 'metadata', 'action' => 'routine']
+        );
+        $row = $result['data'][0] ?? null;
+        if (!is_array($row)) return null;
+        $routineType = strtoupper((string)$this->metadataValue($row, 'RoutineType'));
+        $type = match (true) {
+            $routineType === 'PROCEDURE' => 'procedure',
+            $routineType === 'FUNCTION' && strtoupper((string)$this->metadataValue($row, 'DataType')) === 'TABLE' => 'tableFunction',
+            $routineType === 'FUNCTION' => 'function',
+            default => null,
+        };
+        return $type === null ? null : ['type' => $type, 'parameters' => (int)$this->metadataValue($row, 'ParameterCount')];
+    }
+
     public function hasUniqueKey(string $schema, string $table, array $columns): bool
     {
         $sql = "

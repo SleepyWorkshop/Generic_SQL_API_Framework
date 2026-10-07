@@ -48,6 +48,15 @@ class CrudTestMetadata extends MetadataRepository
 
     public function getWriteColumns(string $schema, string $table): array
     {
+        if ($schema === 'inventory' && $table === 'Stock') {
+            return ['data' => [
+                $this->column('Sku', 'varchar', false, false, false, 40),
+                $this->column('Quantity', 'int', false),
+            ]];
+        }
+        if ($schema !== 'dbo' || $table !== 'Customers') {
+            return ['data' => []];
+        }
         return ['data' => [
             $this->column('Id', 'int', false, true),
             $this->column('CustomerCode', 'varchar', false, false, false, 20),
@@ -123,51 +132,13 @@ class CrudTestController extends WriteController
     }
 }
 
-$definition = [
-    'customers' => [
-        'schema' => 'dbo',
-        'table' => 'Customers',
-        'actions' => ['insert', 'update', 'delete', 'upsert'],
-        'columns' => ['CustomerCode', 'Name', 'Email', 'Status'],
-        'filterColumns' => ['Id', 'CustomerCode', 'Email'],
-        'keys' => ['CustomerCode'],
-        'identityColumn' => 'Id',
-    ],
-];
 $engine = new CrudTestEngine();
 $metadata = new CrudTestMetadata();
-$repository = new WriteRepository(
-    $engine,
-    $metadata,
-    new WriteResourceRegistry($definition)
-);
+$repository = new WriteRepository($engine, $metadata);
 $validator = new QueryRequestValidator();
 $normalizer = new QueryRequestNormalizer();
-crudThrows(fn () => (new WriteResourceRegistry([]))->resolve('customers', 'insert'), 'INVALID_WRITE_RESOURCE');
-$insertOnlyDefinition = $definition;
-$insertOnlyDefinition['customers']['actions'] = ['insert'];
-crudThrows(
-    fn () => (new WriteResourceRegistry($insertOnlyDefinition))->resolve('customers', 'delete'),
-    'INVALID_WRITE_RESOURCE'
-);
-foreach (['missing', 'empty'] as $keyCase) {
-    $invalidKeyDefinition = $definition;
-    if ($keyCase === 'missing') {
-        unset($invalidKeyDefinition['customers']['keys']);
-    } else {
-        $invalidKeyDefinition['customers']['keys'] = [];
-    }
-    $rejected = false;
-    try {
-        (new WriteResourceRegistry($invalidKeyDefinition))->resolve('customers', 'upsert');
-    } catch (RuntimeException $exception) {
-        $rejected = true;
-        crudAssert(str_contains($exception->getMessage(), 'requires configured keys'), 'Wrong configured-key validation failure.');
-    }
-    crudAssert($rejected, "UPSERT {$keyCase} resource keys were accepted.");
-}
 $publicInsert = $normalizer->normalize([
-    'action' => 'insert', 'resource' => 'customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N'],
+    'action' => 'insert', 'table' => 'Customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N'],
 ]);
 crudAssert($publicInsert['controller'] === 'Write' && $publicInsert['action'] === 'insert', 'Public write routing failed.');
 $controller = new CrudTestController(new CrudTestService());
@@ -182,7 +153,7 @@ $execute = function (array $public) use ($validator, $normalizer, $repository): 
 // INSERT: required/default/nullable/identity/type validation and prepared values.
 $injection = "Robert'); DROP TABLE Customers;--";
 $insert = $execute([
-    'action' => 'insert', 'resource' => 'customers',
+    'action' => 'insert', 'table' => 'Customers',
     'data' => ['CustomerCode' => 'C001', 'Name' => $injection, 'Email' => null],
 ]);
 $insertExecution = $engine->executions[array_key_last($engine->executions)];
@@ -193,24 +164,24 @@ crudAssert($insertExecution['params'] === ['C001', $injection, null], 'INSERT pa
 crudAssert($insert['affectedRows'] === 1 && $insert['data'][0]['generatedId'] === 42, 'INSERT result is invalid.');
 
 crudThrows(fn () => $execute([
-    'action' => 'insert', 'resource' => 'missing', 'data' => ['CustomerCode' => 'C', 'Name' => 'N'],
-]), 'INVALID_WRITE_RESOURCE');
+    'action' => 'insert', 'table' => 'Missing', 'data' => ['CustomerCode' => 'C', 'Name' => 'N'],
+]), 'INVALID_WRITE_TABLE');
 crudThrows(fn () => $execute([
-    'action' => 'insert', 'resource' => 'customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N', 'Unknown' => 1],
+    'action' => 'insert', 'table' => 'Customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N', 'Unknown' => 1],
 ]), 'INVALID_WRITE_COLUMN');
 crudThrows(fn () => $execute([
-    'action' => 'insert', 'resource' => 'customers', 'data' => ['CustomerCode' => 'C'],
+    'action' => 'insert', 'table' => 'Customers', 'data' => ['CustomerCode' => 'C'],
 ]), 'MISSING_REQUIRED_FIELD');
 crudThrows(fn () => $execute([
-    'action' => 'insert', 'resource' => 'customers', 'data' => ['CustomerCode' => 'C', 'Name' => 10],
+    'action' => 'insert', 'table' => 'Customers', 'data' => ['CustomerCode' => 'C', 'Name' => 10],
 ]), 'INVALID_WRITE_VALUE');
 crudThrows(fn () => $execute([
-    'action' => 'insert', 'resource' => 'customers', 'data' => ['Id' => 7, 'CustomerCode' => 'C', 'Name' => 'N'],
+    'action' => 'insert', 'table' => 'Customers', 'data' => ['Id' => 7, 'CustomerCode' => 'C', 'Name' => 'N'],
 ]), 'INVALID_WRITE_COLUMN');
 
 // UPDATE: allowlisted filters, parameter order, affected rows, and full-table guard.
 $update = $execute([
-    'action' => 'update', 'resource' => 'customers', 'data' => ['Email' => 'new@example.com'],
+    'action' => 'update', 'table' => 'Customers', 'data' => ['Email' => 'new@example.com'],
     'filters' => [['field' => 'Id', 'operator' => '=', 'value' => 10]],
 ]);
 $updateExecution = $engine->executions[array_key_last($engine->executions)];
@@ -219,43 +190,50 @@ crudAssert(str_contains($updateExecution['sql'], 'WHERE ([Id] = ?)'), 'UPDATE ta
 crudAssert($updateExecution['params'] === ['new@example.com', 10], 'UPDATE parameter order changed.');
 crudAssert($update['affectedRows'] === 2, 'UPDATE affected-row count is invalid.');
 crudThrows(fn () => $execute([
-    'action' => 'update', 'resource' => 'customers', 'data' => ['Email' => 'x'],
+    'action' => 'update', 'table' => 'Customers', 'data' => ['Email' => 'x'],
 ]), 'UNSAFE_WRITE');
-crudThrows(fn () => $execute([
-    'action' => 'update', 'resource' => 'customers', 'data' => ['Email' => 'x'],
+// Filters are generic: any existing column can target rows without a
+// per-table filter registration.
+$execute([
+    'action' => 'update', 'table' => 'Customers', 'data' => ['Email' => 'x'],
     'filters' => [['field' => 'Status', 'operator' => '=', 'value' => 'Active']],
+]);
+crudAssert(str_contains($engine->executions[array_key_last($engine->executions)]['sql'], 'WHERE ([Status] = ?)'), 'Generic filter column was not applied.');
+crudThrows(fn () => $execute([
+    'action' => 'update', 'table' => 'Customers', 'data' => ['Email' => 'x'],
+    'filters' => [['field' => 'Missing', 'operator' => '=', 'value' => 1]],
 ]), 'INVALID_WRITE_COLUMN');
 crudThrows(fn () => $execute([
-    'action' => 'update', 'resource' => 'customers', 'data' => ['Email' => 12],
+    'action' => 'update', 'table' => 'Customers', 'data' => ['Email' => 12],
     'filters' => [['field' => 'Id', 'operator' => '=', 'value' => 1]],
 ]), 'INVALID_WRITE_VALUE');
 crudThrows(fn () => $execute([
-    'action' => 'update', 'resource' => 'missing', 'data' => ['Email' => 'x'],
+    'action' => 'update', 'table' => 'Missing', 'data' => ['Email' => 'x'],
     'filters' => [['field' => 'Id', 'operator' => '=', 'value' => 1]],
-]), 'INVALID_WRITE_RESOURCE');
+]), 'INVALID_WRITE_TABLE');
 
 // DELETE: prepared targeting and full-table guard.
 $delete = $execute([
-    'action' => 'delete', 'resource' => 'customers',
+    'action' => 'delete', 'table' => 'Customers',
     'filters' => [['field' => 'Email', 'operator' => 'LIKE', 'value' => '%@old.example']],
 ]);
 $deleteExecution = $engine->executions[array_key_last($engine->executions)];
 crudAssert(str_contains($deleteExecution['sql'], 'DELETE FROM [dbo].[Customers]'), 'DELETE SQL is invalid.');
 crudAssert($deleteExecution['params'] === ['%@old.example'], 'DELETE value was not parameterized.');
 crudAssert($delete['affectedRows'] === 1, 'DELETE affected-row count is invalid.');
-crudThrows(fn () => $execute(['action' => 'delete', 'resource' => 'customers']), 'UNSAFE_WRITE');
+crudThrows(fn () => $execute(['action' => 'delete', 'table' => 'Customers']), 'UNSAFE_WRITE');
 crudThrows(fn () => $execute([
-    'action' => 'delete', 'resource' => 'missing',
+    'action' => 'delete', 'table' => 'Missing',
     'filters' => [['field' => 'Id', 'operator' => '=', 'value' => 1]],
-]), 'INVALID_WRITE_RESOURCE');
+]), 'INVALID_WRITE_TABLE');
 crudThrows(fn () => $execute([
-    'action' => 'delete', 'resource' => 'customers',
+    'action' => 'delete', 'table' => 'Customers',
     'filters' => [['field' => 'Id', 'operator' => 'DROP', 'value' => 1]],
 ]), 'INVALID_REQUEST');
 
-// UPSERT: configured keys only, single parameterized MERGE/HOLDLOCK statement.
+// UPSERT: request keys must match a unique index; single parameterized MERGE/HOLDLOCK statement.
 $upsertRequest = [
-    'action' => 'upsert', 'resource' => 'customers',
+    'action' => 'upsert', 'table' => 'Customers', 'keys' => ['CustomerCode'],
     'data' => ['CustomerCode' => 'C002', 'Name' => 'Sam'],
 ];
 $upsertInsert = $execute($upsertRequest);
@@ -263,54 +241,77 @@ $upsertExecution = $engine->executions[array_key_last($engine->executions)];
 crudAssert(str_contains($upsertExecution['sql'], 'MERGE INTO [dbo].[Customers] WITH (HOLDLOCK)'), 'UPSERT locking strategy is missing.');
 crudAssert(!str_contains($upsertExecution['sql'], 'C002'), 'UPSERT value was interpolated.');
 crudAssert($upsertExecution['params'] === ['C002', 'Sam'], 'UPSERT parameters changed.');
-crudAssert(str_contains($upsertExecution['sql'], '[target].[CustomerCode] = [source].[CustomerCode]'), 'Configured UPSERT key did not reach SQL generation.');
+crudAssert(str_contains($upsertExecution['sql'], '[target].[CustomerCode] = [source].[CustomerCode]'), 'UPSERT key did not reach SQL generation.');
 crudAssert($upsertInsert['data'][0]['operation'] === 'insert', 'UPSERT insert path was not reported.');
 $engine->upsertOperation = 'UPDATE';
 $upsertUpdate = $execute($upsertRequest);
 crudAssert($upsertUpdate['data'][0]['operation'] === 'update', 'UPSERT update path was not reported.');
 $metadata->uniqueKey = false;
-$uniqueKeyRejected = false;
-try {
-    $execute($upsertRequest);
-} catch (RuntimeException $exception) {
-    $uniqueKeyRejected = true;
-    crudAssert(str_contains($exception->getMessage(), 'unique index'), 'Wrong missing unique-index failure.');
-}
-crudAssert($uniqueKeyRejected, 'UPSERT without a unique index was accepted.');
+crudThrows(fn () => $execute($upsertRequest), 'INVALID_UPSERT_KEY');
 $metadata->uniqueKey = true;
 crudThrows(fn () => $execute(array_merge($upsertRequest, ['keys' => ['Email']])), 'INVALID_UPSERT_KEY');
+crudThrows(fn () => $execute(array_merge($upsertRequest, ['keys' => ['Name']])), 'INVALID_UPSERT_KEY');
 crudThrows(fn () => $execute(array_merge($upsertRequest, ['keys' => []])), 'INVALID_REQUEST');
+$keylessUpsert = $upsertRequest;
+unset($keylessUpsert['keys']);
+crudThrows(fn () => $execute($keylessUpsert), 'INVALID_REQUEST');
 crudThrows(fn () => $execute([
-    'action' => 'upsert', 'resource' => 'customers', 'keys' => ['CustomerCode'],
+    'action' => 'upsert', 'table' => 'Customers', 'keys' => ['CustomerCode'],
     'data' => ['CustomerCode' => null, 'Name' => 'Sam'],
 ]), 'INVALID_WRITE_VALUE');
 crudThrows(fn () => $execute([
-    'action' => 'upsert', 'resource' => 'customers', 'keys' => ['CustomerCode'],
+    'action' => 'upsert', 'table' => 'Customers', 'keys' => ['CustomerCode'],
     'data' => ['CustomerCode' => 'C003', 'Name' => 'Sam', 'Unknown' => true],
 ]), 'INVALID_WRITE_COLUMN');
 
+// Generic CRUD needs no per-table registration: any user table the metadata
+// confirms is writable, including schema-qualified names.
+$execute([
+    'action' => 'insert', 'table' => 'inventory.Stock', 'data' => ['Sku' => 'A-1', 'Quantity' => 5],
+]);
+$stockExecution = $engine->executions[array_key_last($engine->executions)];
+crudAssert(str_contains($stockExecution['sql'], 'INSERT INTO [inventory].[Stock]') && $stockExecution['params'] === ['A-1', 5],
+    'Unregistered table write was not generated generically.');
+crudAssert(str_contains($stockExecution['sql'], 'CAST(NULL AS sql_variant)') && !str_contains($stockExecution['sql'], 'INSERTED.'),
+    'A table without an identity column captured a generated identity.');
+crudAssert(str_contains($insertExecution['sql'], 'INSERTED.[Id]'), 'The identity column was not detected from metadata.');
+$execute([
+    'action' => 'delete', 'table' => 'dbo.Customers', 'filters' => [['field' => 'Id', 'operator' => '=', 'value' => 1]],
+]);
+crudAssert(str_contains($engine->executions[array_key_last($engine->executions)]['sql'], 'DELETE FROM [dbo].[Customers]'), 'Schema-qualified table was not resolved.');
+
+// System catalog objects stay out of reach of the data API.
+foreach (['sys.objects', 'INFORMATION_SCHEMA.TABLES', 'Sys.Tables'] as $systemTable) {
+    crudThrows(fn () => $execute([
+        'action' => 'delete', 'table' => $systemTable, 'filters' => [['field' => 'name', 'operator' => '=', 'value' => 'x']],
+    ]), 'INVALID_WRITE_TABLE');
+}
+
 // Identifier attacks and malformed filter objects are rejected before SQL construction.
 foreach ([
-    ['action' => 'insert', 'resource' => 'customers;drop', 'data' => ['CustomerCode' => 'C', 'Name' => 'N']],
-    ['action' => 'insert', 'resource' => 'customers', 'data' => ['Name]; DROP TABLE X;--' => 'x']],
-    ['action' => 'delete', 'resource' => 'customers', 'filters' => [['field' => 'Id OR 1=1', 'operator' => '=', 'value' => 1]]],
-    ['action' => 'delete', 'resource' => 'customers', 'filters' => [['field' => 'Id', 'operator' => '=']]],
+    ['action' => 'insert', 'table' => 'master.dbo.Customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N']],
+    ['action' => 'insert', 'table' => '[dbo].[Customers]', 'data' => ['CustomerCode' => 'C', 'Name' => 'N']],
+    ['action' => 'insert', 'resource' => 'customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N']],
+    ['action' => 'insert', 'table' => 'Customers;drop', 'data' => ['CustomerCode' => 'C', 'Name' => 'N']],
+    ['action' => 'insert', 'table' => 'Customers', 'data' => ['Name]; DROP TABLE X;--' => 'x']],
+    ['action' => 'delete', 'table' => 'Customers', 'filters' => [['field' => 'Id OR 1=1', 'operator' => '=', 'value' => 1]]],
+    ['action' => 'delete', 'table' => 'Customers', 'filters' => [['field' => 'Id', 'operator' => '=']]],
 ] as $maliciousRequest) {
     crudThrows(fn () => $execute($maliciousRequest), 'INVALID_REQUEST');
 }
 
 // Safe public response and classified database conflicts.
-Response::setRequestContext(['action' => 'insert', 'resource' => 'customers']);
+Response::setRequestContext(['action' => 'insert', 'table' => 'Customers']);
 $response = Response::successPayload($insert, 'Data Inserted Successfully');
 crudAssert($response['success'] && $response['meta']['affectedRows'] === 1, 'Write response metadata is invalid.');
 crudAssert($response['data'][0]['generatedId'] === 42, 'Generated identity is missing from response.');
 $engine->failure = '[Microsoft][ODBC SQL Server Driver][SQL Server]Violation of UNIQUE KEY constraint. (2627)';
 crudThrows(fn () => $execute([
-    'action' => 'insert', 'resource' => 'customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N'],
+    'action' => 'insert', 'table' => 'Customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N'],
 ]), 'DUPLICATE_KEY');
 $engine->failure = 'The INSERT statement conflicted with the FOREIGN KEY constraint. (547)';
 crudThrows(fn () => $execute([
-    'action' => 'insert', 'resource' => 'customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N'],
+    'action' => 'insert', 'table' => 'Customers', 'data' => ['CustomerCode' => 'C', 'Name' => 'N'],
 ]), 'CONSTRAINT_VIOLATION');
 
 echo "CRUD operation tests passed (database-independent; no live SQL Server execution).\n";

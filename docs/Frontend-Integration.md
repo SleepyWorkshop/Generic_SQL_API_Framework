@@ -142,12 +142,12 @@ request shown above. A resource with no UI controls can omit `execution` entirel
 
 ## Write form
 
-For an edit form, submit one registered object:
+For an edit form, submit one object for the target table:
 
 ```json
 {
   "action": "update",
-  "resource": "crud-test",
+  "table": "Customers",
   "data": { "Email": "new@example.com", "Status": "Active" },
   "filters": [{ "field": "CustomerCode", "operator": "=", "value": "C001" }]
 }

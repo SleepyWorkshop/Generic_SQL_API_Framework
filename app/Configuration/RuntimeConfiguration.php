@@ -72,15 +72,15 @@ final class RuntimeConfiguration
     public static function authorizationDefaults(): array
     {
         return [
-            'version' => 3,
+            'version' => 4,
             'publicRoles' => ['read-only'],
             'legacyApiKeyRoles' => ['read-only'],
             'roles' => [
-                'read-only' => ['name' => 'Read Only', 'domain' => 'backend', 'permissions' => ['data.read', 'metadata.read', 'sql.execute', 'routine.execute'], 'sqlResources' => ['*'], 'writeResources' => []],
-                'data-operator' => ['name' => 'Data Operator', 'domain' => 'backend', 'permissions' => ['data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute'], 'sqlResources' => ['*'], 'writeResources' => ['*']],
-                'api-administrator' => ['name' => 'Admin', 'domain' => 'backend', 'permissions' => ['data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute'], 'sqlResources' => ['*'], 'writeResources' => ['*']],
-                'system-administrator' => ['name' => 'System Administrator', 'domain' => 'backend', 'permissions' => ['admin.manage', 'frontend.users.manage', 'data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute'], 'sqlResources' => ['*'], 'writeResources' => ['*']],
-                'application-administrator' => ['name' => 'Application Administrator', 'domain' => 'frontend', 'permissions' => ['frontend.read', 'frontend.users.manage'], 'sqlResources' => ['*'], 'writeResources' => []],
+                'read-only' => ['name' => 'Read Only', 'domain' => 'backend', 'permissions' => ['data.read', 'metadata.read', 'sql.execute', 'routine.execute']],
+                'data-operator' => ['name' => 'Data Operator', 'domain' => 'backend', 'permissions' => ['data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute']],
+                'api-administrator' => ['name' => 'Admin', 'domain' => 'backend', 'permissions' => ['data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute']],
+                'system-administrator' => ['name' => 'System Administrator', 'domain' => 'backend', 'permissions' => ['admin.manage', 'frontend.users.manage', 'data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute']],
+                'application-administrator' => ['name' => 'Application Administrator', 'domain' => 'frontend', 'permissions' => ['frontend.read', 'frontend.users.manage']],
             ],
         ];
     }

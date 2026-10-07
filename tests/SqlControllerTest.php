@@ -1,6 +1,5 @@
 <?php
 
-require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
 
 require_once __DIR__ . '/../app/Requests/QueryRequestValidator.php';
 require_once __DIR__ . '/../app/Requests/QueryRequestNormalizer.php';
@@ -146,7 +145,7 @@ try {
 }
 
 $engine = new SqlTestEngine();
-$repository = new SqlRepository($engine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy());
+$repository = new SqlRepository($engine, $registry);
 $result = $repository->execute($normalized);
 sqlAssert($result['totalRows'] === 7, 'SQL pagination total was not preserved.');
 $execution = end($engine->executions);
@@ -189,7 +188,7 @@ foreach ($sqlOperatorCases as [$operator, $value, $fragment, $expectedParams]) {
     if (!in_array($operator, ['IS NULL', 'IS NOT NULL'], true)) {
         $filter['value'] = $value;
     }
-    (new SqlRepository($operatorEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute($normalizer->normalize([
+    (new SqlRepository($operatorEngine, $registry))->execute($normalizer->normalize([
         'action' => 'sql',
         'resource' => 'item',
         ...$itemExecution,
@@ -209,7 +208,7 @@ $emptySortRequest = $normalizer->normalize([
     'pagination' => ['page' => 1, 'pageSize' => 25],
 ]);
 $emptySortEngine = new SqlTestEngine();
-$emptySortRepository = new SqlRepository($emptySortEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy());
+$emptySortRepository = new SqlRepository($emptySortEngine, $registry);
 $emptySortRepository->execute($emptySortRequest);
 $emptySortExecution = end($emptySortEngine->executions);
 sqlAssert(
@@ -233,7 +232,7 @@ $groupedRequest = $normalizer->normalize([
     'pagination' => ['page' => 1, 'pageSize' => 100],
 ]);
 $groupedEngine = new SqlTestEngine();
-$groupedRepository = new SqlRepository($groupedEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy());
+$groupedRepository = new SqlRepository($groupedEngine, $registry);
 $groupedResult = $groupedRepository->execute($groupedRequest);
 $groupedCountExecutions = array_values(array_filter(
     $groupedEngine->executions,
@@ -267,7 +266,7 @@ sqlAssert($groupedResult['totalRows'] === 7, 'Grouped SQL-mode count result was 
 
 foreach (['bill-sales-month-wise', 'bill-purchases-month-wise'] as $orderedResource) {
     $orderedEngine = new SqlTestEngine();
-    (new SqlRepository($orderedEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute($normalizer->normalize([
+    (new SqlRepository($orderedEngine, $registry))->execute($normalizer->normalize([
         'action' => 'sql',
         'resource' => $orderedResource,
         'filters' => [],
@@ -299,7 +298,7 @@ $topRequest = $normalizer->normalize([
     'pagination' => ['page' => 1, 'pageSize' => 10],
 ]);
 $topEngine = new SqlTestEngine();
-$topResult = (new SqlRepository($topEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute($topRequest);
+$topResult = (new SqlRepository($topEngine, $registry))->execute($topRequest);
 $topCountExecutions = array_values(array_filter(
     $topEngine->executions,
     fn (array $entry): bool => str_contains($entry['sql'], 'COUNT(*) AS TotalRows')
@@ -316,7 +315,7 @@ sqlAssert(
 );
 
 $partialTopEngine = new SqlTestEngine();
-(new SqlRepository($partialTopEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute($normalizer->normalize([
+(new SqlRepository($partialTopEngine, $registry))->execute($normalizer->normalize([
     'action' => 'sql',
     'resource' => 'bill-top-10-categories',
     'filters' => [],
@@ -338,7 +337,7 @@ sqlAssert(
 );
 
 $customerEngine = new SqlTestEngine();
-(new SqlRepository($customerEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute($normalizer->normalize([
+(new SqlRepository($customerEngine, $registry))->execute($normalizer->normalize([
     'action' => 'sql',
     'resource' => 'customer',
     ...$customerExecutionMetadata,
@@ -358,7 +357,7 @@ $dateFilterCases = [
 ];
 foreach ($dateFilterCases as $label => [$operator, $value, $expectedParams]) {
     $dateEngine = new SqlTestEngine();
-    (new SqlRepository($dateEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute($normalizer->normalize([
+    (new SqlRepository($dateEngine, $registry))->execute($normalizer->normalize([
         'action' => 'sql',
         'resource' => 'customer',
         ...$customerExecutionMetadata,
@@ -384,7 +383,7 @@ foreach ($dateFilterCases as $label => [$operator, $value, $expectedParams]) {
 
 foreach (['AND', 'OR'] as $logic) {
     $logicEngine = new SqlTestEngine();
-    (new SqlRepository($logicEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute($normalizer->normalize([
+    (new SqlRepository($logicEngine, $registry))->execute($normalizer->normalize([
         'action' => 'sql',
         'resource' => 'customer',
         ...$customerExecutionMetadata,
@@ -407,7 +406,7 @@ foreach (['AND', 'OR'] as $logic) {
 }
 
 try {
-    (new SqlRepository(new SqlTestEngine(), $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute($normalizer->normalize([
+    (new SqlRepository(new SqlTestEngine(), $registry))->execute($normalizer->normalize([
         'action' => 'sql',
         'resource' => 'customer',
         ...$customerExecutionMetadata,
@@ -443,7 +442,7 @@ foreach ($statFilterCases as $label => [$filters, $expectedParams]) {
         'MaximumSP' => 20,
         'TotalValue' => 30,
     ]];
-    $statsResult = (new SqlRepository($statsEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute(
+    $statsResult = (new SqlRepository($statsEngine, $registry))->execute(
         $normalizer->normalize([
             'action' => 'sql',
             'resource' => 'item-dashboard-stats',
@@ -482,7 +481,7 @@ $unfilteredStatsEngine->resultData = [[
     'MaximumSP' => null,
     'TotalValue' => null,
 ]];
-$unfilteredStatsResult = (new SqlRepository($unfilteredStatsEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute(
+$unfilteredStatsResult = (new SqlRepository($unfilteredStatsEngine, $registry))->execute(
     $normalizer->normalize([
         'action' => 'sql',
         'resource' => 'item-dashboard-stats',
@@ -504,7 +503,7 @@ sqlAssert(
 );
 
 $tableFilterEngine = new SqlTestEngine();
-(new SqlRepository($tableFilterEngine, $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute($normalizer->normalize([
+(new SqlRepository($tableFilterEngine, $registry))->execute($normalizer->normalize([
     'action' => 'sql',
     'resource' => 'item-dashboard-table',
     ...$tableExecution,
@@ -545,7 +544,7 @@ try {
 }
 
 try {
-    (new SqlRepository(new SqlTestEngine(), $registry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository(new SqlTestEngine(), $registry))->execute([
         'resource' => 'item-dashboard-stats',
         ...$statsExecutionMetadata,
         'filters' => [['field' => 'Item_Code', 'operator' => '=', 'value' => 'A1']],

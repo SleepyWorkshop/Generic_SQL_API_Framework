@@ -20,8 +20,9 @@ final class AuthorizationRepository
         if (($value['version'] ?? null) === 1) {
             $value = RuntimeConfiguration::authorizationDefaults();
             JsonFileStore::save($this->path, $value);
-        } elseif (($value['version'] ?? null) === 2) {
-            $value = $this->migrateVersionTwo($value);
+        } elseif (in_array($value['version'] ?? null, [2, 3], true)) {
+            if ($value['version'] === 2) $value = $this->migrateVersionTwo($value);
+            $value = $this->migrateVersionThree($value);
             JsonFileStore::save($this->path, $value);
         }
         $this->validate($value);
@@ -53,15 +54,32 @@ final class AuthorizationRepository
             'name' => 'Admin',
             'domain' => 'backend',
             'permissions' => ['data.read', 'data.write', 'metadata.read', 'sql.execute', 'routine.execute'],
-            'sqlResources' => $operator['sqlResources'] ?? [],
-            'writeResources' => $operator['writeResources'] ?? [],
         ];
+        return $value;
+    }
+
+    /**
+     * Version 4 removes per-role SQL Resource and write-resource scopes.
+     * Authorization is decided by role permissions only.
+     */
+    private function migrateVersionThree(array $value): array
+    {
+        if (!is_array($value['roles'] ?? null) || array_is_list($value['roles'])) {
+            throw new RuntimeException('Invalid authorization configuration.');
+        }
+        foreach ($value['roles'] as $id => $role) {
+            if (is_array($role)) {
+                unset($role['sqlResources'], $role['writeResources']);
+                $value['roles'][$id] = $role;
+            }
+        }
+        $value['version'] = 4;
         return $value;
     }
 
     public function validate(array $value): void
     {
-        if (($value['version'] ?? null) !== 3
+        if (($value['version'] ?? null) !== 4
             || array_diff(array_keys($value), ['version', 'publicRoles', 'legacyApiKeyRoles', 'roles']) !== []
             || !is_array($value['roles'] ?? null)
             || array_is_list($value['roles'])
@@ -81,7 +99,7 @@ final class AuthorizationRepository
             if (!is_string($id)
                 || preg_match('/^[a-z][a-z0-9-]*$/', $id) !== 1
                 || !is_array($role)
-                || array_diff(array_keys($role), ['name', 'domain', 'permissions', 'sqlResources', 'writeResources']) !== []
+                || array_diff(array_keys($role), ['name', 'domain', 'permissions']) !== []
                 || !is_string($role['name'] ?? null)
                 || trim($role['name']) === '') {
                 throw new RuntimeException('Invalid authorization role.');
@@ -89,21 +107,13 @@ final class AuthorizationRepository
             if (!in_array($role['domain'] ?? null, ['backend', 'frontend'], true)) {
                 throw new RuntimeException('Invalid authorization role domain.');
             }
-            foreach (['permissions', 'sqlResources', 'writeResources'] as $field) {
-                if (!is_array($role[$field] ?? null)
-                    || !array_is_list($role[$field])
-                    || count(array_unique($role[$field])) !== count($role[$field])) {
-                    throw new RuntimeException('Invalid authorization role.');
-                }
+            if (!is_array($role['permissions'] ?? null)
+                || !array_is_list($role['permissions'])
+                || count(array_unique($role['permissions'])) !== count($role['permissions'])) {
+                throw new RuntimeException('Invalid authorization role.');
             }
             if (array_diff($role['permissions'], $allowedPermissions) !== []) {
                 throw new RuntimeException('Invalid authorization permission.');
-            }
-            foreach (array_merge($role['sqlResources'], $role['writeResources']) as $resource) {
-                if (!is_string($resource)
-                    || ($resource !== '*' && preg_match('/^[A-Za-z0-9][A-Za-z0-9_\/-]*$/', $resource) !== 1)) {
-                    throw new RuntimeException('Invalid authorization resource scope.');
-                }
             }
         }
         foreach (array_merge($value['publicRoles'], $value['legacyApiKeyRoles']) as $role) {

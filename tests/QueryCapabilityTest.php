@@ -1,6 +1,5 @@
 <?php
 
-require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
 
 require_once __DIR__ . '/../app/Requests/QueryRequestValidator.php';
 require_once __DIR__ . '/../app/Requests/QueryRequestNormalizer.php';
@@ -47,6 +46,14 @@ class QueryCapabilityEngine extends QueryEngine
 class QueryCapabilityMetadata extends MetadataRepository
 {
     public function __construct() {}
+    public function getRoutine(string $schema, string $name): ?array
+    {
+        return $schema === 'dbo' ? ([
+            'RunReport' => ['type' => 'procedure', 'parameters' => 1],
+            'Score' => ['type' => 'function', 'parameters' => 1],
+            'Rows' => ['type' => 'tableFunction', 'parameters' => 1],
+        ][$name] ?? null) : null;
+    }
     public function tableExists($table)
     {
         return !in_array($table, ['ActiveItems', 'NumberTree'], true);
@@ -92,11 +99,7 @@ class QueryCapabilityMetadataEngine extends QueryEngine
 $validator = new QueryRequestValidator();
 $normalizer = new QueryRequestNormalizer();
 $engine = new QueryCapabilityEngine();
-$repository = new QueryRepository($engine, new QueryCapabilityMetadata(), routines: new RoutineResourceRegistry([
-    'dbo.RunReport' => ['type' => 'procedure', 'schema' => 'dbo', 'name' => 'RunReport', 'access' => 'read', 'parameters' => 1, 'roles' => ['read-only']],
-    'dbo.Score' => ['type' => 'function', 'schema' => 'dbo', 'name' => 'Score', 'access' => 'read', 'parameters' => 1, 'roles' => ['read-only']],
-    'dbo.Rows' => ['type' => 'tableFunction', 'schema' => 'dbo', 'name' => 'Rows', 'access' => 'read', 'parameters' => 1, 'roles' => ['read-only']],
-]), sourcePolicy: new PermissiveQuerySourcePolicy());
+$repository = new QueryRepository($engine, new QueryCapabilityMetadata());
 
 $build = function (array $request) use ($validator, $normalizer, $repository): array {
     $validator->validate($request);

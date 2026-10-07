@@ -40,10 +40,10 @@ SQL Server: ODBC, one request-owned connection, prepared parameters
 |---|---|---|
 | Transport | IIS or Nginx TLS; `HTTPS` is passed by the server and never taken from forwarded headers | `Secure` cookies follow production mode or direct HTTPS |
 | Authentication | `AuthenticationMiddleware`: session cookie, managed API key, or both, per `authentication.mode` | API keys never authenticate identity management or the Admin API |
-| Authorization | `AuthorizationMiddleware` and `AuthorizationService` (role permissions and resource scopes); `FrontendUserAuthorizationMiddleware` and `UserManagementService` for frontend user management | Client-supplied role, access, or identity fields are never read |
+| Authorization | `AuthorizationMiddleware` and `AuthorizationService` (role permissions only, one path for every authentication method); `FrontendUserAuthorizationMiddleware` and `UserManagementService` for frontend user management | Client-supplied role, access, or identity fields are never read |
 | Admin API | Web-server loopback restriction; `LocalAdminMiddleware` (loopback `REMOTE_ADDR` and `GENERIC_ADMIN_ENABLED=1`); `admin.manage`; CSRF | Uses `REMOTE_ADDR` only, so it must not sit behind a same-host proxy |
 | SQL Parser | Loopback or internal binding; fixed routing to `index.php` and its assets | No authentication, database, configuration, file, or network access; never executes SQL |
-| Database | Request-scoped ODBC connection; query-source, routine, and write-resource registries; prepared parameters | Credentials are decrypted only in request memory |
+| Database | Request-scoped ODBC connection; catalog-confirmed user objects only; prepared parameters; the database login's permissions are the data boundary | Credentials are decrypted only in request memory |
 | Filesystem | Fixed FastCGI targets; no generic `*.php` routing; state directories outside web roots | See [Filesystem](#filesystem-and-least-privilege) |
 | Secrets | Worker environment for keys; AES-256-GCM `database.json`; hashed passwords and API keys | See [Secrets](#secrets-and-configuration) |
 | Sessions | PHP file sessions, cookie-only, strict mode, host-only cookie, idle and absolute timeouts, `authVersion` revocation | See [Sessions](#sessions-csrf-and-cors) |
@@ -68,11 +68,12 @@ returns `404 NOT_FOUND` before authentication.
 | `auth.login`, `auth.logout` | None / credentials (login rate limit) | None | Yes |
 | `auth.frontendUsers.list` | Session only | `frontend.users.manage` | No |
 | Other `auth.frontendUsers.*` | Session only | `frontend.users.manage` plus persisted actor/target policy | Yes |
-| `select`, `union`, `unionAll` | API mode | `data.read` or `frontend.read`; query-source registry | No |
-| `sql` | API mode | `sql.execute` with `sqlResources` scope, or `frontend.read` | No |
-| `procedure`, `function`, `tableFunction` | API mode | Routine registry, `routine.execute`, a listed role, and `data.write` for write routines | Write routines only |
-| `insert`, `update`, `delete`, `upsert` | API mode | `data.write` with `writeResources` scope | Yes |
-| `metadata.*` | API mode | `metadata.read` or `frontend.read`; results filtered to registered sources | No |
+| `select`, `union`, `unionAll` | API mode | `data.read` or `frontend.read` | No |
+| `sql` | API mode | `sql.execute` or `frontend.read` | No |
+| `function`, `tableFunction` | API mode | `routine.execute` | No |
+| `procedure` | API mode | `routine.execute` and `data.write` | Yes |
+| `insert`, `update`, `delete`, `upsert` | API mode | `data.write` | Yes |
+| `metadata.*` | API mode | `metadata.read` or `frontend.read` | No |
 
 *API mode* is `authentication.mode`: `none` creates an anonymous principal with
 `publicRoles`; `api_key` requires a valid `X-API-Key`; `session` requires a
@@ -111,9 +112,10 @@ into unsafe combinations.
 | `api-administrator` ("Admin" API key role) | backend | API keys only | Same data permissions as Data Operator; no `admin.manage` or `frontend.users.manage` |
 | `application-administrator` (Application Administrator) | frontend | users (`frontendRole`) | `frontend.read`, `frontend.users.manage` |
 
-Any identity with `frontendAccess = true` holds `frontend.read`. All roles have
-`sqlResources: ["*"]`; `writeResources` is `["*"]` for the three write-capable
-roles and empty otherwise. Validation enforces that only System Administrator
+Any identity with `frontendAccess = true` holds `frontend.read`. Roles carry
+permissions only; there are no per-table, per-routine, or per-SQL-Resource
+scopes, and the authentication method never changes the decision for the same
+role. Validation enforces that only System Administrator
 holds `admin.manage`, that Read Only and Application Administrator never hold
 `data.write`, and that `publicRoles` and `legacyApiKeyRoles` never contain
 System Administrator. An API key that was assigned System Administrator by an
@@ -140,30 +142,39 @@ through the Admin API.
   against live metadata; operators, functions, join shapes, sort directions, and
   expressions are allowlisted. Filter, HAVING, and routine values are prepared
   parameters. Expression depth is limited to 32.
-- **Query sources.** `config/query-sources.php` is a deny-by-default registry of
-  tables and views for JSON Query Mode (source, joins, subqueries, set-operation
-  branches, CTE bodies), metadata listings, and SQL Resource runtime source
-  filters. Entries may restrict access by role.
-- **Routines.** `config/routine-resources.php` is a deny-by-default registry.
-  Each entry fixes the type, schema, name, read/write access, exact parameter
-  count, and allowed roles; SQL is built from the entry, never from the request.
-  The shipped registry is empty.
+- **Object names.** Table and routine names are `Name` or `Schema.Name` with
+  identifier-only parts. Three-part and cross-database names, brackets, the
+  `sys` and `INFORMATION_SCHEMA` schemas, and `sp_`/`xp_` system procedures are
+  rejected. Every table, view, column, and routine must exist in the configured
+  database's catalog before SQL is built, and identifiers are bracket-quoted.
+- **Queries.** JSON Query Mode reads any catalog-confirmed table or view, in any
+  position (source, join, subquery, set-operation branch, CTE body). Filters,
+  sorting, and pagination are generic request controls, validated for safety
+  only.
+- **Routines.** Routines are called by name and must match an existing user
+  routine of the requested kind. Functions take exactly their declared
+  parameters, procedures at most that many; values are bound. Procedures
+  require `data.write` because they can change data.
 - **SQL Resources.** Clients send a path-derived ID, never SQL or a path. Files
   must resolve inside the configured root (`realpath` containment), excluded
   directories are not discoverable, collisions fail closed, and each file must
   be one read-only SELECT/CTE. Runtime filter and sort fields come from
-  strictly validated execution metadata. The SQL inside an authored resource is
-  trusted server code and is not checked table by table against the
-  query-source registry.
-- **Writes.** `config/write-resources.php` is deny-by-default. Public IDs map to
-  a fixed schema, table, enabled actions, and writable/filterable/key/identity
-  columns, all checked against live metadata. UPDATE and DELETE require a
-  non-empty filter; UPSERT requires an exact unique index.
+  strictly validated execution metadata, and source mappings must reference a
+  top-level source of the authored statement. The SQL inside an authored
+  resource is trusted server code.
+- **Writes.** Writes target any user table named in the request. Columns,
+  types, and generated-column rules come from live metadata. Only INSERT,
+  UPDATE, DELETE, and MERGE are generated; UPDATE and DELETE require a
+  non-empty filter; UPSERT keys must match a primary key or unique index. The
+  data API never generates DDL or administrative statements.
 - **Result size.** Unpaginated data reads stop at `GENERIC_MAX_RESULT_ROWS`
   (default 10,000) with `413 RESULT_TOO_LARGE`; results are never silently
   truncated.
-- **Read-column authorization** does not exist. Expose sensitive data only
-  through least-privilege views or SQL Resources (ST-003).
+- **Data boundary.** Effective access is the API permission **and** the
+  database login's permission. The API does not duplicate table permissions, so
+  a principal with `data.read` reaches every object the login can read and
+  `data.write` every table it can write. Grant the login only what clients
+  should reach (ST-003).
 
 ## Sessions, CSRF, and CORS
 
@@ -213,7 +224,7 @@ deployments must use the encrypted form and an externally managed key.
 
 | Location | PHP worker access |
 |---|---|
-| Code: `api/`, `admin/`, `sqlparser/`, `app/`, `core/`, `queries/`, `database/drivers/`, `config/` (shipped PHP configuration and registries) | Read only |
+| Code: `api/`, `admin/`, `sqlparser/`, `app/`, `core/`, `queries/`, `database/drivers/`, `config/` (shipped PHP configuration) | Read only |
 | `runtime/windows/`, `runtime/linux/` (development PHP runtimes) | Read only |
 | Runtime configuration directory (`GENERIC_RUNTIME_CONFIG_DIR`, outside the code tree) | Read/write |
 | `database/config/` | Read/write (encrypted `database.json`) |
@@ -222,7 +233,7 @@ deployments must use the encrypted form and an externally managed key.
 | `.git/`, temporary files | No access |
 
 Keeping runtime state outside `Backend/config` means the worker identity cannot
-modify the PHP registries it executes. `php scripts/validate-production.php`
+modify the PHP configuration it executes. `php scripts/validate-production.php`
 reports whether the runtime configuration directory is outside the code tree.
 
 ## PHP runtime and web server
@@ -245,9 +256,11 @@ HSTS, CSP, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, and
 
 ## Database
 
-- Baseline grant is `db_datareader`; add `db_datawriter` only when write
-  resources are registered and `EXECUTE` only when routines are exposed. Prefer
-  schema-, view-, or procedure-level grants. `db_owner` is never required.
+- The login's grants are the effective data boundary. The baseline is
+  `db_datareader`; add `db_datawriter` only when clients must change data and
+  `EXECUTE` only when they must call routines. Prefer schema-, table-, view-, or
+  procedure-level grants. `db_owner` is never required, and a highly privileged
+  or shared login gives every `data.read`/`data.write` principal the same reach.
 - Windows authentication through the application-pool identity is recommended
   on a domain; SQL authentication passwords are stored only in the encrypted
   `database.json`.
@@ -306,9 +319,10 @@ are in [Security verification](Security-Verification.md).
   where possible (SAOH-06).
 - **Logs.** Rotation, retention, alerting, and central collection are external
   (SAOH-07).
-- **Read-column authorization** is not implemented (ST-003).
-- **Frontend access** is not narrowed by SQL Resource scopes; only backend roles
-  are (SSA-06).
+- **No API-level resource isolation.** Authorization is role permission only;
+  per-table, per-column, per-routine, and per-SQL-Resource restrictions are left
+  to the database login's permissions (ST-003; SSA-01, SSA-03, SSA-07 superseded
+  in v2.2).
 - **Password change** does not require the current password (there is no
   self-service or recovery flow; changes are administrator resets); a managed
   API key keeps the role it was created with even if its owner is demoted,

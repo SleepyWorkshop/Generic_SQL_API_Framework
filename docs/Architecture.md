@@ -32,7 +32,7 @@ QueryEngine → Database → DriverFactory → SqlServerDriver → PHP ODBC
 Microsoft SQL Server
 
 Configuration and state (read by every layer above):
-  config/*.php                      shipped registries (read-only in production)
+  config/*.php                      shipped PHP configuration (read-only in production)
   GENERIC_RUNTIME_CONFIG_DIR        users, roles, API keys, Admin settings, availability
   database/config/database.json     encrypted database configuration
   logs/, runtime/, storage/, backups/
@@ -56,7 +56,7 @@ stubs.
 | `app/Repositories/` | Query, SQL Resource, write, metadata, and configuration repositories |
 | `app/Repositories/Query/` | SELECT builders (WHERE, JOIN, GROUP BY, HAVING, ORDER BY, pagination, windows, expressions, routines) |
 | `app/Repositories/Write/` | INSERT, UPDATE, DELETE, UPSERT, and write-filter builders |
-| `app/Resources/` | SQL Resource discovery, query-source, routine, and write-resource registries |
+| `app/Resources/` | SQL Resource discovery and statement analysis, routine resolution, database object-name parsing |
 | `app/Security/`, `app/Authorization/` | Password hashing, API keys, CSRF, rate limiters, database encryption, role model, principals |
 | `app/Configuration/`, `app/Runtime/` | Runtime configuration bootstrap; development process managers and production availability state |
 | `app/Health/`, `app/Backup/`, `app/Deployment/` | Health monitoring, application backup and restore, production validation |
@@ -100,12 +100,39 @@ envelope:
   top-level `WITH` prefix, applies runtime filters at the output, source, or
   HAVING stage, and reuses pagination. It does not use the JSON Query expression
   allowlists.
-- **Write API.** `WriteResourceRegistry` resolves the registered target before
-  metadata is loaded; `WritePayloadValidator` checks values against live column
-  metadata; the write builders produce bracket-quoted identifiers and
+- **Write API.** `DatabaseObjectName` parses the client-named table (rejecting
+  system schemas and cross-database names), the repository loads its live column
+  metadata and identity column, and `WritePayloadValidator` checks columns and
+  values against that metadata; the write builders produce bracket-quoted identifiers and
   parameters, capture `OUTPUT` into a table variable for affected-row counts and
   identities, and use one `MERGE ... WITH (HOLDLOCK)` for UPSERT. See
   [Write API](Write-API.md).
+
+Routines follow the same pattern: `RoutineResolver` parses the name, rejects
+system procedures, and confirms the routine's kind and declared parameter count
+in `INFORMATION_SCHEMA.ROUTINES` before `RoutineBuilder` emits the call.
+
+## Authorization
+
+`AuthorizationMiddleware` makes one decision per request from the authenticated
+`Principal`'s role permissions. Sessions, managed API keys, the legacy key, and
+anonymous mode all produce a `Principal`, so the authentication method never
+changes the outcome:
+
+| Action | Permission |
+|---|---|
+| `select`, `union`, `unionAll` | `data.read` or `frontend.read` |
+| `sql` | `sql.execute` or `frontend.read` |
+| `metadata.*` | `metadata.read` or `frontend.read` |
+| `insert`, `update`, `delete`, `upsert` | `data.write` |
+| `function`, `tableFunction` | `routine.execute` |
+| `procedure` | `routine.execute` and `data.write` |
+
+There are no per-table, per-routine, or per-SQL-Resource registries or scopes.
+After authorization, request validation, catalog checks, and prepared
+parameters keep SQL safe, and the database login's permissions bound what any
+request can reach. The Admin API is a separate management plane with its own
+`admin.manage` check.
 
 `OrderByBuilder` distinguishes top-level positional ordering from window
 `ORDER BY`: SQL Server rejects integer positions inside `OVER (...)`, so window

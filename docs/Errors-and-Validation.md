@@ -79,10 +79,9 @@ message text.
 | `INVALID_SQL_RUNTIME_VALUE` | 400 | A mapped runtime value failed conversion (for example `integer-date`) | Correct the value |
 | `INVALID_SQL_RUNTIME_FILTER` | 400 | Filter placement is ambiguous or unsafe | Change the filter logic or resource design |
 | `INVALID_SQL_PAGINATION` | 400 | Pagination lacks an approved sort or conflicts with authored OFFSET/FETCH | Supply approved sorting or use the resource's fixed paging |
-| `INVALID_ROUTINE` | 400 | Routine ID is not registered for this action | Use a registered routine ID |
-| `INVALID_ROUTINE_PARAMETERS` | 400 | Argument count differs from the registry | Send exactly the registered number |
-| `RESOURCE_ACCESS_DENIED` | 403 | Table/view, SQL Resource, or routine is unregistered or outside the caller's roles | Do not retry; request access |
-| `INVALID_WRITE_RESOURCE` | 400 | Write resource is unknown or the action is not enabled | Do not retry |
+| `INVALID_ROUTINE` | 400 | Routine name is unsafe, does not exist, or is a different routine kind | Use an existing user routine of the right kind |
+| `INVALID_ROUTINE_PARAMETERS` | 400 | Too many procedure arguments, or a function argument count that differs from its declaration | Send the declared parameters |
+| `INVALID_WRITE_TABLE` | 400 | Write table is in a system schema or does not exist as a user table | Use an existing user table |
 | `UNSAFE_WRITE` | 400 | UPDATE or DELETE without filters | Supply at least one filter |
 | `INVALID_WRITE_COLUMN` | 400 | Column is not writable or filterable, or is generated | Remove or replace the field |
 | `INVALID_WRITE_VALUE` | 400 | Value fails live type, range, format, null, or length rules | Correct the value |
@@ -131,6 +130,6 @@ JSON errors through unchanged; verify this on the target host.
 ## Validation and security boundaries
 
 Validation is one layer of the security model. Query construction, SQL
-Resource containment, write-resource registries, query-source and routine
-registries, and credential handling are described in
+Resource containment, identifier and catalog checks, and credential handling are
+described in
 [Security model](security/Security-Model.md#data-access-controls).

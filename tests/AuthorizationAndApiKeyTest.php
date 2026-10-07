@@ -32,15 +32,28 @@ try {
     putenv('GENERIC_RUNTIME_CONFIG_DIR=' . $directory);
     RuntimeConfiguration::ensure();
     $legacyAuthorizationPath = $directory . '/legacy-authorization.json';
-    $legacyAuthorization = RuntimeConfiguration::authorizationDefaults();
-    $legacyAuthorization['version'] = 2;
-    unset($legacyAuthorization['roles'][RoleModel::API_ADMINISTRATOR]);
-    $legacyAuthorization['roles'][RoleModel::DATA_OPERATOR]['writeResources'] = ['legacy-custom-scope'];
-    JsonFileStore::save($legacyAuthorizationPath, $legacyAuthorization);
-    $migratedAuthorization = (new AuthorizationRepository($legacyAuthorizationPath))->load();
-    authorizationAssert($migratedAuthorization['version'] === 3
-        && $migratedAuthorization['roles'][RoleModel::API_ADMINISTRATOR]['writeResources'] === ['legacy-custom-scope'],
-        'Authorization migration discarded customized API resource scopes.');
+    // Versions 2 and 3 carried per-role SQL Resource and write-resource scopes.
+    // Both migrate to version 4, which authorizes by role permissions only.
+    $scopedDefaults = RuntimeConfiguration::authorizationDefaults();
+    foreach ($scopedDefaults['roles'] as $roleId => $role) {
+        $scopedDefaults['roles'][$roleId] += ['sqlResources' => ['*'], 'writeResources' => ['legacy-custom-scope']];
+    }
+    foreach ([2, 3] as $legacyVersion) {
+        $legacyAuthorization = $scopedDefaults;
+        $legacyAuthorization['version'] = $legacyVersion;
+        if ($legacyVersion === 2) unset($legacyAuthorization['roles'][RoleModel::API_ADMINISTRATOR]);
+        JsonFileStore::save($legacyAuthorizationPath, $legacyAuthorization);
+        $migratedAuthorization = (new AuthorizationRepository($legacyAuthorizationPath))->load();
+        $expectedAuthorization = RuntimeConfiguration::authorizationDefaults();
+        $sortedRoles = function (array $value): array { ksort($value['roles']); return $value; };
+        $scopesRemaining = array_filter($migratedAuthorization['roles'],
+            fn (array $role): bool => array_key_exists('sqlResources', $role) || array_key_exists('writeResources', $role));
+        authorizationAssert($migratedAuthorization['version'] === 4
+            && $scopesRemaining === []
+            && $sortedRoles($migratedAuthorization) === $sortedRoles($expectedAuthorization)
+            && JsonFileStore::load($legacyAuthorizationPath) === $migratedAuthorization,
+            "Authorization version {$legacyVersion} did not migrate to permission-only version 4.");
+    }
 
     $legacyApiKeyPath = $directory . '/legacy-api-keys.json';
     JsonFileStore::save($legacyApiKeyPath, ['version' => 2, 'keys' => [[
@@ -89,18 +102,54 @@ try {
     $middleware = new AuthorizationMiddleware();
     PrincipalContext::set(authorizationPrincipal(RoleModel::READ_ONLY));
     $middleware->handle(['action'=>'select']); $middleware->handle(['action'=>'sql','resource'=>'reports/sales']);
-    authorizationFails(fn () => $middleware->handle(['action'=>'insert','resource'=>'customers']), 'RESOURCE_ACCESS_DENIED');
+    authorizationFails(fn () => $middleware->handle(['action'=>'insert','table'=>'Customers']), 'AUTHORIZATION_DENIED');
     authorizationFails(fn () => $middleware->handle(['action'=>'admin.status']), 'AUTHORIZATION_DENIED');
     PrincipalContext::set(authorizationPrincipal(RoleModel::DATA_OPERATOR));
-    $middleware->handle(['action'=>'select']); $middleware->handle(['action'=>'upsert','resource'=>'customers']);
+    $middleware->handle(['action'=>'select']); $middleware->handle(['action'=>'upsert','table'=>'Customers']);
     authorizationFails(fn () => $middleware->handle(['action'=>'admin.status']), 'AUTHORIZATION_DENIED');
 
     PrincipalContext::set(authorizationPrincipal(RoleModel::SYSTEM_ADMINISTRATOR));
-    foreach ([['action'=>'select'],['action'=>'delete','resource'=>'customers'],['action'=>'admin.status']] as $request) $middleware->handle($request);
+    foreach ([['action'=>'select'],['action'=>'delete','table'=>'Customers'],['action'=>'admin.status']] as $request) $middleware->handle($request);
+
+    // One authorization path: a session principal and an API-key principal
+    // holding the same role reach the same decision for every data action.
+    // No table, write-resource, routine, or SQL Resource registration exists.
+    $actions = ['select', 'union', 'unionAll', 'sql', 'metadata.tables', 'insert', 'update', 'delete', 'upsert',
+        'function', 'tableFunction', 'procedure', 'admin.status'];
+    $expected = [
+        RoleModel::READ_ONLY => ['select', 'union', 'unionAll', 'sql', 'metadata.tables', 'function', 'tableFunction'],
+        RoleModel::DATA_OPERATOR => array_diff($actions, ['admin.status']),
+        RoleModel::API_ADMINISTRATOR => array_diff($actions, ['admin.status']),
+    ];
+    foreach ($expected as $role => $allowedActions) {
+        foreach ($actions as $action) {
+            $outcomes = [];
+            foreach (['session', 'api_key'] as $authenticationType) {
+                PrincipalContext::set(new Principal('id-' . $role, 'principal', $authenticationType, $role, false, null, true));
+                try {
+                    $middleware->handle(['action' => $action, 'table' => 'AnyUnregisteredTable', 'resource' => 'reports/any']);
+                    $outcomes[$authenticationType] = 'allowed';
+                } catch (ApiRequestException $exception) {
+                    authorizationAssert($exception->getErrorCode() === 'AUTHORIZATION_DENIED', "Unexpected denial code for {$role}/{$action}.");
+                    $outcomes[$authenticationType] = 'denied';
+                }
+            }
+            $wanted = in_array($action, $allowedActions, true) ? 'allowed' : 'denied';
+            authorizationAssert($outcomes === ['session' => $wanted, 'api_key' => $wanted],
+                "Session and API-key authorization differ or are wrong for {$role}/{$action}.");
+        }
+    }
+    // Stored procedures can change data, so routine.execute alone is not enough.
+    PrincipalContext::set(authorizationPrincipal(RoleModel::READ_ONLY));
+    authorizationFails(fn () => $middleware->handle(['action' => 'procedure', 'source' => ['procedure' => 'dbo.AnyProcedure']]), 'AUTHORIZATION_DENIED');
+    PrincipalContext::set(authorizationPrincipal(null, true, RoleModel::APPLICATION_ADMINISTRATOR));
+    foreach (['function', 'tableFunction', 'procedure'] as $routineAction) {
+        authorizationFails(fn () => $middleware->handle(['action' => $routineAction]), 'AUTHORIZATION_DENIED');
+    }
 
     PrincipalContext::set(authorizationPrincipal(null, true, RoleModel::APPLICATION_ADMINISTRATOR));
     foreach ([['action'=>'select'],['action'=>'union'],['action'=>'metadata.tables'],['action'=>'sql','resource'=>'reports/sales']] as $request) $middleware->handle($request);
-    authorizationFails(fn () => $middleware->handle(['action'=>'insert','resource'=>'customers']), 'RESOURCE_ACCESS_DENIED');
+    authorizationFails(fn () => $middleware->handle(['action'=>'insert','table'=>'Customers']), 'AUTHORIZATION_DENIED');
     authorizationFails(fn () => $middleware->handle(['action'=>'admin.status']), 'AUTHORIZATION_DENIED');
     authorizationFails(fn () => $middleware->handle([
         'action'=>'auth.users.assignAuthorization',
@@ -157,7 +206,7 @@ try {
     $apiAdministrator = new Principal(null, 'api-admin', 'api_key', RoleModel::API_ADMINISTRATOR, false, null, true);
     $authorization = new AuthorizationService();
     $authorization->authorize($apiAdministrator, 'data.read');
-    $authorization->authorize($apiAdministrator, 'data.write', 'customers', 'write');
+    $authorization->authorize($apiAdministrator, 'data.write');
     authorizationFails(fn () => $authorization->authorize($apiAdministrator, 'admin.manage'), 'AUTHORIZATION_DENIED');
     authorizationFails(fn () => $authorization->authorize($apiAdministrator, 'frontend.users.manage'), 'AUTHORIZATION_DENIED');
 

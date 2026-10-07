@@ -41,7 +41,7 @@ version supports it.
 | Transactions | No public contract | No public contract | No public contract |
 | Prepared values | WHERE/HAVING | Runtime filters | Data and filters |
 | Client arbitrary SQL/path | Rejected/not a property | Rejected/not a property | Rejected/not a property |
-| Metadata checks | Tables/columns/projections | Discovered file plus execution metadata; runtime source filters against the query-source registry | Registry plus live write metadata |
+| Metadata checks | Tables/columns/projections | Discovered file plus execution metadata; runtime source filters against the catalog | Live table and column metadata |
 
 ## Other public execution surfaces
 
@@ -55,7 +55,7 @@ version supports it.
 | View metadata | `metadata.views` |
 | Procedure metadata | `metadata.procedures` |
 | Whole schema rows | `metadata.schema` |
-| API authentication/authorization | `none`, session, managed/legacy API key, or session + API key; fixed roles/resource scopes; administrator-session-only management |
+| API authentication/authorization | `none`, session, managed/legacy API key, or session + API key; fixed roles and permissions; administrator-session-only management |
 | Database provider | Microsoft SQL Server through ODBC only |
 
 For exact shapes use [Action reference](Action-Reference.md); for unsupported

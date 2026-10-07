@@ -216,10 +216,7 @@ try {
     }
     $authorizationRepository->validate(RuntimeConfiguration::authorizationDefaults());
 
-    $authorization = RuntimeConfiguration::authorizationDefaults();
-    $authorization['roles'][RoleModel::READ_ONLY]['sqlResources'] = ['reports/allowed'];
-    $authorization['roles'][RoleModel::DATA_OPERATOR]['writeResources'] = ['customers'];
-    (new AuthorizationRepository())->save($authorization);
+    (new AuthorizationRepository())->save(RuntimeConfiguration::authorizationDefaults());
     coverageAssert((new DatabaseAvailabilityManager())->available() === false, 'The isolated database is unexpectedly available.');
 
     $repository = new AuthRepository();
@@ -421,14 +418,20 @@ try {
     coverageExpect(coverageRequest($apiShortLegacy, '/', ['action' => 'select'], headers: ['X-API-Key' => $shortLegacyKey]), 401, 'AUTHENTICATION_REQUIRED', 'A short legacy key was accepted.');
     coverageExpect(coverageRequest($apiLegacy, '/', ['action' => 'select'], headers: ['X-API-Key' => $legacyKey . 'x']), 401, 'AUTHENTICATION_REQUIRED', 'A wrong legacy key was accepted.');
     coverageExpect(coverageRequest($apiLegacy, '/', ['action' => 'select'], headers: ['X-API-Key' => $legacyKey]), 503, 'DATABASE_UNAVAILABLE', 'The legacy key was not accepted.');
-    coverageExpect(coverageRequest($apiLegacy, '/', ['action' => 'insert', 'resource' => 'customers'], headers: ['X-API-Key' => $legacyKey]),
-        403, 'RESOURCE_ACCESS_DENIED', 'The legacy key exceeded the read-only role.');
-    // P1-23 / P2-02: key scope enforcement; API-key writes are CSRF-exempt.
-    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'resource' => 'customers'], headers: $keyHeader($readKey)), 403, 'RESOURCE_ACCESS_DENIED', 'A read-only key wrote data.');
-    coverageExpect(coverageRequest($api, '/', ['action' => 'sql', 'resource' => 'reports/other'], headers: $keyHeader($readKey)), 403, 'RESOURCE_ACCESS_DENIED', 'A read-only key left its SQL scope.');
-    coverageExpect(coverageRequest($api, '/', ['action' => 'sql', 'resource' => 'reports/allowed'], headers: $keyHeader($readKey)), 503, 'DATABASE_UNAVAILABLE', 'A read-only key lost its SQL scope.');
-    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'resource' => 'orders'], headers: $keyHeader($operatorKey)), 403, 'RESOURCE_ACCESS_DENIED', 'A scoped operator key left its write scope.');
-    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'resource' => 'customers'], headers: $keyHeader($operatorKey)), 503, 'DATABASE_UNAVAILABLE', 'An API-key write required CSRF or lost its scope.');
+    coverageExpect(coverageRequest($apiLegacy, '/', ['action' => 'insert', 'table' => 'Customers'], headers: ['X-API-Key' => $legacyKey]),
+        403, 'AUTHORIZATION_DENIED', 'The legacy key exceeded the read-only role.');
+    // P1-23 / P2-02: API keys are confined by their role's permissions only;
+    // no table or SQL Resource registration applies. API-key writes are CSRF-exempt.
+    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'table' => 'Customers'], headers: $keyHeader($readKey)), 403, 'AUTHORIZATION_DENIED', 'A read-only key wrote data.');
+    coverageExpect(coverageRequest($api, '/', ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Any']], headers: $keyHeader($readKey)), 403, 'AUTHORIZATION_DENIED', 'A read-only key ran a stored procedure.');
+    coverageExpect(coverageRequest($api, '/', ['action' => 'function', 'source' => ['function' => 'dbo.Any']], headers: $keyHeader($readKey)), 503, 'DATABASE_UNAVAILABLE', 'A read-only key could not call a function.');
+    foreach (['reports/allowed', 'reports/other'] as $resource) {
+        coverageExpect(coverageRequest($api, '/', ['action' => 'sql', 'resource' => $resource], headers: $keyHeader($readKey)), 503, 'DATABASE_UNAVAILABLE', 'A read-only key was limited to a SQL Resource scope.');
+    }
+    foreach (['Customers', 'Orders', 'inventory.Stock'] as $table) {
+        coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'table' => $table], headers: $keyHeader($operatorKey)), 503, 'DATABASE_UNAVAILABLE', 'An API-key write required CSRF or a table registration.');
+    }
+    coverageExpect(coverageRequest($api, '/', ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Any']], headers: $keyHeader($operatorKey)), 503, 'DATABASE_UNAVAILABLE', 'An operator key could not run a procedure.');
     // P1-09: no API key reaches Admin.
     foreach ($adminActions as $action) {
         coverageExpect(coverageRequest($api, '/', ['action' => $action], headers: $keyHeader($administratorKey)), 404, 'NOT_FOUND', "API key reached public {$action}.");
@@ -449,14 +452,14 @@ try {
     // P1-20: session+api_key falls back to the session for an invalid key.
     $invalidKey = ['X-API-Key' => 'gsk_' . str_repeat('1', 16) . '_' . str_repeat('C', 43)];
     coverageExpect(coverageRequest($api, '/', ['action' => 'select'], $readerCookie, $invalidKey), 503, 'DATABASE_UNAVAILABLE', 'An invalid key overrode a valid session.');
-    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'resource' => 'customers'], $readerCookie, $invalidKey + ['X-CSRF-Token' => $readerToken]),
-        403, 'RESOURCE_ACCESS_DENIED', 'An invalid key changed the session principal.');
+    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'table' => 'Customers'], $readerCookie, $invalidKey + ['X-CSRF-Token' => $readerToken]),
+        403, 'AUTHORIZATION_DENIED', 'An invalid key changed the session principal.');
     coverageExpect(coverageRequest($api, '/', ['action' => 'select'], headers: $invalidKey), 401, 'AUTHENTICATION_REQUIRED', 'An invalid key alone was accepted.');
     coverageExpect(coverageRequest($api, '/', ['action' => 'select'], headers: $keyHeader($readKey)), 503, 'DATABASE_UNAVAILABLE', 'A valid key was refused in mixed mode.');
     // P1-21: mode none is least privilege.
     $setMode('none');
     coverageExpect(coverageRequest($api, '/', ['action' => 'select']), 503, 'DATABASE_UNAVAILABLE', 'Mode none refused anonymous reads.');
-    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'resource' => 'customers']), 403, 'RESOURCE_ACCESS_DENIED', 'Mode none allowed anonymous writes.');
+    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'table' => 'Customers']), 403, 'AUTHORIZATION_DENIED', 'Mode none allowed anonymous writes.');
     coverageExpect(coverageRequest($api, '/', ['action' => 'auth.frontendUsers.list']), 401, 'AUTHENTICATION_REQUIRED', 'Mode none exposed frontend user management.');
     $setMode('session');
 
@@ -489,8 +492,8 @@ try {
     // P1-06: client-supplied identity fields are rejected or have no effect.
     $identityFields = ['backendRole' => RoleModel::SYSTEM_ADMINISTRATOR, 'frontendRole' => RoleModel::APPLICATION_ADMINISTRATOR,
         'roles' => [RoleModel::SYSTEM_ADMINISTRATOR], 'permissions' => ['admin.manage', 'data.write'], 'userId' => str_repeat('f', 32)];
-    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'resource' => 'customers'] + $identityFields, $readerCookie, ['X-CSRF-Token' => $readerToken]),
-        403, 'RESOURCE_ACCESS_DENIED', 'Request identity fields elevated a read-only session.');
+    coverageExpect(coverageRequest($api, '/', ['action' => 'insert', 'table' => 'Customers'] + $identityFields, $readerCookie, ['X-CSRF-Token' => $readerToken]),
+        403, 'AUTHORIZATION_DENIED', 'Request identity fields elevated a read-only session.');
     coverageExpect(coverageRequest($api, '/', ['action' => 'auth.frontendUsers.list'] + $identityFields, $readerCookie), 403, 'AUTHORIZATION_DENIED',
         'Request identity fields granted frontend user management.');
     foreach ($identityFields as $field => $value) {
@@ -521,7 +524,7 @@ try {
             default => [$operatorCookie, $operatorToken],
         };
         $request = $action === 'auth.login' ? ['action' => $action, 'username' => 'Coverage.Target', 'password' => 'coverage-target-password']
-            : ['action' => $action, 'username' => 'Coverage.Target', 'resource' => 'customers'];
+            : ['action' => $action, 'username' => 'Coverage.Target', 'table' => 'Customers'];
         foreach (['missing' => null, 'invalid' => str_repeat('b', 64), 'foreign-session' => $readerToken] as $case => $token) {
             coverageExpect(coverageRequest($api, '/', $request, $cookie, ['X-CSRF-Token' => $token]), 403, 'CSRF_VALIDATION_FAILED', "Public {$action} accepted a {$case} CSRF token.");
         }
@@ -587,21 +590,32 @@ try {
     coverageExpect(coverageRequest($api, '/', ['action' => 'select'], $readerCookie), 503, 'DATABASE_UNAVAILABLE', 'A non-POST logout ended the session.');
     coverageExpect(coverageRequest($admin, '/api.php', ['action' => 'auth.users.list'], $adminCookie), 200, null, 'A non-POST logout ended the Admin session.');
 
-    // P2-11 / P2-12 / P3-03: SQL and write scopes; database state stays hidden
-    // from unauthenticated and unauthorized callers.
-    coverageExpect(coverageRequest($api, '/', ['action' => 'sql', 'resource' => 'reports/other'], $readerCookie), 403, 'RESOURCE_ACCESS_DENIED', 'Read-only session left its SQL scope.');
-    coverageExpect(coverageRequest($api, '/', ['action' => 'sql', 'resource' => 'reports/allowed'], $readerCookie), 503, 'DATABASE_UNAVAILABLE', 'Read-only session lost its SQL scope.');
-    coverageExpect(coverageRequest($api, '/', ['action' => 'sql', 'resource' => 'reports/other'], $viewerCookie), 503, 'DATABASE_UNAVAILABLE',
-        'Frontend access no longer reads all SQL Resources (SSA-06 pinned behavior changed).');
-    foreach (['insert', 'update', 'delete', 'upsert'] as $action) {
-        coverageExpect(coverageRequest($api, '/', ['action' => $action, 'resource' => 'orders'], $operatorCookie, ['X-CSRF-Token' => $operatorToken]),
-            403, 'RESOURCE_ACCESS_DENIED', "Scoped operator {$action} left its write scope.");
-        coverageExpect(coverageRequest($api, '/', ['action' => $action, 'resource' => 'customers'], $operatorCookie, ['X-CSRF-Token' => $operatorToken]),
-            503, 'DATABASE_UNAVAILABLE', "Scoped operator {$action} lost its write scope.");
-        coverageExpect(coverageRequest($api, '/', ['action' => $action, 'resource' => 'customers'], $readerCookie, ['X-CSRF-Token' => $readerToken]),
-            403, 'RESOURCE_ACCESS_DENIED', "Unauthorized {$action} learned the database state.");
-        coverageExpect(coverageRequest($api, '/', ['action' => $action, 'resource' => 'customers']), 401, 'AUTHENTICATION_REQUIRED', "Anonymous {$action} learned the database state.");
+    // P2-11 / P2-12 / P3-03: sessions follow the same permission-only rules as
+    // API keys; database state stays hidden from unauthenticated and
+    // unauthorized callers.
+    foreach (['reports/allowed', 'reports/other'] as $resource) {
+        coverageExpect(coverageRequest($api, '/', ['action' => 'sql', 'resource' => $resource], $readerCookie), 503, 'DATABASE_UNAVAILABLE', 'A read-only session was limited to a SQL Resource scope.');
     }
+    coverageExpect(coverageRequest($api, '/', ['action' => 'sql', 'resource' => 'reports/other'], $viewerCookie), 503, 'DATABASE_UNAVAILABLE',
+        'Frontend access no longer reads SQL Resources.');
+    foreach (['insert', 'update', 'delete', 'upsert'] as $action) {
+        foreach (['Customers', 'Orders'] as $table) {
+            coverageExpect(coverageRequest($api, '/', ['action' => $action, 'table' => $table], $operatorCookie, ['X-CSRF-Token' => $operatorToken]),
+                503, 'DATABASE_UNAVAILABLE', "Operator {$action} on {$table} required a table registration.");
+        }
+        coverageExpect(coverageRequest($api, '/', ['action' => $action, 'table' => 'Customers'], $readerCookie, ['X-CSRF-Token' => $readerToken]),
+            403, 'AUTHORIZATION_DENIED', "Unauthorized {$action} learned the database state.");
+        coverageExpect(coverageRequest($api, '/', ['action' => $action, 'table' => 'Customers']), 401, 'AUTHENTICATION_REQUIRED', "Anonymous {$action} learned the database state.");
+    }
+    // Routines: functions need routine.execute; procedures also need data.write
+    // and, for sessions, CSRF.
+    coverageExpect(coverageRequest($api, '/', ['action' => 'function', 'source' => ['function' => 'dbo.Any']], $readerCookie), 503, 'DATABASE_UNAVAILABLE', 'A read-only session could not call a function.');
+    coverageExpect(coverageRequest($api, '/', ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Any']], $readerCookie, ['X-CSRF-Token' => $readerToken]),
+        403, 'AUTHORIZATION_DENIED', 'A read-only session ran a stored procedure.');
+    coverageExpect(coverageRequest($api, '/', ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Any']], $operatorCookie),
+        403, 'CSRF_VALIDATION_FAILED', 'A session procedure call ran without CSRF.');
+    coverageExpect(coverageRequest($api, '/', ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Any']], $operatorCookie, ['X-CSRF-Token' => $operatorToken]),
+        503, 'DATABASE_UNAVAILABLE', 'An operator session could not run a procedure.');
 
     // P2-15: API key identifiers.
     foreach (['auth.apiKeys.enable', 'auth.apiKeys.disable', 'auth.apiKeys.revoke'] as $action) {
@@ -742,7 +756,7 @@ try {
     // asserted by ProductionApplicationAvailabilityTest.
     foreach (['403 CORS_ORIGIN_DENIED', '405 METHOD_NOT_ALLOWED', '415 UNSUPPORTED_MEDIA_TYPE', '413 REQUEST_TOO_LARGE', '400 INVALID_JSON',
         '400 INVALID_REQUEST', '404 NOT_FOUND', '503 AUTHENTICATION_UNAVAILABLE', '401 AUTHENTICATION_REQUIRED', '429 RATE_LIMIT_EXCEEDED',
-        '401 INVALID_CREDENTIALS', '429 LOGIN_RATE_LIMITED', '403 AUTHORIZATION_DENIED', '403 RESOURCE_ACCESS_DENIED', '403 CSRF_VALIDATION_FAILED',
+        '401 INVALID_CREDENTIALS', '429 LOGIN_RATE_LIMITED', '403 AUTHORIZATION_DENIED', '403 CSRF_VALIDATION_FAILED',
         '403 LAST_ENABLED_ADMIN', '404 USER_NOT_FOUND', '409 INSTALLATION_ALREADY_INITIALIZED', '503 DATABASE_UNAVAILABLE'] as $row) {
         coverageAssert(isset($coverageObserved[$row]), "Status table row {$row} was not exercised.");
     }

@@ -1,6 +1,5 @@
 <?php
 
-require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
 
 require_once __DIR__ . '/../app/Requests/QueryRequestValidator.php';
 require_once __DIR__ . '/../app/Requests/QueryRequestNormalizer.php';
@@ -75,7 +74,7 @@ function logicContains(string $needle, string $haystack, string $message): void
 $validator = new QueryRequestValidator();
 $normalizer = new QueryRequestNormalizer();
 $engine = new LogicTestEngine();
-$builder = new SelectBuilder($engine, new LogicTestMetadata(), sourcePolicy: new PermissiveQuerySourcePolicy());
+$builder = new SelectBuilder($engine, new LogicTestMetadata());
 
 $buildPublic = function (array $request, bool $isUnion = true) use ($validator, $normalizer, $builder): array {
     $validator->validate($request);

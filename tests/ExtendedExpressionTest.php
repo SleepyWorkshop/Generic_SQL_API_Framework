@@ -1,6 +1,5 @@
 <?php
 
-require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
 
 require_once __DIR__ . '/../app/Requests/QueryRequestValidator.php';
 require_once __DIR__ . '/../app/Requests/QueryRequestNormalizer.php';
@@ -85,7 +84,7 @@ $validator = new QueryRequestValidator();
 $normalizer = new QueryRequestNormalizer();
 $engine = new ExtendedExpressionEngine();
 $metadata = new ExtendedExpressionMetadata();
-$builder = new SelectBuilder($engine, $metadata, sourcePolicy: new PermissiveQuerySourcePolicy());
+$builder = new SelectBuilder($engine, $metadata);
 $build = function (array $request, bool $unionBranch = false) use ($validator, $normalizer, $builder): array {
     $validator->validate($request);
     return $builder->build($normalizer->normalize($request), $unionBranch);
@@ -250,7 +249,7 @@ $odbcRequest = [
     'pagination' => ['page' => 1, 'pageSize' => 10],
 ];
 $odbcEngine = new ExtendedExpressionEngine();
-$odbcBuilder = new SelectBuilder($odbcEngine, new ExtendedExpressionMetadata(), sourcePolicy: new PermissiveQuerySourcePolicy());
+$odbcBuilder = new SelectBuilder($odbcEngine, new ExtendedExpressionMetadata());
 $validator->validate($odbcRequest);
 $odbcBuilt = $odbcBuilder->build($normalizer->normalize($odbcRequest));
 $odbcCount = $odbcEngine->executions[0];
@@ -384,7 +383,7 @@ extendedContains('LAG((Sales * ?), 1) OVER (ORDER BY Month ASC)', $windowInput['
 extendedAssert($windowInput['params'] === [2], 'Window expression input parameter was lost.');
 
 $paginationEngine = new ExtendedExpressionEngine();
-$paginationBuilder = new SelectBuilder($paginationEngine, new ExtendedExpressionMetadata(), sourcePolicy: new PermissiveQuerySourcePolicy());
+$paginationBuilder = new SelectBuilder($paginationEngine, new ExtendedExpressionMetadata());
 $paginationRequest = [
     'action' => 'select', 'source' => ['table' => 'Items'],
     'fields' => [$binary($field('Amount'), '+', $literal(1)) + ['alias' => 'Value']],
@@ -415,7 +414,7 @@ extendedContains('ROUND((Amount * ?), 0) AS [Value]', $cteQuery['sql'], 'CTE pro
 extendedAssert($cteQuery['params'] === [2], 'CTE expression parameter was lost.');
 
 $unionEngine = new ExtendedExpressionEngine();
-$unionRepository = new QueryRepository($unionEngine, new ExtendedExpressionMetadata(), sourcePolicy: new PermissiveQuerySourcePolicy());
+$unionRepository = new QueryRepository($unionEngine, new ExtendedExpressionMetadata());
 $unionRequest = [
     'action' => 'unionAll',
     'queries' => [

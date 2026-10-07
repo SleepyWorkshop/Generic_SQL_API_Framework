@@ -33,10 +33,12 @@ high level they cover:
   features, expressions, windows, pagination strategies, set operations,
   routines, metadata, and response envelopes.
 - **SQL Resources and writes:** discovery, path safety, execution metadata,
-  filter placement, CRUD and UPSERT generation, write-resource rules.
+  filter placement, CRUD and UPSERT generation, write target and column rules.
 - **SQL Parser:** parsing, generation, capability analysis, and asset routing.
 - **Security:** authentication, sessions, CSRF, CORS, API keys, authorization
-  boundaries (including the 64-test authorization and API coverage plan),
+  boundaries (including the 64-test authorization and API coverage plan and a
+  check that sessions and API keys reach identical decisions for every role and
+  action), system-object and identifier rejection,
   injection attempts, rate limits, HTTPS and header templates, static-analysis
   and DAST regressions, and operational hardening.
 - **Operations:** runtime configuration bootstrap and migration, encryption,

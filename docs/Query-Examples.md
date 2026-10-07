@@ -209,8 +209,8 @@ Use `union` for duplicate-removing UNION. INTERSECT and EXCEPT are not public ac
 
 ## Auto-discovered SQL Resource
 
-`queries/reports/item.sql` is addressable by its relative ID without a new
-registry entry:
+`queries/reports/item.sql` is addressable by its relative ID without any
+registration:
 
 ```json
 { "action": "sql", "resource": "reports/item" }

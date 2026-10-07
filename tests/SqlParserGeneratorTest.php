@@ -2,7 +2,7 @@
 
 require_once __DIR__ . '/../sqlparser/src/SqlParserRequestHandler.php';
 require_once __DIR__ . '/../app/Repositories/Query/RoutineBuilder.php';
-require_once __DIR__ . '/../app/Resources/RoutineResourceRegistry.php';
+require_once __DIR__ . '/../app/Resources/DatabaseObjectName.php';
 
 function parserAssert(bool $condition, string $message): void
 {
@@ -713,9 +713,8 @@ parserAssert($normalizedProcedure === [
     'procedure' => 'dbo.RunReport',
     'params' => [2026, 'North', null],
 ], 'Generated procedure request failed normalization parity.');
-$registeredProcedure = (new RoutineResourceRegistry(['dbo.RunReport' => ['type' => 'procedure', 'schema' => 'dbo', 'name' => 'RunReport', 'access' => 'read', 'parameters' => 3, 'roles' => ['read-only']]]))
-    ->resolve($normalizedProcedure['procedure'], 'procedure');
-$builtProcedure = (new RoutineBuilder())->buildProcedure($registeredProcedure, $normalizedProcedure['params']);
+$parsedProcedure = DatabaseObjectName::parse($normalizedProcedure['procedure'], 'source.procedure', 'INVALID_ROUTINE', 'Invalid routine.');
+$builtProcedure = (new RoutineBuilder())->buildProcedure($parsedProcedure, $normalizedProcedure['params']);
 parserAssert($builtProcedure === [
     'sql' => 'EXEC [dbo].[RunReport] ?, ?, ?',
     'params' => [2026, 'North', null],

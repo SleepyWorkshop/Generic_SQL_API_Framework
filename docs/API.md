@@ -23,7 +23,7 @@ accepted with credentials.
 Normal data actions use the configured `none`, `session`, `api_key`, or
 `session+api_key` mode. API-key clients send `X-API-Key`; bearer transport is not
 part of the contract. Authentication produces a server-owned principal before
-authorization evaluates permissions and resource scopes. Administrator actions
+authorization evaluates the principal's role permissions. Administrator actions
 remain on the loopback Admin API and always require a System Administrator
 session regardless of the normal data-API mode.
 
@@ -121,17 +121,15 @@ See [SQL Resource Mode](SQL-Resource-Mode.md) and
 
 ### CRUD write requests
 
-Writes use an exact ID from `config/write-resources.php`; they never accept a
-table or schema name from the client. The tracked registry includes the explicit
-`crud-test` mapping for `dbo.ApiCrudTest`; deployments that do not provide that
-test table should remove or replace it. Every other resource remains denied until
-an administrator explicitly maps it to a table and its writable/filterable
-columns.
+Writes name their target in `table` (`Table` or `Schema.Table`). Any user table
+of the configured database can be written by a caller holding `data.write`;
+there is no per-table registration. System schemas and cross-database names are
+rejected, and the table and its columns are validated against live metadata.
 
 ```json
 {
   "action": "insert",
-  "resource": "customers",
+  "table": "Customers",
   "data": { "customerCode": "C001", "name": "John", "email": null }
 }
 ```
@@ -139,7 +137,7 @@ columns.
 ```json
 {
   "action": "update",
-  "resource": "customers",
+  "table": "Customers",
   "data": { "email": "new@example.com" },
   "filters": [{ "field": "id", "operator": "=", "value": 10 }]
 }
@@ -148,7 +146,7 @@ columns.
 ```json
 {
   "action": "delete",
-  "resource": "customers",
+  "table": "Customers",
   "filters": [{ "field": "id", "operator": "=", "value": 10 }]
 }
 ```
@@ -156,7 +154,7 @@ columns.
 ```json
 {
   "action": "upsert",
-  "resource": "customers",
+  "table": "Customers",
   "data": { "customerCode": "C001", "name": "John" },
   "keys": ["customerCode"]
 }
@@ -171,8 +169,8 @@ and NULL operators, but not subqueries or EXISTS. Columns, types, nullability,
 lengths, defaults, and generated status are checked against SQL Server metadata.
 All data, key, and filter values are prepared parameters.
 
-UPSERT `keys` must exactly match the server-configured key set and each key value
-must be present and non-null. The implementation is one SQL Server `MERGE` with
+UPSERT `keys` is required, must exactly match the table's primary key or an
+unfiltered unique index, and each key value must be present and non-null. The implementation is one SQL Server `MERGE` with
 `HOLDLOCK`; a matching unfiltered UNIQUE/PRIMARY KEY index is verified from live
 metadata. It does not
 open a transaction, and SQL Server MERGE-specific operational caveats still
@@ -281,7 +279,7 @@ Unhandled builder, metadata, connection, or execution failures are HTTP 500:
 
 The response does not expose the underlying exception. The exception handler writes details to the dated file in `logs/`.
 
-Write validation additionally uses `INVALID_WRITE_RESOURCE`,
+Write validation additionally uses `INVALID_WRITE_TABLE`,
 `INVALID_WRITE_COLUMN`, `INVALID_WRITE_VALUE`, `MISSING_REQUIRED_FIELD`,
 `INVALID_UPSERT_KEY`, and `UNSAFE_WRITE`, all as HTTP 400. Recognized duplicate
 key and other constraint failures are safe HTTP 409 responses with

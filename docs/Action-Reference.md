@@ -9,8 +9,8 @@ Unless a section says otherwise, request-shape failures are HTTP 400
 `INVALID_REQUEST` and execution failures are HTTP 500 `QUERY_ERROR`.
 
 Every action is authenticated according to the configured API mode and
-authorized by the caller's role, resource scopes, and the query-source, routine,
-and write-resource registries before validation; see
+authorized by the caller's role permissions before validation; there is no
+per-table, per-routine, or per-resource registration. See
 [Authentication and authorization](Authentication-and-Authorization.md). Session
 and frontend-user actions are in that document, and Admin actions are in
 [Admin Console](Admin-Console.md).
@@ -181,26 +181,26 @@ In addition to common errors: `INVALID_SQL_RESOURCE`,
 ### Notes
 
 A new file such as `queries/reports/new-report.sql` works as
-`reports/new-report` without registration. Legacy registry IDs continue to
-work. The backend does not parse general SQL projections; supply
-`execution.columns` when runtime controls need output-name validation. Clients
-never send SQL text or filesystem paths. See [SQL Resource Mode](SQL-Resource-Mode.md).
+`reports/new-report` without registration. The backend does not parse general
+SQL projections; supply `execution.columns` when runtime controls need
+output-name validation. Clients never send SQL text or filesystem paths. See
+[SQL Resource Mode](SQL-Resource-Mode.md).
 
 
 ## `insert`
 
 ### Purpose
 
-Insert one object through an approved Write resource.
+Insert one row into a table.
 
 ### Request
 
-Required fields are `action`, `resource`, and `data`; no optional properties.
+Required fields are `action`, `table`, and `data`; no optional properties.
 
 ### Minimal example
 
 ```json
-{"action":"insert","resource":"crud-test","data":{"CustomerCode":"C001","Name":"John"}}
+{"action":"insert","table":"Customers","data":{"CustomerCode":"C001","Name":"John"}}
 ```
 
 ### Full example
@@ -208,7 +208,7 @@ Required fields are `action`, `resource`, and `data`; no optional properties.
 ```json
 {
   "action": "insert",
-  "resource": "crud-test",
+  "table": "dbo.Customers",
   "data": {
     "CustomerCode": "C001",
     "Name": "John",
@@ -223,13 +223,14 @@ Required fields are `action`, `resource`, and `data`; no optional properties.
 
 | Field | Type | Required | Description |
 |---|---|---:|---|
-| `resource` | string | yes | Approved Write resource ID. |
-| `data` | non-empty object | yes | One scalar/null value per configured writable column. |
+| `table` | string | yes | `Table` or `Schema.Table` of a user table. |
+| `data` | non-empty object | yes | One scalar/null value per column; database-generated columns are rejected. |
 
 ### Validation
 
-The resource must enable INSERT. Live metadata enforces types, lengths,
-nullability, required fields, defaults, and generated-column protection.
+The table must exist in the configured database. Live metadata enforces column
+existence, types, lengths, nullability, required fields, defaults, and
+generated-column protection.
 
 ### Response
 
@@ -249,17 +250,17 @@ Bulk inserts and client-selected return columns are unsupported.
 
 ### Purpose
 
-Update one or more matching rows through an approved Write resource.
+Update one or more matching rows of a table.
 
 ### Request
 
-Required fields are `action`, `resource`, `data`, and non-empty `filters`;
+Required fields are `action`, `table`, `data`, and non-empty `filters`;
 `filterLogic` is optional.
 
 ### Minimal example
 
 ```json
-{"action":"update","resource":"crud-test","data":{"Status":"Inactive"},"filters":[{"field":"Id","operator":"=","value":42}]}
+{"action":"update","table":"Customers","data":{"Status":"Inactive"},"filters":[{"field":"Id","operator":"=","value":42}]}
 ```
 
 ### Full example
@@ -267,7 +268,7 @@ Required fields are `action`, `resource`, `data`, and non-empty `filters`;
 ```json
 {
   "action": "update",
-  "resource": "crud-test",
+  "table": "Customers",
   "data": { "Email": "new@example.com", "Status": "Active" },
   "filters": [
     { "field": "CustomerCode", "operator": "=", "value": "C001" },
@@ -281,15 +282,15 @@ Required fields are `action`, `resource`, `data`, and non-empty `filters`;
 
 | Field | Type | Required | Description |
 |---|---|---:|---|
-| `resource` | string | yes | Resource enabling UPDATE. |
-| `data` | non-empty object | yes | Configured writable fields. |
-| `filters` | non-empty array | yes | Configured filter fields; never optional in practice. |
+| `table` | string | yes | `Table` or `Schema.Table` of a user table. |
+| `data` | non-empty object | yes | Columns to change; database-generated columns are rejected. |
+| `filters` | non-empty array | yes | Conditions on any existing column. |
 | `filterLogic` | string | no | AND or OR; default AND. |
 
 ### Validation
 
-The resource/action/columns and live types must be valid. Missing/empty targeting
-is HTTP 400 `UNSAFE_WRITE`.
+The table, columns, and value types must be valid against live metadata.
+Missing/empty targeting is HTTP 400 `UNSAFE_WRITE`.
 
 ### Response
 
@@ -307,17 +308,17 @@ No full-table UPDATE fallback exists; filters may legitimately match multiple ro
 
 ### Purpose
 
-Delete matching rows through an approved Write resource.
+Delete matching rows of a table.
 
 ### Request
 
-Required fields are `action`, `resource`, and non-empty `filters`; `filterLogic`
+Required fields are `action`, `table`, and non-empty `filters`; `filterLogic`
 is optional. `data` is not accepted.
 
 ### Minimal example
 
 ```json
-{"action":"delete","resource":"crud-test","filters":[{"field":"Id","operator":"=","value":42}]}
+{"action":"delete","table":"Customers","filters":[{"field":"Id","operator":"=","value":42}]}
 ```
 
 ### Full example
@@ -325,7 +326,7 @@ is optional. `data` is not accepted.
 ```json
 {
   "action": "delete",
-  "resource": "crud-test",
+  "table": "Customers",
   "filters": [
     { "field": "Status", "operator": "=", "value": "Inactive" },
     { "field": "Age", "operator": ">=", "value": 18 }
@@ -338,14 +339,14 @@ is optional. `data` is not accepted.
 
 | Field | Type | Required | Description |
 |---|---|---:|---|
-| `resource` | string | yes | Resource enabling DELETE. |
+| `table` | string | yes | `Table` or `Schema.Table` of a user table. |
 | `filters` | non-empty array | yes | Required targeting conditions. |
 | `filterLogic` | string | no | AND or OR; default AND. |
 
 ### Validation
 
-The resource/action/filter columns and live values must be valid. Missing/empty
-targeting is `UNSAFE_WRITE`.
+The table, filter columns, and values must be valid against live metadata.
+Missing/empty targeting is `UNSAFE_WRITE`.
 
 ### Response
 
@@ -363,17 +364,17 @@ No full-table DELETE fallback exists; filters may match multiple rows.
 
 ### Purpose
 
-Update an existing row or insert a new row by the configured unique key set.
+Update an existing row or insert a new row, matched by a unique key.
 
 ### Request
 
-Required fields are `action`, `resource`, `data`, and `keys`; no filters or other
+Required fields are `action`, `table`, `data`, and `keys`; no filters or other
 optional properties are accepted.
 
 ### Minimal example
 
 ```json
-{"action":"upsert","resource":"crud-test","data":{"CustomerCode":"C001","Name":"John"},"keys":["CustomerCode"]}
+{"action":"upsert","table":"Customers","data":{"CustomerCode":"C001","Name":"John"},"keys":["CustomerCode"]}
 ```
 
 ### Full example
@@ -381,7 +382,7 @@ optional properties are accepted.
 ```json
 {
   "action": "upsert",
-  "resource": "crud-test",
+  "table": "Customers",
   "data": {
     "CustomerCode": "C001",
     "Name": "John",
@@ -397,19 +398,20 @@ optional properties are accepted.
 
 | Field | Type | Required | Description |
 |---|---|---:|---|
-| `resource` | string | yes | Resource enabling UPSERT with configured keys. |
+| `table` | string | yes | `Table` or `Schema.Table` of a user table. |
 | `data` | non-empty object | yes | Includes every key and at least one non-key value. |
-| `keys` | non-empty string list | yes | Must exactly match the server-configured set. |
+| `keys` | non-empty string list | yes | Must exactly match the table's primary key or an unfiltered unique index. |
 
 ### Validation
 
-Keys must be unique, configured, present and non-null in `data`, and backed by
-an exact unfiltered UNIQUE/PRIMARY KEY index discovered from live metadata.
+Keys must be unique existing columns, present and non-null in `data`, and
+exactly match a PRIMARY KEY or unfiltered UNIQUE index discovered from live
+metadata.
 
 ### Response
 
-Returns operation `upsert` and affected count. An inserting path can include a
-configured identity `generatedId`.
+Returns operation `upsert` and affected count. An inserting path includes the
+table's identity value as `generatedId` when the table has an identity column.
 
 ### Errors
 
@@ -504,7 +506,14 @@ Required: `action`, `source.procedure`. Optional: `parameters`.
 
 ### Validation
 
-The identifier is shape-validated and parameter values are prepared.
+The name must be `Name` or `Schema.Name`, outside the `sys` and
+`INFORMATION_SCHEMA` schemas, and must not start with `sp_` or `xp_`. It must
+name an existing user stored procedure of the configured database. At most the
+declared number of parameters may be sent (trailing parameters use their
+defaults). Values are always prepared.
+
+Requires `routine.execute` and `data.write`, because a procedure can change
+data; session callers must also send `X-CSRF-Token`.
 
 ### Response
 
@@ -512,12 +521,14 @@ Returned result rows use `Procedure Executed Successfully`.
 
 ### Errors
 
-Invalid shape is `INVALID_REQUEST`; database/signature failure is `QUERY_ERROR`.
+Invalid shape is `INVALID_REQUEST`; an unsafe, unknown, or wrong-type name is
+`INVALID_ROUTINE`; too many parameters is `INVALID_ROUTINE_PARAMETERS`; database
+failures are `QUERY_ERROR`.
 
 ### Notes
 
-The API does not discover parameter names, support named/output parameters, or
-independently authorize routine names.
+There is no routine registration. The API does not support named or output
+parameters.
 
 ## `function`
 
@@ -550,7 +561,10 @@ Required: `action`, `source.function`. Optional: `parameters`.
 
 ### Validation
 
-The function identifier is shape-validated and parameter values are prepared.
+The name follows the same rules as `procedure` and must name an existing user
+scalar function. Exactly the declared number of parameters is required. Values
+are always prepared. Requires `routine.execute`; functions cannot modify data,
+so no CSRF token is needed.
 
 ### Response
 
@@ -559,13 +573,13 @@ Returns a row with database column `Result` and message
 
 ### Errors
 
-Invalid shape is `INVALID_REQUEST`; routine existence/signature failure becomes
-generic `QUERY_ERROR`.
+Invalid shape is `INVALID_REQUEST`; an unsafe, unknown, or wrong-type name is
+`INVALID_ROUTINE`; a wrong parameter count is `INVALID_ROUTINE_PARAMETERS`;
+database failures are `QUERY_ERROR`.
 
 ### Notes
 
-Only routines registered in `config/routine-resources.php` can be called; see
-[Metadata and routines](Metadata-and-Routines.md#routine-registry).
+See [Metadata and routines](Metadata-and-Routines.md#routines).
 
 ## `tableFunction`
 
@@ -596,7 +610,8 @@ positional `parameters` list.
 
 ### Validation
 
-The function identifier is shape-validated and parameter values are prepared.
+The name must name an existing user table-valued function; otherwise the rules
+are the same as `function`.
 
 ### Response
 
@@ -604,7 +619,7 @@ Returns function rows with `Table Function Executed Successfully`.
 
 ### Errors
 
-Invalid shape is `INVALID_REQUEST`; database/signature failure is `QUERY_ERROR`.
+As for `function`.
 
 ### Notes
 
@@ -826,7 +841,6 @@ Invalid shape is `INVALID_REQUEST`; database failure is `QUERY_ERROR`.
 ### Notes
 
 The result is a flat ordered row list, not a nested schema document. Metadata
-actions require `metadata.read` (or frontend access) and list only tables and
-views registered in `config/query-sources.php` and routines registered in
-`config/routine-resources.php` that the caller may use. See
+actions require `metadata.read` (or frontend access) and list the user objects of
+the configured database that its login can see. See
 [Metadata and routines](Metadata-and-Routines.md).

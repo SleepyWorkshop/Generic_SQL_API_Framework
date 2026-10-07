@@ -1,6 +1,5 @@
 <?php
 
-require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
 
 require_once __DIR__ . '/../app/Repositories/SqlRepository.php';
 
@@ -80,7 +79,7 @@ try {
 
     // Existing Item behavior: no marker, output alias allowlist, prepared value.
     $itemEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($itemEngine, new SqlResourceRegistry(), sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($itemEngine, new SqlResourceRegistry()))->execute([
         'resource' => 'item',
         'execution' => ['columns' => ['Item_Code', 'Item_Desc', 'Item_MRP']],
         'filters' => [['field' => 'Item_Desc', 'operator' => 'LIKE', 'value' => "%pen%' OR 1=1 --"]],
@@ -97,7 +96,7 @@ try {
     );
 
     $itemNoFilterEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($itemNoFilterEngine, new SqlResourceRegistry(), sourcePolicy: new PermissiveQuerySourcePolicy()))->execute(['resource' => 'item']);
+    (new SqlRepository($itemNoFilterEngine, new SqlResourceRegistry()))->execute(['resource' => 'item']);
     $itemNoFilterData = end($itemNoFilterEngine->executions);
     filteringAssert(
         str_contains($itemNoFilterData['sql'], 'FROM ItemMasterTable')
@@ -108,7 +107,7 @@ try {
 
     // Existing Customer behavior: legacy source marker and integer-date conversion.
     $customerEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($customerEngine, new SqlResourceRegistry(), sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($customerEngine, new SqlResourceRegistry()))->execute([
         'resource' => 'customer',
         'execution' => [
             'columns' => ['Cust_Name', 'TotalCustomers'],
@@ -141,7 +140,7 @@ try {
     // Output integer-date filters retain the derived-table behavior while
     // converting semantic frontend dates to integer prepared parameters.
     $outputDateEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($outputDateEngine, new SqlResourceRegistry([], $testDirectory), sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($outputDateEngine, new SqlResourceRegistry([], $testDirectory)))->execute([
         'resource' => 'integer-dates',
         'execution' => [
             'columns' => ['StoredDate', 'Description', 'Total'],
@@ -195,7 +194,7 @@ try {
     ];
     foreach ($sourceDateCases as $operator => [$value, $sqlFragment, $expectedParams]) {
         $sourceDateEngine = new SqlResourceFilteringEngine();
-        (new SqlRepository($sourceDateEngine, $sourceDateRegistry, null, $dateMetadata, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+        (new SqlRepository($sourceDateEngine, $sourceDateRegistry, null, $dateMetadata))->execute([
             'resource' => 'integer-dates',
             'execution' => ['columns' => ['StoredDate', 'Description', 'Total']],
             'filters' => [[
@@ -216,7 +215,7 @@ try {
     }
 
     $mixedDateEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($mixedDateEngine, $sourceDateRegistry, null, $dateMetadata, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($mixedDateEngine, $sourceDateRegistry, null, $dateMetadata))->execute([
         'resource' => 'integer-dates',
         'execution' => ['columns' => ['StoredDate', 'Description', 'Total']],
         'filters' => [
@@ -240,7 +239,7 @@ try {
     $files[] = $nativeDateFile;
     $nativeDateRegistry = new SqlResourceRegistry([], $testDirectory);
     $nativeDateEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($nativeDateEngine, $nativeDateRegistry, null, $dateMetadata, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($nativeDateEngine, $nativeDateRegistry, null, $dateMetadata))->execute([
         'resource' => 'native-dates',
         'execution' => ['columns' => ['EventDate', 'Description']],
         'filters' => [[
@@ -265,7 +264,7 @@ try {
     $files[] = $aliasedDateFile;
     $aliasedDateRegistry = new SqlResourceRegistry([], $testDirectory);
     $aliasedDateEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($aliasedDateEngine, $aliasedDateRegistry, null, $dateMetadata, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($aliasedDateEngine, $aliasedDateRegistry, null, $dateMetadata))->execute([
         'resource' => 'aliased-date',
         'execution' => ['columns' => ['ReportDate', 'Description']],
         'filters' => [[
@@ -290,7 +289,7 @@ try {
     $files[] = $outputDateFile;
     $outputDateRegistry = new SqlResourceRegistry([], $testDirectory);
     $derivedDateEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($derivedDateEngine, $outputDateRegistry, null, $dateMetadata, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($derivedDateEngine, $outputDateRegistry, null, $dateMetadata))->execute([
         'resource' => 'derived-date',
         'execution' => ['columns' => ['ReportDate', 'Description']],
         'filters' => [[
@@ -315,7 +314,7 @@ try {
     $files[] = $sourceOnlyFile;
     $sourceOnlyRegistry = new SqlResourceRegistry([], $testDirectory);
     $sourceOnlyEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($sourceOnlyEngine, $sourceOnlyRegistry, null, $dateMetadata, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($sourceOnlyEngine, $sourceOnlyRegistry, null, $dateMetadata))->execute([
         'resource' => 'source-only-date',
         'execution' => [
             'columns' => ['Description', 'Total'],
@@ -341,8 +340,7 @@ try {
             new SqlResourceFilteringEngine(),
             $sourceDateRegistry,
             null,
-            $dateMetadata
-        , sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+            $dateMetadata))->execute([
             'resource' => 'integer-dates',
             'execution' => ['columns' => ['StoredDate', 'Description', 'Total']],
             'filters' => [[
@@ -402,7 +400,7 @@ SQL;
     );
 
     $complexEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($complexEngine, $complexRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($complexEngine, $complexRegistry))->execute([
         'resource' => 'complex',
         ...$complexExecution,
         'filters' => [
@@ -440,7 +438,7 @@ SQL;
     );
 
     filteringFailure(
-        fn () => (new SqlRepository(new SqlResourceFilteringEngine(), $complexRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+        fn () => (new SqlRepository(new SqlResourceFilteringEngine(), $complexRegistry))->execute([
             'resource' => 'complex',
             ...$complexExecution,
             'filters' => [['field' => 'NotApproved', 'operator' => '=', 'value' => 1]],
@@ -449,7 +447,7 @@ SQL;
     );
 
     $complexNoFilterEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($complexNoFilterEngine, $complexRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute(['resource' => 'complex', ...$complexExecution]);
+    (new SqlRepository($complexNoFilterEngine, $complexRegistry))->execute(['resource' => 'complex', ...$complexExecution]);
     $complexNoFilterData = end($complexNoFilterEngine->executions);
     filteringAssert(
         $complexNoFilterData['sql'] === $complexSql
@@ -458,7 +456,7 @@ SQL;
     );
 
     $topEngine = new SqlResourceFilteringEngine();
-    $topResult = (new SqlRepository($topEngine, $complexRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    $topResult = (new SqlRepository($topEngine, $complexRegistry))->execute([
         'resource' => 'complex',
         ...$complexExecution,
         'pagination' => ['page' => 1, 'pageSize' => 10],
@@ -477,7 +475,7 @@ SQL;
         'MinimumSales' => ['expression' => 'SUM(Amount)', 'placement' => 'having'],
     ]);
     $havingEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($havingEngine, $havingRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($havingEngine, $havingRegistry))->execute([
         'resource' => 'having',
         ...$havingExecution,
         'filters' => [['field' => 'MinimumSales', 'operator' => '>=', 'value' => 100]],
@@ -495,7 +493,7 @@ SQL;
         'CreatedAfter' => ['expression' => 'Recent.CreatedAt', 'placement' => 'source'],
     ]);
     $cteEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($cteEngine, $cteRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($cteEngine, $cteRegistry))->execute([
         'resource' => 'cte',
         ...$cteExecution,
         'filters' => [['field' => 'CreatedAfter', 'operator' => '>', 'value' => '2026-01-01']],
@@ -515,7 +513,7 @@ SQL;
         'SourceId' => ['expression' => 'Id', 'placement' => 'source'],
     ]);
     $unionFailure = filteringFailure(
-        fn () => (new SqlRepository(new SqlResourceFilteringEngine(), $unionRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+        fn () => (new SqlRepository(new SqlResourceFilteringEngine(), $unionRegistry))->execute([
             'resource' => 'union',
             ...$unionExecution,
             'filters' => [['field' => 'SourceId', 'operator' => '=', 'value' => 1]],
@@ -533,7 +531,7 @@ SQL;
         'LogicalCategory' => ['expression' => 'Category', 'placement' => 'output'],
     ]);
     $unionOutputEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($unionOutputEngine, $unionOutputRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($unionOutputEngine, $unionOutputRegistry))->execute([
         'resource' => 'union',
         ...$unionOutputExecution,
         'filters' => [['field' => 'LogicalCategory', 'operator' => '=', 'value' => "1' OR 1=1 --"]],
@@ -546,7 +544,7 @@ SQL;
     );
 
     $mixedOrFailure = filteringFailure(
-        fn () => (new SqlRepository(new SqlResourceFilteringEngine(), $complexRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+        fn () => (new SqlRepository(new SqlResourceFilteringEngine(), $complexRegistry))->execute([
             'resource' => 'complex',
             ...$complexExecution,
             'filterLogic' => 'OR',
@@ -570,10 +568,10 @@ SQL;
     $derivedExecution = filteringExecution([
         'CreatedAfter' => ['expression' => 'D.CreatedAt', 'placement' => 'source'],
     ]);
-    // A derived table is not a registered query source, so a client mapping
-    // to its alias is denied even when every physical table is permitted.
+    // A derived table is not a top-level source of the authored statement, so a
+    // client mapping to its alias cannot be placed and is rejected.
     $derivedFailure = filteringFailure(
-        fn () => (new SqlRepository(new SqlResourceFilteringEngine(), $derivedRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+        fn () => (new SqlRepository(new SqlResourceFilteringEngine(), $derivedRegistry))->execute([
             'resource' => 'derived',
             ...$derivedExecution,
             'filters' => [['field' => 'CreatedAfter', 'operator' => '>', 'value' => '2026-01-01']],
@@ -582,7 +580,7 @@ SQL;
     );
     filteringAssert(
         $derivedFailure instanceof ApiRequestException
-            && $derivedFailure->getErrorCode() === 'RESOURCE_ACCESS_DENIED',
+            && $derivedFailure->getErrorCode() === 'INVALID_SQL_RUNTIME_FILTER',
         'Derived-table mapped filter returned the wrong error.'
     );
 
@@ -591,7 +589,7 @@ SQL;
     $files[] = $derivedJoinFile;
     $derivedJoinRegistry = new SqlResourceRegistry([], $testDirectory);
     $derivedJoinEngine = new SqlResourceFilteringEngine();
-    (new SqlRepository($derivedJoinEngine, $derivedJoinRegistry, sourcePolicy: new PermissiveQuerySourcePolicy()))->execute([
+    (new SqlRepository($derivedJoinEngine, $derivedJoinRegistry))->execute([
         'resource' => 'derived-join',
         ...filteringExecution(['CreatedAfter' => ['expression' => 'E.CreatedAt', 'placement' => 'source']]),
         'filters' => [['field' => 'CreatedAfter', 'operator' => '>', 'value' => '2026-01-01']],

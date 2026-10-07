@@ -5,8 +5,7 @@ require_once __DIR__ . '/MetadataRepository.php';
 require_once __DIR__ . '/Query/SelectBuilder.php';
 require_once __DIR__ . '/Query/RoutineBuilder.php';
 require_once __DIR__ . '/SetOperationBuilder.php';
-require_once __DIR__ . '/../Resources/RoutineResourceRegistry.php';
-require_once __DIR__ . '/../Resources/QuerySourcePolicy.php';
+require_once __DIR__ . '/../Resources/RoutineResolver.php';
 
 /** Public compatibility facade for query construction and execution. */
 class QueryRepository
@@ -15,22 +14,21 @@ class QueryRepository
     private SelectBuilder $selectBuilder;
     private RoutineBuilder $routineBuilder;
     private SetOperationBuilder $setOperationBuilder;
-    private RoutineResourceRegistry $routines;
+    private RoutineResolver $routines;
     private Logger $logger;
 
     public function __construct(
         ?QueryEngine $queryEngine = null,
         ?MetadataRepository $metadataRepository = null,
         ?Logger $logger = null,
-        ?RoutineResourceRegistry $routines = null,
-        ?QuerySourcePolicy $sourcePolicy = null
+        ?RoutineResolver $routines = null
     ) {
         $this->logger = $logger ?? new Logger();
         $this->queryEngine = $queryEngine ?? new QueryEngine(null, $this->logger);
         $metadataRepository = $metadataRepository ?? new MetadataRepository($this->queryEngine);
-        $this->selectBuilder = new SelectBuilder($this->queryEngine, $metadataRepository, $this->logger, $sourcePolicy);
+        $this->selectBuilder = new SelectBuilder($this->queryEngine, $metadataRepository, $this->logger);
         $this->routineBuilder = new RoutineBuilder();
-        $this->routines = $routines ?? new RoutineResourceRegistry();
+        $this->routines = $routines ?? new RoutineResolver($metadataRepository);
         $this->setOperationBuilder = new SetOperationBuilder($this, $this->queryEngine);
     }
 
@@ -99,10 +97,8 @@ class QueryRepository
         return $this->routineBuilder->buildTableFunction($routine, $request['params'] ?? []);
     }
 
-    private function resolveRoutine($id, string $type, array $request): array
+    private function resolveRoutine($name, string $type, array $request): array
     {
-        $routine = $this->routines->resolve($id, $type);
-        $this->routines->assertParameters($routine, $request['params'] ?? []);
-        return $routine;
+        return $this->routines->resolve($name, $type, $request['params'] ?? []);
     }
 }

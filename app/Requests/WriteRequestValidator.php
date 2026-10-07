@@ -19,17 +19,19 @@ class WriteRequestValidator
         }
 
         $allowed = match ($action) {
-            'insert' => ['action', 'resource', 'data'],
-            'update' => ['action', 'resource', 'data', 'filters', 'filterLogic'],
-            'delete' => ['action', 'resource', 'filters', 'filterLogic'],
-            'upsert' => ['action', 'resource', 'data', 'keys'],
+            'insert' => ['action', 'table', 'data'],
+            'update' => ['action', 'table', 'data', 'filters', 'filterLogic'],
+            'delete' => ['action', 'table', 'filters', 'filterLogic'],
+            'upsert' => ['action', 'table', 'data', 'keys'],
             default => ['action'],
         };
         $this->rejectUnknown($request, $allowed, '', $errors);
 
-        if (!is_string($request['resource'] ?? null)
-            || preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]*$/', $request['resource']) !== 1) {
-            $errors[] = ['path' => 'resource', 'message' => 'A valid resource identifier is required.'];
+        // Table or schema.table; system schemas and cross-database names are
+        // rejected later by DatabaseObjectName.
+        if (!is_string($request['table'] ?? null)
+            || preg_match('/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$/', $request['table']) !== 1) {
+            $errors[] = ['path' => 'table', 'message' => 'A valid table or schema.table identifier is required.'];
         }
 
         if (in_array($action, ['insert', 'update', 'upsert'], true)) {
@@ -49,8 +51,8 @@ class WriteRequestValidator
                 $errors[] = ['path' => 'filterLogic', 'message' => 'Filter logic must be AND or OR.'];
             }
         }
-        if ($action === 'upsert' && array_key_exists('keys', $request)) {
-            $keys = $request['keys'];
+        if ($action === 'upsert') {
+            $keys = $request['keys'] ?? null;
             if (!is_array($keys) || $keys === [] || !array_is_list($keys)) {
                 $errors[] = ['path' => 'keys', 'message' => 'UPSERT keys must be a non-empty array.'];
             } else {

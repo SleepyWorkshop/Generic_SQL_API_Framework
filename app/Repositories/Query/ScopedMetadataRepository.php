@@ -1,23 +1,20 @@
 <?php
 
 require_once __DIR__ . '/../MetadataRepository.php';
-require_once __DIR__ . '/../../Resources/QuerySourcePolicy.php';
 
 /**
  * Adds request-local CTE output metadata without weakening physical-table
- * validation. Every physical table or view must also pass the query-source
- * policy; CTE names stay local to the request and are not registry sources.
+ * validation: names that are not CTEs of this request are checked against the
+ * database catalog by the delegate.
  */
 class ScopedMetadataRepository extends MetadataRepository
 {
     private MetadataRepository $delegate;
-    private QuerySourcePolicy $sourcePolicy;
     private array $virtualTables = [];
 
-    public function __construct(MetadataRepository $delegate, ?QuerySourcePolicy $sourcePolicy = null)
+    public function __construct(MetadataRepository $delegate)
     {
         $this->delegate = $delegate;
-        $this->sourcePolicy = $sourcePolicy ?? new QuerySourcePolicy();
     }
 
     public function setVirtualTables(array $tables): void
@@ -35,7 +32,6 @@ class ScopedMetadataRepository extends MetadataRepository
         if ($this->findVirtualTable((string)$table) !== null) {
             return true;
         }
-        $this->sourcePolicy->assertAllowed((string)$table);
         return $this->delegate->tableExists($table);
     }
 
@@ -43,7 +39,6 @@ class ScopedMetadataRepository extends MetadataRepository
     {
         $virtualTable = $this->findVirtualTable((string)$table);
         if ($virtualTable === null) {
-            $this->sourcePolicy->assertAllowed((string)$table);
             return $this->delegate->columnExists($table, $column);
         }
         foreach ($this->virtualTables[$virtualTable] as $virtualColumn) {
@@ -59,7 +54,6 @@ class ScopedMetadataRepository extends MetadataRepository
         if ($this->findVirtualTable((string)$table) !== null) {
             return null;
         }
-        $this->sourcePolicy->assertAllowed((string)$table);
         return $this->delegate->getColumnDataType($table, $column);
     }
 
@@ -67,7 +61,6 @@ class ScopedMetadataRepository extends MetadataRepository
     {
         $virtualTable = $this->findVirtualTable((string)$table);
         if ($virtualTable === null) {
-            $this->sourcePolicy->assertAllowed((string)$table);
             return $this->delegate->getColumns($table);
         }
         return [

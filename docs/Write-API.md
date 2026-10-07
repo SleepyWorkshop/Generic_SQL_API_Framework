@@ -1,72 +1,60 @@
 # Write API
 
 The Write API performs single-object INSERT, UPDATE, DELETE, and UPSERT
-operations on registered resources. It is deny-by-default: only resources
-declared in `config/write-resources.php` are writable. Callers need `data.write`
-and a matching `writeResources` scope (Data Operator, System Administrator, or
-an `api-administrator` key), and session callers must send `X-CSRF-Token`.
+operations on any user table of the configured database. There is no
+per-table registration: a caller holding `data.write` (Data Operator, System
+Administrator, or an `api-administrator` key) can write to any table the
+database login can write to. Session callers must send `X-CSRF-Token`.
 
-## Write resource registry
+The request names the target table; the backend validates the name, loads the
+table's live column metadata, and builds parameterized SQL. The database login's
+own permissions remain the final boundary, so grant it only the rights the
+deployment needs (see [Deployment checklist](#deployment-checklist)).
 
-`config/write-resources.php` maps public resource IDs to fixed SQL Server
-targets. It is separate from SQL Resources: report queries are never implied to
-be safe write targets.
+## Target table
 
-The repository ships one entry, `crud-test`, for the test table
-`dbo.ApiCrudTest`. Replace or remove it in deployments that do not have that
-table.
+`table` is `Name` (schema `dbo`) or `Schema.Name`:
 
-```php
-return [
-    'crud-test' => [
-        'schema' => 'dbo',
-        'table' => 'ApiCrudTest',
-        'actions' => ['insert', 'update', 'delete', 'upsert'],
-        'columns' => ['CustomerCode', 'Name', 'Email', 'Age', 'Status'],
-        'filterColumns' => ['Id', 'CustomerCode', 'Name', 'Email', 'Age', 'Status'],
-        'keys' => ['CustomerCode'],
-        'identityColumn' => 'Id',
-    ],
-];
-```
+- each part is an unquoted identifier (`[A-Za-z_][A-Za-z0-9_]*`);
+- three-part or cross-database names, brackets, and other punctuation are
+  rejected (`400 INVALID_REQUEST`);
+- the `sys` and `INFORMATION_SCHEMA` schemas are rejected
+  (`400 INVALID_WRITE_TABLE`);
+- the table must exist as a user table in the configured database
+  (`sys.tables`); otherwise `400 INVALID_WRITE_TABLE`. Views are not write
+  targets.
 
-| Setting | Required | Meaning |
-|---|:-:|---|
-| `table` | yes | Fixed physical base table |
-| `schema` | no | Fixed schema; default `dbo` |
-| `actions` | yes | Non-empty subset of `insert`, `update`, `delete`, `upsert` |
-| `columns` | yes | Columns clients may assign |
-| `filterColumns` | no | Columns usable in UPDATE/DELETE filters; defaults to `columns` |
-| `keys` | no | Exact UPSERT key set (a subset of `columns`); required for UPSERT, empty disables it |
-| `identityColumn` | no | Identity returned by INSERT or an inserting UPSERT; must appear in `columns` or `filterColumns` |
+Columns come from the table's live metadata:
 
-All names are unqualified SQL identifiers; lists are checked for
-case-insensitive duplicates. On every request the resource is checked against
-live SQL Server metadata: configured columns must exist, a declared identity
-must really be an identity, and identity, computed, generated-always, hidden,
-timestamp, and rowversion columns can never be written even if listed. A
-mismatch is treated as server misconfiguration and returned as a generic
-`QUERY_ERROR`. Values are checked for required columns, nullability, type,
-range, format, and length; omit a field to use its database default.
+- any existing column can be used in UPDATE/DELETE filters;
+- any column that is not database-generated can be written. Identity, computed,
+  generated-always, hidden, `timestamp`, and `rowversion` columns are rejected
+  (`INVALID_WRITE_COLUMN`);
+- a non-nullable column without a default must be supplied on INSERT and UPSERT
+  (`MISSING_REQUIRED_FIELD`); omit a field to use its database default;
+- values are checked for type, range, format, nullability, and length
+  (`INVALID_WRITE_VALUE`). Unsupported SQL Server types are rejected.
+
+If the table has an identity column, INSERT (and the insert branch of UPSERT)
+returns its value as `generatedId`.
 
 ## INSERT
 
 ```json
 {
   "action": "insert",
-  "resource": "crud-test",
+  "table": "dbo.Customers",
   "data": {
     "CustomerCode": "C001",
     "Name": "John",
     "Email": "john@example.com",
-    "Age": 30,
     "Status": "Active"
   }
 }
 ```
 
 `data` is a non-empty object of scalar or null values. INSERT accepts no
-filters, keys, source, or return-field selection.
+filters, keys, or return-field selection.
 
 ```json
 {
@@ -81,14 +69,12 @@ filters, keys, source, or return-field selection.
 }
 ```
 
-`generatedId` appears only when a verified, configured identity is returned.
-
 ## UPDATE
 
 ```json
 {
   "action": "update",
-  "resource": "crud-test",
+  "table": "Customers",
   "data": { "Email": "new@example.com", "Status": "Active" },
   "filters": [{ "field": "CustomerCode", "operator": "=", "value": "C001" }],
   "filterLogic": "AND"
@@ -104,12 +90,13 @@ rows; there is no single-row guarantee.
 ```json
 {
   "action": "delete",
-  "resource": "crud-test",
+  "table": "Customers",
   "filters": [{ "field": "Id", "operator": "=", "value": 42 }]
 }
 ```
 
-DELETE has no `data`; a non-empty `filters` list is mandatory. Success data is
+DELETE has no `data`; a non-empty `filters` list is mandatory
+(`UNSAFE_WRITE` otherwise). Success data is
 `[{"operation":"delete","affectedRows":N}]`.
 
 ## UPSERT
@@ -117,24 +104,20 @@ DELETE has no `data`; a non-empty `filters` list is mandatory. Success data is
 ```json
 {
   "action": "upsert",
-  "resource": "crud-test",
+  "table": "Customers",
+  "keys": ["CustomerCode"],
   "data": {
     "CustomerCode": "C001",
     "Name": "John",
-    "Email": "john@example.com",
-    "Age": 30,
-    "Status": "Active"
-  },
-  "keys": ["CustomerCode"]
+    "Email": "john@example.com"
+  }
 }
 ```
 
-- The request `keys` must equal the configured key set (case- and
-  order-insensitive), and every key needs a non-null value in `data`.
-- `data` must include at least one non-key value.
-- Live metadata must show a PRIMARY KEY or unfiltered UNIQUE index exactly
-  matching the configured keys. The API cannot tell whether those columns are
-  the intended business key.
+- `keys` is required. Each key must be an existing column with a non-null value
+  in `data`, and `data` must include at least one non-key value.
+- The key set must exactly match the table's PRIMARY KEY or an unfiltered UNIQUE
+  index (case- and order-insensitive); otherwise `400 INVALID_UPSERT_KEY`.
 
 UPSERT is one `MERGE ... WITH (HOLDLOCK)` statement with prepared source values.
 There is no surrounding API transaction. HOLDLOCK closes the gap between a
@@ -145,21 +128,22 @@ concurrency against each target, especially with triggers or replication.
 
 DML `OUTPUT` is captured into a table variable and selected afterwards. This
 gives an affected-row count without relying on the driver, works when the target
-has enabled DML triggers, and returns only a configured, verified identity.
-Identifiers are bracket-quoted from the registry; all values are positional
-prepared parameters. Each request executes one operation as an independent
-statement.
+has enabled DML triggers, and returns only the table's identity column.
+Schema, table, and column names are bracket-quoted after validation against
+metadata; all values are positional prepared parameters. Each request executes
+one DML statement. The Write API never generates DDL or any statement other than
+INSERT, UPDATE, DELETE, or MERGE.
 
 ## Write filters
 
 UPDATE and DELETE accept `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`,
 `NOT LIKE`, `IN`, `NOT IN`, `BETWEEN`, `NOT BETWEEN`, `IS NULL`, and
-`IS NOT NULL` on `filterColumns`. `IN` lists must be non-empty, `BETWEEN` takes
-exactly two values, and the null operators omit `value`. Subqueries and `EXISTS`
-are not supported. Filters combine with `AND` by default or with top-level
-`filterLogic: "OR"`.
+`IS NOT NULL` on any column of the table. `IN` lists must be non-empty, `BETWEEN`
+takes exactly two values, and the null operators omit `value`. Subqueries and
+`EXISTS` are not supported. Filters combine with `AND` by default or with
+top-level `filterLogic: "OR"`.
 
-Write error codes (`INVALID_WRITE_RESOURCE`, `UNSAFE_WRITE`,
+Write error codes (`INVALID_WRITE_TABLE`, `UNSAFE_WRITE`,
 `INVALID_WRITE_COLUMN`, `INVALID_WRITE_VALUE`, `MISSING_REQUIRED_FIELD`,
 `INVALID_UPSERT_KEY`, `DUPLICATE_KEY`, `CONSTRAINT_VIOLATION`) are listed in
 [Errors and validation](Errors-and-Validation.md#data-action-codes). SQL Server
@@ -167,20 +151,17 @@ error text is never returned.
 
 ## Not supported
 
-Bulk or array input, multi-action transactions, client-selected tables or
-schemas, identity-insert overrides, SQL expression values, explicit requests for
-database defaults, returned-column selection, soft delete, and optimistic
-concurrency tokens.
+Bulk or array input, multi-action transactions, writes to views or system
+objects, cross-database targets, identity-insert overrides, SQL expression
+values, explicit requests for database defaults, returned-column selection, soft
+delete, and optimistic concurrency tokens.
 
 ## Deployment checklist
 
-1. Grant the database login only the INSERT/UPDATE/DELETE rights the registered
-   resources need.
-2. Keep `columns` and `filterColumns` as small as possible.
-3. Make sure every required, non-generated column is assignable or has a
-   database default.
-4. Configure `identityColumn` only when returning it is safe.
-5. For UPSERT, create and verify the matching unique index.
-6. Remove `crud-test` unless the deployment has `dbo.ApiCrudTest`.
-7. Verify DML, constraints, triggers, affected-row output, and concurrent UPSERT
+1. Grant the database login INSERT/UPDATE/DELETE only on the tables or schemas
+   clients should be able to change. With `data.write`, the API can reach every
+   table the login can write to.
+2. Give `data.write` only to roles and API keys that need it.
+3. For UPSERT, create the matching primary key or unique index.
+4. Verify DML, constraints, triggers, affected-row output, and concurrent UPSERT
    against the deployment database.

@@ -12,13 +12,11 @@ require_once __DIR__ . '/../app/Requests/QueryRequestNormalizer.php';
 require_once __DIR__ . '/../app/Repositories/QueryRepository.php';
 require_once __DIR__ . '/../app/Repositories/SqlRepository.php';
 require_once __DIR__ . '/../app/Repositories/Query/SqlExpressionBuilder.php';
-require_once __DIR__ . '/../app/Resources/RoutineResourceRegistry.php';
-require_once __DIR__ . '/../app/Resources/QuerySourcePolicy.php';
+require_once __DIR__ . '/../app/Resources/RoutineResolver.php';
 require_once __DIR__ . '/../app/Security/DatabaseTransportSecurity.php';
 require_once __DIR__ . '/../app/Health/ApplicationHealthMonitor.php';
 require_once __DIR__ . '/../app/Deployment/ProductionValidator.php';
 require_once __DIR__ . '/../database/drivers/SqlServerDriver.php';
-require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
 
 /*
  * Regression coverage for the v2.1.2 static security remediation
@@ -151,8 +149,25 @@ class RemediationRecordingEngine extends QueryEngine
 /** Every table and column exists; source authorization is the only gate. */
 class RemediationMetadata extends MetadataRepository
 {
-    public function __construct(private array $columns = []) {}
-    public function tableExists($table) { return true; }
+    public int $routineLookups = 0;
+
+    /** @param array|null $tables Catalog table names; null means every name exists. */
+    public function __construct(private array $columns = [], private ?array $tables = null) {}
+    public function tableExists($table)
+    {
+        return $this->tables === null || in_array(strtolower((string)$table), $this->tables, true);
+    }
+    public function getRoutine(string $schema, string $name): ?array
+    {
+        $this->routineLookups++;
+        return [
+            'dbo.readreport' => ['type' => 'procedure', 'parameters' => 1],
+            'dbo.writereport' => ['type' => 'procedure', 'parameters' => 0],
+            'reports.daily' => ['type' => 'procedure', 'parameters' => 0],
+            'dbo.score' => ['type' => 'function', 'parameters' => 1],
+            'dbo.rows' => ['type' => 'tableFunction', 'parameters' => 1],
+        ][strtolower($schema . '.' . $name)] ?? null;
+    }
     public function columnExists($table, $column)
     {
         return $this->columns === [] || in_array(strtolower($column), $this->columns[strtolower((string)$table)] ?? [], true);
@@ -305,75 +320,61 @@ try {
         (new LocalAdminMiddleware())->handle(['action' => $action]);
     }
 
-    // SSA-01: routines are deny-by-default registry entries.
-    $routineEntry = fn (string $type, string $name, string $access, int $parameters, array $roles): array => [
-        'type' => $type, 'schema' => 'dbo', 'name' => $name, 'access' => $access, 'parameters' => $parameters, 'roles' => $roles,
-    ];
-    $routines = new RoutineResourceRegistry([
-        'dbo.ReadReport' => $routineEntry('procedure', 'ReadReport', 'read', 1, ['read-only', 'data-operator', 'application-administrator']),
-        'dbo.WriteReport' => $routineEntry('procedure', 'WriteReport', 'write', 0, ['read-only', 'data-operator']),
-        'reports.daily' => $routineEntry('procedure', 'DailyReport', 'read', 0, ['read-only']),
-        'dbo.Score' => $routineEntry('function', 'Score', 'read', 1, ['read-only']),
-        'dbo.Rows' => $routineEntry('tableFunction', 'Rows', 'read', 1, ['read-only']),
-    ]);
-    foreach (['sp_executesql', 'sys.sp_rename', 'master.dbo.xp_cmdshell', 'otherdb.dbo.ReadReport',
-        'dbo.ReadReport;DROP', 'DBO.READREPORT', 'ReadReport', '', null, ['dbo.ReadReport']] as $unregistered) {
-        remediationRejects(fn () => $routines->resolve($unregistered, 'procedure'), 'INVALID_ROUTINE', 'An unregistered routine resolved.');
+    // SSA-01 (V2.2): routines are not registered. A routine name resolves only to
+    // a user routine of the matching type in the configured database's catalog,
+    // and argument counts follow its declared parameters.
+    $routineMetadata = new RemediationMetadata();
+    $routines = new RoutineResolver($routineMetadata);
+    foreach (['sp_executesql', 'dbo.sp_executesql', 'xp_cmdshell', 'sys.sp_rename', 'SYS.objects', 'INFORMATION_SCHEMA.ROUTINES',
+        'master.dbo.xp_cmdshell', 'otherdb.dbo.ReadReport', 'dbo.ReadReport;DROP', '[dbo].[ReadReport]', '', null, ['dbo.ReadReport']] as $unsafe) {
+        $lookups = $routineMetadata->routineLookups;
+        remediationRejects(fn () => $routines->resolve($unsafe, 'procedure', []), 'INVALID_ROUTINE', 'An unsafe routine name resolved.');
+        remediationAssert($routineMetadata->routineLookups === $lookups, 'An unsafe routine name reached the catalog lookup.');
     }
-    remediationRejects(fn () => $routines->resolve('dbo.Score', 'procedure'), 'INVALID_ROUTINE', 'A function was callable as a procedure.');
-    remediationRejects(fn () => $routines->resolve('dbo.ReadReport', 'tableFunction'), 'INVALID_ROUTINE', 'A procedure was callable as a table function.');
-    remediationRejects(fn () => (new RoutineResourceRegistry([]))->resolve('dbo.ReadReport', 'procedure'), 'INVALID_ROUTINE',
-        'The default registry is not deny-by-default.');
-    remediationAssert((require $root . '/config/routine-resources.php') === [], 'The shipped routine registry is not empty.');
-    foreach ([
-        ['dbo.Bad' => ['schema' => 'dbo.x'] + $routineEntry('procedure', 'Bad', 'read', 0, ['read-only'])],
-        ['dbo.Bad' => $routineEntry('procedure', 'Bad]; DROP', 'read', 0, ['read-only'])],
-        ['dbo.Bad' => $routineEntry('procedure', 'Bad', 'read', 0, [])],
-        ['dbo.Bad' => $routineEntry('procedure', 'Bad', 'read', 0, ['unknown-role'])],
-        ['dbo.Bad' => $routineEntry('procedure', 'Bad', 'execute', 0, ['read-only'])],
-        ['dbo.Bad' => $routineEntry('procedure', 'Bad', 'read', -1, ['read-only'])],
-        ['dbo.Bad' => $routineEntry('procedure', 'Bad', 'read', 0, ['read-only']) + ['database' => 'master']],
-    ] as $invalidRegistry) {
-        $failure = remediationFailure(fn () => (new RoutineResourceRegistry($invalidRegistry))->resolve('dbo.Bad', 'procedure'),
-            'An invalid routine registry entry was accepted.');
-        remediationAssert($failure instanceof RuntimeException && !$failure instanceof ApiRequestException, 'Invalid routine entry failed unsafely.');
-    }
+    remediationRejects(fn () => $routines->resolve('dbo.Missing', 'procedure', []), 'INVALID_ROUTINE', 'A routine absent from the catalog resolved.');
+    remediationRejects(fn () => $routines->resolve('dbo.Score', 'procedure', [1]), 'INVALID_ROUTINE', 'A function was callable as a procedure.');
+    remediationRejects(fn () => $routines->resolve('dbo.ReadReport', 'tableFunction', [1]), 'INVALID_ROUTINE', 'A procedure was callable as a table function.');
+    remediationRejects(fn () => $routines->resolve('dbo.Rows', 'function', [1]), 'INVALID_ROUTINE', 'A table function was callable as a scalar function.');
+    remediationAssert(!is_file($root . '/config/routine-resources.php'), 'A routine registry is shipped again.');
 
     $routineEngine = new RemediationRecordingEngine();
-    $routineRepository = new QueryRepository($routineEngine, new RemediationMetadata(), routines: $routines, sourcePolicy: new PermissiveQuerySourcePolicy());
+    $routineRepository = new QueryRepository($routineEngine, $routineMetadata);
     $hostile = "x'; DROP TABLE Orders; --";
-    $routineRepository->procedure(['procedure' => 'dbo.ReadReport', 'params' => [$hostile]]);
+    $routineRepository->procedure(['procedure' => 'ReadReport', 'params' => [$hostile]]);
     $execution = end($routineEngine->executions);
     remediationAssert($execution['sql'] === 'EXEC [dbo].[ReadReport] ?' && $execution['params'] === [$hostile],
-        'Registered procedure SQL is not built from the registry with bound arguments.');
-    $routineRepository->procedure(['procedure' => 'reports.daily', 'params' => []]);
-    remediationAssert(end($routineEngine->executions)['sql'] === 'EXEC [dbo].[DailyReport]', 'The client routine ID became a SQL identifier.');
+        'Procedure SQL is not built from validated identifiers with bound arguments.');
+    $routineRepository->procedure(['procedure' => 'reports.Daily', 'params' => []]);
+    remediationAssert(end($routineEngine->executions)['sql'] === 'EXEC [reports].[Daily]', 'A schema-qualified procedure was not quoted.');
+    $routineRepository->procedure(['procedure' => 'dbo.ReadReport', 'params' => []]);
+    remediationAssert(end($routineEngine->executions)['sql'] === 'EXEC [dbo].[ReadReport]', 'Procedure parameter defaults were not allowed.');
     $routineRepository->function(['function' => 'dbo.Score', 'params' => [1]]);
-    remediationAssert(end($routineEngine->executions)['sql'] === 'SELECT [dbo].[Score](?) AS Result', 'Registered function SQL is wrong.');
+    remediationAssert(end($routineEngine->executions)['sql'] === 'SELECT [dbo].[Score](?) AS Result', 'Function SQL is wrong.');
     $routineRepository->tableFunction(['function' => 'dbo.Rows', 'params' => [1]]);
-    remediationAssert(end($routineEngine->executions)['sql'] === 'SELECT * FROM [dbo].[Rows](?)', 'Registered table function SQL is wrong.');
+    remediationAssert(end($routineEngine->executions)['sql'] === 'SELECT * FROM [dbo].[Rows](?)', 'Table function SQL is wrong.');
     $executionCount = count($routineEngine->executions);
-    remediationRejects(fn () => $routineRepository->procedure(['procedure' => 'dbo.ReadReport', 'params' => []]),
-        'INVALID_ROUTINE_PARAMETERS', 'A wrong routine parameter count was accepted.');
+    remediationRejects(fn () => $routineRepository->procedure(['procedure' => 'dbo.ReadReport', 'params' => [1, 2]]),
+        'INVALID_ROUTINE_PARAMETERS', 'Too many procedure arguments were accepted.');
+    remediationRejects(fn () => $routineRepository->function(['function' => 'dbo.Score', 'params' => []]),
+        'INVALID_ROUTINE_PARAMETERS', 'A function was called without its declared arguments.');
     remediationRejects(fn () => $routineRepository->procedure(['procedure' => 'sp_executesql', 'params' => ['SELECT 1']]),
-        'INVALID_ROUTINE', 'The repository executed an unregistered routine.');
+        'INVALID_ROUTINE', 'The repository executed a system procedure.');
     remediationAssert(count($routineEngine->executions) === $executionCount, 'A rejected routine reached the database.');
 
-    $routineAuthorization = new AuthorizationMiddleware(new AuthorizationService(), $routines);
+    // Routine authorization is permission-only and identical for sessions and
+    // API keys: functions need routine.execute; procedures, which can change
+    // data, also need data.write.
+    $routineAuthorization = new AuthorizationMiddleware(new AuthorizationService());
     $routineRequest = fn (string $action, $id): array => ['action' => $action, 'source' => [$action === 'procedure' ? 'procedure' : 'function' => $id]];
-    PrincipalContext::set(remediationPrincipal('read-only'));
-    $routineAuthorization->handle($routineRequest('procedure', 'dbo.ReadReport'));
-    $routineAuthorization->handle($routineRequest('function', 'dbo.Score'));
-    remediationRejects(fn () => $routineAuthorization->handle($routineRequest('procedure', 'dbo.WriteReport')),
-        'AUTHORIZATION_DENIED', 'Read Only executed a write routine.');
-    remediationRejects(fn () => $routineAuthorization->handle($routineRequest('procedure', 'sp_executesql')),
-        'INVALID_ROUTINE', 'An unregistered routine passed authorization.');
-    PrincipalContext::set(remediationPrincipal('data-operator'));
-    $routineAuthorization->handle($routineRequest('procedure', 'dbo.WriteReport'));
-    remediationRejects(fn () => $routineAuthorization->handle($routineRequest('tableFunction', 'dbo.Rows')),
-        'RESOURCE_ACCESS_DENIED', 'A role not listed by the routine entry was authorized.');
-    PrincipalContext::set(remediationPrincipal('read-only', false, null, 'api_key'));
-    $routineAuthorization->handle($routineRequest('procedure', 'dbo.ReadReport'));
+    foreach (['session', 'api_key'] as $type) {
+        PrincipalContext::set(remediationPrincipal('read-only', false, null, $type));
+        $routineAuthorization->handle($routineRequest('function', 'dbo.Score'));
+        $routineAuthorization->handle($routineRequest('tableFunction', 'dbo.Rows'));
+        remediationRejects(fn () => $routineAuthorization->handle($routineRequest('procedure', 'dbo.ReadReport')),
+            'AUTHORIZATION_DENIED', "A read-only {$type} principal executed a stored procedure.");
+        PrincipalContext::set(remediationPrincipal('data-operator', false, null, $type));
+        $routineAuthorization->handle($routineRequest('procedure', 'dbo.WriteReport'));
+    }
     PrincipalContext::set(remediationPrincipal(null, true, 'application-administrator'));
     remediationRejects(fn () => $routineAuthorization->handle($routineRequest('procedure', 'dbo.ReadReport')),
         'AUTHORIZATION_DENIED', 'frontend.read authorized a routine.');
@@ -381,50 +382,21 @@ try {
     remediationRejects(fn () => $routineAuthorization->handle($routineRequest('function', 'dbo.Score')),
         'AUTHORIZATION_DENIED', 'Frontend access authorized a routine.');
 
-    // SSA-03: query sources are deny-by-default registry entries.
-    $sources = new QuerySourceRegistry([
-        'Orders' => [],
-        'Lines' => ['roles' => ['frontend-access']],
-        'Customers' => ['roles' => ['data-operator']],
-    ]);
-    $policy = new QuerySourcePolicy($sources);
-    foreach ([
-        ['dbo.Orders' => []], ['Orders' => ['roles' => ['unknown']]], ['Orders' => ['roles' => []]],
-        ['Orders' => ['schema' => 'dbo']], [['Orders']], ['Orders' => [], 'ORDERS' => []],
-    ] as $invalidSources) {
-        $failure = remediationFailure(fn () => new QuerySourceRegistry($invalidSources), 'An invalid query source entry was accepted.');
-        remediationAssert($failure instanceof RuntimeException, 'Invalid query source entry failed unsafely.');
-    }
-    $shippedSources = new QuerySourceRegistry();
-    foreach (['CustomerTable', 'ItemMasterTable', 'BillDetTable', 'BillMastTable', 'billmasttable', 'PurMastTable', 'CategoryTable'] as $required) {
-        remediationAssert($shippedSources->find($required) !== null, "Shipped query sources omit {$required}.");
-    }
-    foreach (['sys.objects', 'INFORMATION_SCHEMA.TABLES', 'master.dbo.Users', 'Inventory'] as $unregistered) {
-        remediationAssert($shippedSources->find($unregistered) === null, "Shipped query sources include {$unregistered}.");
-    }
-    PrincipalContext::clear();
-    remediationAssert($policy->allows('Orders') && $policy->allows('orders') && !$policy->allows('Secret')
-        && !$policy->allows('dbo.Orders') && !$policy->allows('sys.objects') && !$policy->allows('Customers'),
-        'Query source policy decisions are wrong without a principal.');
-    PrincipalContext::set(remediationPrincipal('read-only'));
-    remediationAssert(!$policy->allows('Customers') && !$policy->allows('Lines'), 'A role-restricted source was allowed.');
-    PrincipalContext::set(remediationPrincipal('data-operator'));
-    remediationAssert($policy->allows('Customers'), 'A listed role was denied.');
-    PrincipalContext::set(remediationPrincipal(null, true));
-    remediationAssert($policy->allows('Lines') && !$policy->allows('Customers'), 'frontend-access sources were not applied.');
-
+    // SSA-03 (V2.2): JSON Query Mode has no table registry. Any table or view the
+    // configured database's catalog confirms is readable with data.read, in
+    // every query position; names the catalog does not confirm (system objects,
+    // other databases, unknown names) never reach SQL execution.
+    remediationAssert(!is_file($root . '/config/query-sources.php'), 'A query-source registry is shipped again.');
     PrincipalContext::set(remediationPrincipal('read-only'));
     $validator = new QueryRequestValidator();
     $normalizer = new QueryRequestNormalizer();
     $queryEngine = new RemediationRecordingEngine();
-    $queries = new QueryRepository($queryEngine, new RemediationMetadata(), routines: $routines, sourcePolicy: $policy);
+    $queries = new QueryRepository($queryEngine, new RemediationMetadata([], ['orders', 'secret', 'lines']));
     $run = function (array $request) use ($validator, $normalizer, $queries): array {
         $validator->validate($request);
         return $queries->select($normalizer->normalize($request));
     };
-    $run(['action' => 'select', 'source' => ['table' => 'Orders'], 'fields' => ['Id']]);
-    remediationAssert(str_contains(remediationSql(end($queryEngine->executions)['sql']), 'FROM Orders'), 'A registered source was not queried.');
-    $denied = [
+    $generic = [
         'source' => ['action' => 'select', 'source' => ['table' => 'Secret'], 'fields' => ['Id']],
         'join' => ['action' => 'select', 'source' => ['table' => 'Orders', 'alias' => 'O'], 'fields' => ['O.Id'],
             'joins' => [['type' => 'INNER', 'source' => ['table' => 'Secret', 'alias' => 'S'], 'on' => ['left' => 'O.Id', 'right' => 'S.Id']]]],
@@ -436,14 +408,25 @@ try {
         ]],
         'cte' => ['action' => 'select', 'with' => ['name' => 'Recent', 'query' => ['source' => ['table' => 'Secret'], 'fields' => ['Id']]],
             'source' => ['table' => 'Recent'], 'fields' => ['Id']],
-        'role-restricted' => ['action' => 'select', 'source' => ['table' => 'Customers'], 'fields' => ['Id']],
+        'filter-sort-page' => ['action' => 'select', 'source' => ['table' => 'Lines'], 'fields' => ['Id', 'Name'],
+            'filters' => [['field' => 'Name', 'operator' => '=', 'value' => 'branch-10']],
+            'sort' => [['field' => 'Name', 'direction' => 'DESC']], 'pagination' => ['page' => 2, 'pageSize' => 10]],
     ];
-    foreach ($denied as $placement => $request) {
+    foreach ($generic as $placement => $request) {
         $before = count($queryEngine->executions);
-        remediationRejects(fn () => $run($request), 'RESOURCE_ACCESS_DENIED', "An unregistered {$placement} source was queried.");
-        remediationAssert(count($queryEngine->executions) === $before, "A denied {$placement} source reached the database.");
+        $run($request);
+        remediationAssert(count($queryEngine->executions) > $before, "A catalog-confirmed {$placement} source required a registration.");
     }
-    // CTE names stay local, even when they shadow an unregistered table name.
+    $pagedSql = remediationSql(end($queryEngine->executions)['sql']);
+    remediationAssert(str_contains($pagedSql, 'FROM Lines') && str_contains($pagedSql, 'Name = ?') && !str_contains($pagedSql, 'branch-10'),
+        'Generic filtering, sorting, or pagination was not applied with bound values.');
+    foreach (['sys.objects', 'master.dbo.Users', 'Missing'] as $unknown) {
+        $before = count($queryEngine->executions);
+        $failure = remediationFailure(fn () => $run(['action' => 'select', 'source' => ['table' => $unknown], 'fields' => ['Id']]),
+            "A table the catalog does not confirm ({$unknown}) was queried.");
+        remediationAssert(count($queryEngine->executions) === $before, "An unconfirmed source ({$unknown}) reached the database.");
+    }
+    // CTE names stay local, even when they shadow a physical table name.
     $run(['action' => 'select', 'with' => ['name' => 'Secret', 'query' => ['source' => ['table' => 'Orders'], 'fields' => ['Id']]],
         'source' => ['table' => 'Secret'], 'fields' => ['Id']]);
     $cteSql = remediationSql(end($queryEngine->executions)['sql']);
@@ -460,43 +443,37 @@ try {
         remediationRejects(fn () => $validator->validate($spoof), 'INVALID_REQUEST', 'A qualified CTE name or client virtual table was accepted.');
     }
 
-    // Metadata listings respect the query-source and routine registries.
-    $metadata = new MetadataService(new RemediationMetadata(), $policy, $routines);
-    $tables = $metadata->getTables();
-    remediationAssert(array_column($tables['data'], 'TABLE_NAME') === ['Orders'] && $tables['rowsReturned'] === 1,
-        'Table metadata exposed unregistered sources.');
-    remediationAssert(array_column($metadata->getViews()['data'], 'TABLE_NAME') === ['orders'], 'View metadata exposed unregistered sources.');
-    remediationAssert(array_column($metadata->schema()['data'], 'TABLE_NAME') === ['Orders'], 'Schema metadata exposed unregistered sources.');
-    remediationAssert(array_column($metadata->getProcedures()['data'], 'ROUTINE_NAME') === ['ReadReport'], 'Procedure metadata exposed unregistered routines.');
-    remediationRejects(fn () => $metadata->getColumns('Secret'), 'RESOURCE_ACCESS_DENIED', 'Column metadata exposed an unregistered source.');
-    remediationAssert($metadata->getColumns('Orders')['data'] !== [] && !$metadata->tableExists('Secret') && $metadata->tableExists('Orders'),
-        'Metadata existence checks ignore the query-source policy.');
+    // Metadata listings come straight from the database catalog.
+    $metadata = new MetadataService(new RemediationMetadata());
+    remediationAssert(array_column($metadata->getTables()['data'], 'TABLE_NAME') === ['Orders', 'Secret', 'Lines'], 'Table metadata was filtered by a registry.');
+    remediationAssert(array_column($metadata->getProcedures()['data'], 'ROUTINE_NAME') === ['ReadReport', 'sp_secret', 'Other'], 'Procedure metadata was filtered by a registry.');
+    remediationAssert($metadata->getColumns('Secret')['data'] !== [] && $metadata->tableExists('Secret'), 'Column metadata required a registration.');
 
-    // SSA-07: SQL Resource source filters resolve only against registered sources.
+    // SSA-07 (V2.2): SQL Resource runtime mappings resolve against the authored
+    // statement's top-level sources and the catalog. A qualifier that names no
+    // top-level source (for example a derived table) cannot be placed.
     $resourceDirectory = $directory . '/resources';
     mkdir($resourceDirectory, 0700, true);
     file_put_contents($resourceDirectory . '/joined.sql', 'SELECT O.Id AS Category, O.Total AS Sales FROM Orders AS O JOIN Secret AS S ON S.Id = O.Id');
     $resourceRegistry = new SqlResourceRegistry([], $resourceDirectory);
     $resourceEngine = new RemediationRecordingEngine();
-    $resourceMetadata = new RemediationMetadata(['orders' => ['id', 'total', 'createdat'], 'secret' => ['id', 'password']]);
-    $resources = new SqlRepository($resourceEngine, $resourceRegistry, null, $resourceMetadata, $policy);
+    $resourceMetadata = new RemediationMetadata(['orders' => ['id', 'total', 'createdat'], 'secret' => ['id', 'region']]);
+    $resources = new SqlRepository($resourceEngine, $resourceRegistry, null, $resourceMetadata);
     $resourceRequest = fn (array $mappings, string $field): array => [
         'resource' => 'joined',
         'execution' => ['columns' => ['Category', 'Sales'], 'filters' => $mappings],
         'filters' => [['field' => $field, 'operator' => 'LIKE', 'value' => 'a%']],
     ];
-    remediationRejects(fn () => $resources->execute($resourceRequest(['Leak' => ['expression' => 'S.Password', 'placement' => 'source']], 'Leak')),
-        'RESOURCE_ACCESS_DENIED', 'An explicit mapping reached an unregistered source.');
-    remediationRejects(fn () => $resources->execute($resourceRequest(['Leak' => ['expression' => 'Password', 'placement' => 'source']], 'Leak')),
-        'RESOURCE_ACCESS_DENIED', 'An unqualified mapping reached a statement with an unregistered source.');
-    remediationRejects(fn () => $resources->execute($resourceRequest(['Leak' => ['expression' => 'COUNT(S.Password)', 'placement' => 'having']], 'Leak')),
-        'RESOURCE_ACCESS_DENIED', 'A HAVING mapping reached an unregistered source.');
-    remediationRejects(fn () => $resources->execute($resourceRequest(['Password' => ['placement' => 'source']], 'Password')),
-        'INVALID_SQL_RUNTIME_FIELD', 'Source resolution matched an unregistered source.');
+    $resources->execute($resourceRequest(['Region' => ['expression' => 'S.Region', 'placement' => 'source']], 'Region'));
+    remediationAssert(str_contains(remediationSql(end($resourceEngine->executions)['sql']), '(S.Region) LIKE ?'), 'A top-level source mapping required a registration.');
+    $resources->execute($resourceRequest(['Region' => ['placement' => 'source']], 'Region'));
+    remediationAssert(str_contains(remediationSql(end($resourceEngine->executions)['sql']), 'S.Region'), 'Catalog source resolution failed.');
     $resources->execute($resourceRequest(['CreatedAt' => ['placement' => 'source']], 'CreatedAt'));
-    remediationAssert(str_contains(remediationSql(end($resourceEngine->executions)['sql']), 'O.CreatedAt'), 'Source resolution against a registered source failed.');
-    $resources->execute($resourceRequest(['Created' => ['expression' => 'O.CreatedAt', 'placement' => 'source']], 'Created'));
-    remediationAssert(str_contains(remediationSql(end($resourceEngine->executions)['sql']), '(O.CreatedAt) LIKE ?'), 'An explicit registered mapping failed.');
+    remediationAssert(str_contains(remediationSql(end($resourceEngine->executions)['sql']), 'O.CreatedAt'), 'Catalog source resolution failed.');
+    remediationRejects(fn () => $resources->execute($resourceRequest(['Leak' => ['expression' => 'X.Region', 'placement' => 'source']], 'Leak')),
+        'INVALID_SQL_RUNTIME_FILTER', 'A mapping to a qualifier outside the statement was placed.');
+    remediationRejects(fn () => $resources->execute($resourceRequest(['Nope' => ['placement' => 'source']], 'Nope')),
+        'INVALID_SQL_RUNTIME_FIELD', 'Source resolution matched a column the catalog does not have.');
 
     // SSA-11: unpaginated data reads are capped without silent truncation.
     putenv('GENERIC_MAX_RESULT_ROWS');
@@ -594,22 +571,22 @@ try {
         && !str_contains($caseQuery['sql'], "OR '1'") && !str_contains($caseQuery['sql'], "\0"),
         'Public CASE values were inlined instead of bound.');
 
-    // SSA-06 (accepted limitation): frontend access is not narrowed by SQL
-    // Resource scopes, while backend roles are.
-    $authorizationRepository = new AuthorizationRepository();
-    $authorization = $authorizationRepository->load();
-    $authorization['roles']['read-only']['sqlResources'] = ['reports/allowed'];
-    $authorization['roles']['application-administrator']['sqlResources'] = ['reports/allowed'];
-    $authorizationRepository->save($authorization);
+    // SQL Resources (V2.2): sql.execute or frontend access runs any discovered
+    // resource; there are no per-role SQL Resource scopes. Callers without
+    // either permission are denied.
+    remediationAssert(!array_key_exists('sqlResources', (new AuthorizationRepository())->load()['roles']['read-only']),
+        'Per-role SQL Resource scopes returned.');
     $sqlAuthorization = new AuthorizationMiddleware(new AuthorizationService());
-    PrincipalContext::set(remediationPrincipal('read-only'));
-    $sqlAuthorization->handle(['action' => 'sql', 'resource' => 'reports/allowed']);
-    remediationRejects(fn () => $sqlAuthorization->handle(['action' => 'sql', 'resource' => 'reports/other']),
-        'RESOURCE_ACCESS_DENIED', 'Backend SQL Resource scopes are not enforced.');
-    foreach ([remediationPrincipal(null, true), remediationPrincipal(null, true, 'application-administrator')] as $frontendPrincipal) {
-        PrincipalContext::set($frontendPrincipal);
-        $sqlAuthorization->handle(['action' => 'sql', 'resource' => 'reports/other']);
+    foreach ([remediationPrincipal('read-only'), remediationPrincipal('read-only', false, null, 'api_key'),
+        remediationPrincipal(null, true), remediationPrincipal(null, true, 'application-administrator')] as $sqlPrincipal) {
+        PrincipalContext::set($sqlPrincipal);
+        foreach (['reports/allowed', 'reports/other', 'widgets/any'] as $resource) {
+            $sqlAuthorization->handle(['action' => 'sql', 'resource' => $resource]);
+        }
     }
+    PrincipalContext::set(remediationPrincipal(null));
+    remediationRejects(fn () => $sqlAuthorization->handle(['action' => 'sql', 'resource' => 'reports/allowed']),
+        'AUTHORIZATION_DENIED', 'A principal without sql.execute or frontend access ran a SQL Resource.');
 
     echo "Static security remediation tests passed.\n";
 } finally {

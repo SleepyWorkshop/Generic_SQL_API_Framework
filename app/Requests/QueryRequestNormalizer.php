@@ -26,7 +26,7 @@ class QueryRequestNormalizer
             $normalized = [
                 'controller' => 'Write',
                 'action' => $action,
-                'resource' => $request['resource'],
+                'table' => $request['table'],
             ];
             if (isset($request['data'])) $normalized['data'] = $request['data'];
             if (isset($request['filters'])) {

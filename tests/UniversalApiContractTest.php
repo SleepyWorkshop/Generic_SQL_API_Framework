@@ -1,12 +1,11 @@
 <?php
 
-require_once __DIR__ . '/support/PermissiveQuerySourcePolicy.php';
 
 require_once __DIR__ . '/../app/Requests/QueryRequestValidator.php';
 require_once __DIR__ . '/../app/Requests/QueryRequestNormalizer.php';
 require_once __DIR__ . '/../app/Repositories/Query/SelectBuilder.php';
 require_once __DIR__ . '/../app/Repositories/Query/RoutineBuilder.php';
-require_once __DIR__ . '/../app/Resources/RoutineResourceRegistry.php';
+require_once __DIR__ . '/../app/Resources/RoutineResolver.php';
 require_once __DIR__ . '/../core/Response.php';
 
 class ContractTestEngine extends QueryEngine
@@ -28,6 +27,14 @@ class ContractTestMetadata extends MetadataRepository
     public function columnExists($table, $column) { return $column !== 'Missing'; }
     public function getColumnDataType($table, $column) { return 'varchar'; }
     public function getColumns($table) { return ['data' => [['COLUMN_NAME' => 'ItemCode']]]; }
+    public function getRoutine(string $schema, string $name): ?array
+    {
+        return [
+            'RunReport' => ['type' => 'procedure', 'parameters' => 1],
+            'Score' => ['type' => 'function', 'parameters' => 1],
+            'Rows' => ['type' => 'tableFunction', 'parameters' => 1],
+        ][$name] ?? null;
+    }
 }
 
 function contractAssert(bool $condition, string $message): void
@@ -59,7 +66,7 @@ function expectBuildInvalid(SelectBuilder $builder, array $request): void
 
 $validator = new QueryRequestValidator();
 $normalizer = new QueryRequestNormalizer();
-$builder = new SelectBuilder(new ContractTestEngine(), new ContractTestMetadata(), sourcePolicy: new PermissiveQuerySourcePolicy());
+$builder = new SelectBuilder(new ContractTestEngine(), new ContractTestMetadata());
 
 // Covers SELECT, fields, aliases, multiple filters, JOIN, GROUP BY, HAVING,
 // ASC/DESC multi-sort, pagination, aggregate functions, and prepared values.
@@ -186,11 +193,7 @@ foreach (['union', 'unionAll'] as $action) {
 }
 
 $routine = new RoutineBuilder();
-$routineRegistry = new RoutineResourceRegistry([
-    'RunReport' => ['type' => 'procedure', 'schema' => 'dbo', 'name' => 'RunReport', 'access' => 'read', 'parameters' => 1, 'roles' => ['read-only']],
-    'dbo.Score' => ['type' => 'function', 'schema' => 'dbo', 'name' => 'Score', 'access' => 'read', 'parameters' => 1, 'roles' => ['read-only']],
-    'dbo.Rows' => ['type' => 'tableFunction', 'schema' => 'dbo', 'name' => 'Rows', 'access' => 'read', 'parameters' => 1, 'roles' => ['read-only']],
-]);
+$routineResolver = new RoutineResolver(new ContractTestMetadata());
 foreach ([
     ['action' => 'procedure', 'source' => ['procedure' => 'RunReport'], 'parameters' => [1]],
     ['action' => 'function', 'source' => ['function' => 'dbo.Score'], 'parameters' => [1]],
@@ -200,11 +203,11 @@ foreach ([
     $routineInternal = $normalizer->normalize($routineRequest);
     contractAssert($routineInternal['params'] === [1], 'Routine parameter normalization failed.');
     if ($routineRequest['action'] === 'procedure') {
-        contractAssert($routine->buildProcedure($routineRegistry->resolve($routineInternal['procedure'], 'procedure'), $routineInternal['params'])['sql'] === 'EXEC [dbo].[RunReport] ?', 'Procedure failed.');
+        contractAssert($routine->buildProcedure($routineResolver->resolve($routineInternal['procedure'], 'procedure', $routineInternal['params']), $routineInternal['params'])['sql'] === 'EXEC [dbo].[RunReport] ?', 'Procedure failed.');
     } elseif ($routineRequest['action'] === 'function') {
-        contractAssert($routine->buildFunction($routineRegistry->resolve($routineInternal['function'], 'function'), $routineInternal['params'])['sql'] === 'SELECT [dbo].[Score](?) AS Result', 'Scalar function failed.');
+        contractAssert($routine->buildFunction($routineResolver->resolve($routineInternal['function'], 'function', $routineInternal['params']), $routineInternal['params'])['sql'] === 'SELECT [dbo].[Score](?) AS Result', 'Scalar function failed.');
     } else {
-        contractAssert($routine->buildTableFunction($routineRegistry->resolve($routineInternal['function'], 'tableFunction'), $routineInternal['params'])['sql'] === 'SELECT * FROM [dbo].[Rows](?)', 'Table function failed.');
+        contractAssert($routine->buildTableFunction($routineResolver->resolve($routineInternal['function'], 'tableFunction', $routineInternal['params']), $routineInternal['params'])['sql'] === 'SELECT * FROM [dbo].[Rows](?)', 'Table function failed.');
     }
 }
 

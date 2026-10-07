@@ -25,71 +25,59 @@ final class AuthorizationService
         return array_keys($permissions);
     }
 
-    public function authorize(Principal $principal, string $permission, ?string $resource = null, ?string $scope = null): void
+    /**
+     * The single authorization decision for every API principal. Sessions,
+     * managed API keys, the legacy key, and anonymous mode all reach this
+     * method with a Principal; the authentication method never changes the
+     * outcome for the same roles.
+     */
+    public function authorize(Principal $principal, string $permission): void
     {
-        $this->authorizeInternal($principal, $permission, $resource, $scope, true);
+        $this->authorizeInternal($principal, $permission, true);
     }
 
-    private function authorizeInternal(Principal $principal, string $permission, ?string $resource, ?string $scope, bool $audit): void
+    private function authorizeInternal(Principal $principal, string $permission, bool $audit): void
     {
-        if (!$principal->enabled) $this->deny($principal, $permission, false, 'principal_disabled', $audit);
+        if (!$principal->enabled) $this->deny($principal, $permission, 'principal_disabled', $audit);
         // Frontend access is the base read entitlement in the frontend domain;
         // Application Administrator adds management, not a second read model.
         if ($permission === 'frontend.read' && $principal->frontendAccess) return;
         $configuration = $this->repository->load();
-        $allowed = false;
-        $resourceAllowed = $resource === null;
         foreach ($principal->roles() as $roleId) {
-            $role = $configuration['roles'][$roleId] ?? null;
-            if ($role === null || !in_array($permission, $role['permissions'], true)) continue;
-            $allowed = true;
-            if ($resource === null) { $resourceAllowed = true; continue; }
-            $resources = $scope === 'write' ? $role['writeResources'] : $role['sqlResources'];
-            if (in_array('*', $resources, true) || in_array($resource, $resources, true)) $resourceAllowed = true;
-        }
-        if (!$allowed || !$resourceAllowed) {
-            $this->deny($principal, $permission, $resource !== null, $allowed ? 'resource_scope_denied' : 'permission_denied', $audit, $resource);
-        }
-        (new OperationalLogger())->info('api', 'API authorization accepted', [
-            'permission' => $permission,
-            'resource' => $resource,
-        ]);
-    }
-
-    /**
-     * Routines are callable only when registered, when the principal holds
-     * routine.execute (frontend.read never qualifies), when one of its roles is
-     * listed by the registry entry, and, for write routines, data.write.
-     */
-    public function authorizeRoutine(Principal $principal, array $routine): void
-    {
-        $this->authorizeInternal($principal, 'routine.execute', null, null, true);
-        if (array_intersect($principal->roles(), $routine['roles']) === []) {
-            $this->deny($principal, 'routine.execute', true, 'resource_scope_denied', true, 'routine:' . $routine['id']);
-        }
-        if ($routine['access'] === 'write') {
-            $this->authorizeInternal($principal, 'data.write', null, null, true);
-        }
-    }
-
-    public function authorizeAny(Principal $principal, array $permissions, ?string $resource = null, ?string $scope = null): void
-    {
-        foreach ($permissions as $permission) {
-            try { $this->authorizeInternal($principal, $permission, $resource, $scope, false); return; }
-            catch (ApiRequestException $exception) {
-                if (!in_array($exception->getErrorCode(), ['AUTHORIZATION_DENIED', 'RESOURCE_ACCESS_DENIED'], true)) throw $exception;
+            if (in_array($permission, $configuration['roles'][$roleId]['permissions'] ?? [], true)) {
+                (new OperationalLogger())->info('api', 'API authorization accepted', ['permission' => $permission]);
+                return;
             }
         }
-        $this->deny($principal, implode('|', $permissions), $resource !== null, 'permission_denied', true, $resource);
+        $this->deny($principal, $permission, 'permission_denied', $audit);
     }
 
-    private function deny(Principal $principal, string $permission, bool $resourceDenied, string $reason, bool $audit, ?string $resource = null): never
+    /** Passes when the principal holds at least one of the permissions. */
+    public function authorizeAny(Principal $principal, array $permissions): void
+    {
+        foreach ($permissions as $permission) {
+            try { $this->authorizeInternal($principal, $permission, false); return; }
+            catch (ApiRequestException $exception) {
+                if ($exception->getErrorCode() !== 'AUTHORIZATION_DENIED') throw $exception;
+            }
+        }
+        $this->deny($principal, implode('|', $permissions), 'permission_denied', true);
+    }
+
+    /** Passes only when the principal holds every permission. */
+    public function authorizeAll(Principal $principal, array $permissions): void
+    {
+        foreach ($permissions as $permission) {
+            $this->authorizeInternal($principal, $permission, true);
+        }
+    }
+
+    private function deny(Principal $principal, string $permission, string $reason, bool $audit): never
     {
         if ($audit) {
             (new OperationalLogger())->warning('api', 'API authorization denied', [
                 'permission' => $permission,
-                'resource' => $resource,
-                'error_code' => $resourceDenied ? 'RESOURCE_ACCESS_DENIED' : 'AUTHORIZATION_DENIED',
+                'error_code' => 'AUTHORIZATION_DENIED',
             ]);
             $this->logger->audit('authorization.denied', 'denied', 'NOTICE', [
                 'actorType' => $principal->authenticationType === 'api_key' ? 'api_key' : 'user',
@@ -98,14 +86,10 @@ final class AuthorizationService
                 'role' => $principal->backendRole ?? $principal->frontendRole,
                 'authenticationMethod' => $principal->authenticationType,
                 'action' => $permission,
-                'resource' => $resource,
                 'reason' => $reason,
                 'component' => 'authorization',
             ]);
         }
-        throw new ApiRequestException(
-            $resourceDenied ? 'Resource access is denied.' : 'Authorization denied.',
-            $resourceDenied ? 'RESOURCE_ACCESS_DENIED' : 'AUTHORIZATION_DENIED', [], 403
-        );
+        throw new ApiRequestException('Authorization denied.', 'AUTHORIZATION_DENIED', [], 403);
     }
 }

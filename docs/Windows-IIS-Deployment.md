@@ -850,15 +850,17 @@ Type the password interactively; do not save it in a script file.
 USE [ApplicationDb];
 CREATE USER [generic_sql_api] FOR LOGIN [IIS APPPOOL\GenericSQLAPI];   -- or the login from 16.1/16.2
 ALTER ROLE db_datareader ADD MEMBER [generic_sql_api];
--- Only if write resources are registered in config\write-resources.php:
+-- Only if clients with data.write must change data:
 ALTER ROLE db_datawriter ADD MEMBER [generic_sql_api];
--- Only if stored procedures or functions are exposed through routine actions:
+-- Only if clients must call stored procedures or functions:
 GRANT EXECUTE TO [generic_sql_api];
 ```
 
-Prefer narrower grants (specific schemas, views, or procedures) when the exposed
-data is limited; read authorization is resource-level, so sensitive columns
-should be exposed through least-privilege views.
+These grants are the effective data boundary. The API authorizes by role
+permission only: a principal with `data.read` can read every table and view this
+user can read, and `data.write` can change every table it can write. Prefer
+narrower grants (specific schemas, tables, views, or procedures) and expose
+sensitive columns only through least-privilege views.
 
 ### 16.4 Encryption and certificates
 

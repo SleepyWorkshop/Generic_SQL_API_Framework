@@ -6,7 +6,6 @@ require_once __DIR__ . '/../app/Repositories/AuthorizationRepository.php';
 require_once __DIR__ . '/../app/Services/UserManagementService.php';
 require_once __DIR__ . '/../app/Services/ApiKeyService.php';
 require_once __DIR__ . '/../app/Middleware/CsrfProtectionMiddleware.php';
-require_once __DIR__ . '/../app/Resources/RoutineResourceRegistry.php';
 
 /*
  * Regression coverage for the v2.1.3 findings AAPI-03 – AAPI-08
@@ -137,51 +136,41 @@ try {
     putenv('GENERIC_LOG_DIR=' . $logDirectory);
     RuntimeConfiguration::ensure();
 
-    // AAPI-03: registered write routines require CSRF for session callers.
-    // The shipped registry is empty, so the routines below are an in-memory
-    // registry injected into the middleware only; nothing is registered.
-    hardeningAssert((require $root . '/config/routine-resources.php') === [], 'The shipped routine registry is no longer empty.');
-    $routineRegistry = new RoutineResourceRegistry([
-        'Ledger.Post' => ['type' => 'procedure', 'schema' => 'dbo', 'name' => 'PostLedger', 'access' => 'write', 'parameters' => 0, 'roles' => [RoleModel::DATA_OPERATOR]],
-        'Ledger.Report' => ['type' => 'procedure', 'schema' => 'dbo', 'name' => 'LedgerReport', 'access' => 'read', 'parameters' => 0, 'roles' => [RoleModel::READ_ONLY]],
-        'Ledger.Close' => ['type' => 'function', 'schema' => 'dbo', 'name' => 'CloseLedger', 'access' => 'write', 'parameters' => 0, 'roles' => [RoleModel::DATA_OPERATOR]],
-        'Ledger.Rebuild' => ['type' => 'tableFunction', 'schema' => 'dbo', 'name' => 'RebuildLedger', 'access' => 'write', 'parameters' => 0, 'roles' => [RoleModel::DATA_OPERATOR]],
-    ]);
+    // AAPI-03: stored procedures can change data, so every procedure call needs
+    // CSRF for session callers, like insert/update/delete. There is no routine
+    // registry: the rule depends only on the routine type.
     $tokens = new CsrfTokenService();
     $validToken = $tokens->token();
-    $csrf = new CsrfProtectionMiddleware($tokens, $routineRegistry);
-    $writeRoutines = [
-        ['action' => 'procedure', 'source' => ['procedure' => 'Ledger.Post'], 'parameters' => []],
-        ['action' => 'function', 'source' => ['function' => 'Ledger.Close'], 'parameters' => []],
-        ['action' => 'tableFunction', 'source' => ['function' => 'Ledger.Rebuild'], 'parameters' => []],
+    $csrf = new CsrfProtectionMiddleware($tokens);
+    $procedures = [
+        ['action' => 'procedure', 'source' => ['procedure' => 'dbo.PostLedger'], 'parameters' => []],
+        ['action' => 'procedure', 'source' => ['procedure' => 'LedgerReport'], 'parameters' => []],
+        ['action' => 'procedure', 'source' => 'malformed'],
     ];
     unset($_SERVER['GENERIC_AUTH_PROVIDER']);
-    foreach ($writeRoutines as $request) {
+    foreach ($procedures as $request) {
         foreach ([null, str_repeat('0', 64), substr($validToken, 0, 32)] as $provided) {
             if ($provided === null) unset($_SERVER['HTTP_X_CSRF_TOKEN']); else $_SERVER['HTTP_X_CSRF_TOKEN'] = $provided;
             hardeningFailure(fn () => $csrf->handle($request), 'CSRF_VALIDATION_FAILED', 403,
-                "Session write routine {$request['action']} ran without a valid CSRF token.");
+                'A session procedure call ran without a valid CSRF token.');
         }
         $_SERVER['HTTP_X_CSRF_TOKEN'] = $validToken;
         $csrf->handle($request);
     }
     unset($_SERVER['HTTP_X_CSRF_TOKEN']);
-    // Read routines and unregistered or malformed routine requests are not
-    // CSRF-gated here; authorization rejects unregistered routines later.
+    // Scalar and table-valued functions cannot modify data and stay ungated,
+    // like select.
     foreach ([
-        ['action' => 'procedure', 'source' => ['procedure' => 'Ledger.Report']],
-        ['action' => 'procedure', 'source' => ['procedure' => 'Ledger.Missing']],
-        ['action' => 'procedure', 'source' => ['procedure' => 'Ledger.Close']],
-        ['action' => 'procedure', 'source' => 'Ledger.Post'],
+        ['action' => 'function', 'source' => ['function' => 'dbo.Score']],
+        ['action' => 'tableFunction', 'source' => ['function' => 'dbo.Rows']],
         ['action' => 'function'],
     ] as $request) $csrf->handle($request);
     // API-key and anonymous callers remain exempt, as for insert/update/delete.
     foreach (['api_key', 'none'] as $provider) {
         $_SERVER['GENERIC_AUTH_PROVIDER'] = $provider;
-        foreach ($writeRoutines as $request) $csrf->handle($request);
+        foreach ($procedures as $request) $csrf->handle($request);
     }
     unset($_SERVER['GENERIC_AUTH_PROVIDER']);
-    (new CsrfProtectionMiddleware($tokens))->handle(['action' => 'procedure', 'source' => ['procedure' => 'Ledger.Post']]);
     if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 
     // AAPI-08: anonymous and legacy-key principals cannot be System Administrators.

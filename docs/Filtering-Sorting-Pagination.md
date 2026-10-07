@@ -107,13 +107,13 @@ change its meaning.
 ## Write filters
 
 UPDATE and DELETE require a non-empty list. Fields are unqualified identifiers
-in the Write resource's `filterColumns`. Values are validated against live SQL
+naming any existing column of the target table. Values are validated against live SQL
 Server column types; null values must use `IS NULL` or `IS NOT NULL`.
 
 ```json
 {
   "action": "update",
-  "resource": "crud-test",
+  "table": "Customers",
   "data": { "Status": "Active" },
   "filters": [
     { "field": "CustomerCode", "operator": "=", "value": "C001" },

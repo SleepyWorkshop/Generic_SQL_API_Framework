@@ -2,7 +2,6 @@
 
 require_once __DIR__ . '/Middleware.php';
 require_once __DIR__ . '/../Security/CsrfTokenService.php';
-require_once __DIR__ . '/../Resources/RoutineResourceRegistry.php';
 require_once __DIR__ . '/../Requests/ApiRequestException.php';
 
 final class CsrfProtectionMiddleware extends Middleware
@@ -55,15 +54,16 @@ final class CsrfProtectionMiddleware extends Middleware
         'update',
         'delete',
         'upsert',
+        // Stored procedures can change data, so they are protected like writes.
+        // Scalar and table-valued functions cannot, and stay unprotected like select.
+        'procedure',
     ];
 
     private CsrfTokenService $tokens;
-    private ?RoutineResourceRegistry $routines;
 
-    public function __construct(?CsrfTokenService $tokens = null, ?RoutineResourceRegistry $routines = null)
+    public function __construct(?CsrfTokenService $tokens = null)
     {
         $this->tokens = $tokens ?? new CsrfTokenService();
-        $this->routines = $routines;
     }
 
     public function handle(array $request): void
@@ -71,31 +71,10 @@ final class CsrfProtectionMiddleware extends Middleware
         if (in_array($_SERVER['GENERIC_AUTH_PROVIDER'] ?? null, ['api_key', 'none'], true)) {
             return;
         }
-        if (!in_array($request['action'] ?? null, self::PROTECTED_ACTIONS, true) && !$this->isWriteRoutine($request)) {
+        if (!in_array($request['action'] ?? null, self::PROTECTED_ACTIONS, true)) {
             return;
         }
         $header = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
         $this->tokens->validate(is_string($header) ? $header : null);
-    }
-
-    /**
-     * Registered write routines change data like insert/update/delete, so they
-     * need CSRF for session callers. Read routines stay unprotected like
-     * select; unregistered routines are rejected by AuthorizationMiddleware.
-     */
-    private function isWriteRoutine(array $request): bool
-    {
-        $action = $request['action'] ?? null;
-        if (!in_array($action, RoutineResourceRegistry::TYPES, true)) {
-            return false;
-        }
-        $key = $action === 'procedure' ? 'procedure' : 'function';
-        $source = is_array($request['source'] ?? null) ? $request['source'] : [];
-        try {
-            $routine = ($this->routines ??= new RoutineResourceRegistry())->resolve($source[$key] ?? null, $action);
-        } catch (ApiRequestException $exception) {
-            return false;
-        }
-        return $routine['access'] === 'write';
     }
 }

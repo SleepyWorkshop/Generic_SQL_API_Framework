@@ -34,9 +34,6 @@ stubs, not evidence of multi-database support.
 | `database/drivers/SqlServerDriver.php` | Connection construction and SQL Server driver behavior |
 | `config/*.example.json` | Secret-free reference templates for runtime configuration |
 | `config/sql-resources.php` | SQL Resource discovery root and exclusions |
-| `config/query-sources.php` | Deny-by-default table/view registry for JSON Query Mode and metadata |
-| `config/routine-resources.php` | Deny-by-default routine registry |
-| `config/write-resources.php` | Deny-by-default write registry |
 | `queries/system/` | Internal metadata SQL; excluded from public discovery but runtime-required |
 | `queries/reports/`, `queries/widgets/` | Dynamically discovered reviewed SQL resources |
 | `deployment/` | Production examples, not local process managers |
@@ -122,8 +119,11 @@ logs, backups without explicit protected handling, fixtures, or commits.
   normal API mode is `none` or accepts API keys.
 - Browser mutations require the session-bound `X-CSRF-Token`.
 - Managed `gsk_` secrets are revealed once and stored only as hashes.
-- Request fields never grant roles, frontend access, permissions, or resource
-  scopes. Resolve the current server-side principal.
+- Request fields never grant roles, frontend access, or permissions. Resolve the
+  current server-side principal.
+- Authorization is role permission only and identical for every authentication
+  method. Do not add per-table, per-routine, or per-resource registries or
+  scopes; the database login's permissions are the data boundary.
 - Application Administrator is a frontend role and grants no Backend Admin
   Console authority. Preserve last-enabled-System-Administrator protection.
 - Authentication/authorization changes that affect a user must continue to
@@ -153,8 +153,8 @@ logs, backups without explicit protected handling, fixtures, or commits.
 3. Keep all runtime values out of the SQL file.
 4. Add optional `execution` metadata only for approved columns, default sorting,
    and logical filter mappings.
-5. Test discovery, execution, filtering stage, pagination/count behavior, and
-   unauthorized scope. Complex CTE/set-operation resources need explicit tests.
+5. Test discovery, execution, filtering stage, and pagination/count behavior.
+   Complex CTE/set-operation resources need explicit tests.
 
 Internal files in `queries/system/` are called directly by metadata repositories
 and must not be exposed or deleted as apparently undiscovered resources.
@@ -165,8 +165,9 @@ Trace both `api/index.php` and `admin/api.php`, then inspect
 `AuthenticationMiddleware`, `AdminAuthorizationMiddleware`,
 `AuthorizationMiddleware`, `SecurityConfiguration`, `AuthSessionService`, and
 the relevant repositories/services. Verify all four normal API modes, session
-and API-key principals, CSRF, disabled/revoked state, last-admin behavior,
-resource scopes, and that secrets/internal identity fields stay absent from
+and API-key principals (which must reach the same decision), CSRF,
+disabled/revoked state, last-admin behavior, and that secrets/internal identity
+fields stay absent from
 responses and logs.
 
 Do not redesign the fixed role model or expose editable permissions as a side

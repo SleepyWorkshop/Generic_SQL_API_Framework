@@ -57,7 +57,7 @@ accounts and are throttled per source address and username
 (`429 LOGIN_RATE_LIMITED`). Sessions expire after the configured idle and
 absolute timeouts.
 
-Session-authenticated mutations (writes, registered write routines, frontend
+Session-authenticated mutations (writes, stored procedures, frontend
 user changes, and Admin mutations) require the token in `X-CSRF-Token`.
 API-key requests do not use CSRF. Cookie, CORS, and session-storage details
 are in [Security model](security/Security-Model.md#sessions-csrf-and-cors).
@@ -96,16 +96,18 @@ edited into unsafe combinations.
 | API Administrator (`api-administrator`, shown as "Admin") | backend | API keys only | yes | yes | none |
 | Application Administrator (`application-administrator`) | frontend | users | yes (frontend) | no | Frontend users only |
 
-- **Read** covers `select`, `union`, `unionAll`, `sql`, routines, and metadata.
-  **Write** covers `insert`, `update`, `delete`, `upsert`, and registered write
-  routines.
+- **Read** covers `select`, `union`, `unionAll`, `sql`, scalar and table-valued
+  functions, and metadata.
+- **Write** covers `insert`, `update`, `delete`, `upsert`, and stored
+  procedures (which also need `routine.execute`).
 - `frontendAccess` grants frontend read capability. The frontend has no write
   screens, so frontend access never grants write permission.
 - Application Administrator never grants Admin Console, configuration,
   API-key, runtime-control, or backend-role access.
-- Resource registries, scopes, request validation, and prepared parameters
-  still apply after role checks. Query sources and routines can additionally be
-  restricted by role in their registries.
+- Authorization is decided by role permissions only, the same way for
+  sessions, API keys, the legacy key, and anonymous mode. There are no per-table,
+  per-routine, or per-SQL-Resource scopes; request validation, catalog checks,
+  prepared parameters, and the database login's permissions still apply.
 
 The permission matrix and per-action minimum privileges are in
 [Security model](security/Security-Model.md#roles-and-permissions).

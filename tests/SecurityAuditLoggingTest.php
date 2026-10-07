@@ -81,7 +81,7 @@ try {
     $authorization = new AuthorizationService(null, $logger);
     $principal = new Principal($operator['username'] === 'Audit.Operator' ? (new AuthRepository())->findUser('Audit.Operator')['id'] : null, 'Audit.Operator', 'session', RoleModel::READ_ONLY, false, null, true);
     PrincipalContext::set($principal);
-    auditFailure(fn () => $authorization->authorize($principal, 'admin.manage', 'reports/private'), 'RESOURCE_ACCESS_DENIED');
+    auditFailure(fn () => $authorization->authorize($principal, 'admin.manage'), 'AUTHORIZATION_DENIED');
 
     $keys = new ApiKeyService(null, null, $authorization, $logger);
     $created = $keys->create('Audit integration', 'Audit.Operator', [RoleModel::DATA_OPERATOR]);

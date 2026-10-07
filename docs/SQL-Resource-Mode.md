@@ -225,8 +225,8 @@ filenames, extensions, clauses, database credentials, or arbitrary expressions.
 Real-path containment, excluded directories, strict identifiers, constrained
 execution expressions, fixed operator/placement/direction enums, prepared values,
 and the read-only statement analyzer preserve the security boundary. Callers
-need `sql.execute` with a matching role `sqlResources` scope, or frontend access
-(`frontend.read`, which is not narrowed by `sqlResources`). Runtime `source`
-filters resolve only against `config/query-sources.php`; the authored SQL itself
-is not checked against that registry. Least-privilege database permissions
-remain required.
+need `sql.execute` or frontend access (`frontend.read`); either runs any
+discovered resource. A `source` or `having` runtime mapping must reference a
+top-level source of the authored statement, and source columns are confirmed
+against the database catalog. Least-privilege database permissions remain
+required.

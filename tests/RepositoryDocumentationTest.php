@@ -19,8 +19,8 @@ $applicationRuntimeExample = json_decode((string)file_get_contents($root . '/con
 
 repositoryDocumentationAssert(
     ($application['app_name'] ?? null) === 'Generic SQL API Framework'
-        && ($application['version'] ?? null) === '2.0.0',
-    'Application identity does not represent the released v2.0.0 version.'
+        && ($application['version'] ?? null) === '2.2.0-dev',
+    'Application identity does not represent the v2.2 development version.'
 );
 repositoryDocumentationAssert(
     $adminExample === RuntimeConfiguration::adminDefaults()
@@ -38,19 +38,22 @@ repositoryDocumentationAssert(
     ],
     'Tracked application runtime example does not match bootstrap defaults.'
 );
-// Released versions are dated; post-release work stays under [Unreleased].
-$unreleasedPosition = strpos($changelog, "## [Unreleased]");
-$v2Position = strpos($changelog, '## [2.0.0] - 2026-10-05');
 repositoryDocumentationAssert(
-    $unreleasedPosition !== false && $v2Position !== false && $unreleasedPosition < $v2Position
-        && str_contains($changelog, '## [1.0.0] - 2026-07-27')
-        && !str_contains($changelog, '## [2.0.0] - Unreleased')
-        && !preg_match('/## \[(?:1\.[1-9]|2\.[1-9])[^]]*\]/', $changelog),
+    json_decode((string)file_get_contents($root . '/config/authorization.example.json'), true, 512, JSON_THROW_ON_ERROR)
+        === RuntimeConfiguration::authorizationDefaults(),
+    'Tracked authorization example does not match bootstrap defaults.'
+);
+// Releases appear newest first; v2.2 development work stays under [Unreleased].
+preg_match_all('/^## \[([^\]]+)\](.*)$/m', $changelog, $releases);
+repositoryDocumentationAssert(
+    $releases[1] === ['Unreleased', '2.1.0', '2.0.0', '1.0.0']
+        && $releases[2] === ['', '', ' - 2026-10-05', ' - 2026-07-27'],
     'Changelog release status is inconsistent.'
 );
 repositoryDocumentationAssert(
-    str_contains($readme, 'The current release is **v2.0.0**')
-        && !preg_match('/development line|v2\.0\.0[^.\n]*unreleased/i', $readme)
+    str_contains($readme, 'The latest completed release is **v2.1.0**')
+        && str_contains($readme, '`2.2.0-dev`')
+        && !preg_match('/v2\.[01]\.0[^.\n]*unreleased/i', $readme)
         && preg_match('/Phase [1-4](?:\.[0-9]+)?\s+[—-].*implemented/i', $readme) !== 1,
     'README contains an incorrect release status or phase diary.'
 );
@@ -66,7 +69,8 @@ foreach (['## Completed', '## Current', '## Upcoming', '## Deferred'] as $sectio
 foreach ([
     '| v1.0.0 | Core Generic SQL API Framework | Released |',
     '| v2.0.0 | Platform expansion and security | Released (2026-10-05) |',
-    '| v2.1 | Security verification and operational hardening | Current — unreleased |',
+    '| v2.1.0 | Security verification and operational hardening | Completed |',
+    '| v2.2 | Generic authorization and data-access simplification | Current — in development |',
     '| v3.0 | Multi-database support | Upcoming |',
     '| v3.1 | Developer experience and API integration | Upcoming |',
 ] as $milestone) {
@@ -183,6 +187,15 @@ foreach ([
     'docs/security/Static-Security-Analysis-Inventory.md',
     'docs/security/Security-Architecture-and-Operational-Hardening.md',
     'docs/security/Dependency-Security-Review.md',
+    // v2.2 removed the application-specific registries.
+    'config/query-sources.php',
+    'config/write-resources.php',
+    'config/routine-resources.php',
+    'app/Resources/QuerySourcePolicy.php',
+    'app/Resources/QuerySourceRegistry.php',
+    'app/Resources/WriteResourceRegistry.php',
+    'app/Resources/RoutineResourceRegistry.php',
+    'tests/support/PermissiveQuerySourcePolicy.php',
 ] as $obsolete) {
     repositoryDocumentationAssert(!file_exists($root . '/' . $obsolete), "Obsolete file remains: {$obsolete}");
 }

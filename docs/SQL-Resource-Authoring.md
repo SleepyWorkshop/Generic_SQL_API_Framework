@@ -80,9 +80,8 @@ on. Discovery does not parse the projection or infer an output schema.
 - Pagination requires an approved runtime/default sort or an authored top-level
   `ORDER BY`.
 
-The SQL inside a resource is not checked table by table against
-`config/query-sources.php`. Only runtime `source` filters are resolved against
-that registry. Review every file as backend code.
+The SQL inside a resource is trusted server code and is not analyzed table by
+table. Review every file as backend code.
 
 ## How runtime filters are applied
 
@@ -108,10 +107,9 @@ stages; use output placement or a dedicated resource instead.
 - Use stable, unique output aliases and full path-based IDs.
 - Declare only the control fields the UI actually needs; `execution.columns` is
   a control allowlist, not response projection or redaction.
-- Register in `config/query-sources.php` any table used by a `source` runtime
-  filter.
-- Restrict who can run the resource through role `sqlResources` scopes; discovery
-  is not authorization.
+- Remember that any caller with `sql.execute` or frontend access can run every
+  discovered resource; keep resources that should not be broadly available out
+  of the discovery root.
 - Use least-privilege database permissions and review query plans.
-- Test discovery, execution, each filter stage, pagination and count behavior,
-  and unauthorized scope. Then test the real SQL against SQL Server.
+- Test discovery, execution, each filter stage, and pagination and count
+  behavior. Then test the real SQL against SQL Server.

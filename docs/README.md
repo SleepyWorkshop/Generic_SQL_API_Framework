@@ -26,10 +26,10 @@ the [changelog](../CHANGELOG.md). Start with the repository
 | [Query functions](Query-Functions.md) | The complete function allowlist |
 | [Filtering, sorting, and pagination](Filtering-Sorting-Pagination.md) | Operators, sort rules, and paging across modes |
 | [Query examples](Query-Examples.md) | Worked requests |
-| [Metadata and routines](Metadata-and-Routines.md) | Metadata actions and the routine registry |
+| [Metadata and routines](Metadata-and-Routines.md) | Metadata actions and routine calls |
 | [SQL Resource Mode](SQL-Resource-Mode.md) | Executing server-owned SQL files by ID |
 | [SQL Resource authoring](SQL-Resource-Authoring.md) | Adding and reviewing SQL Resource files |
-| [Write API](Write-API.md) | INSERT, UPDATE, DELETE, UPSERT, and the write-resource registry |
+| [Write API](Write-API.md) | INSERT, UPDATE, DELETE, and UPSERT on any user table |
 | [SQL Parser](SQL-Parser-Generator.md) | Converting SQL into request JSON |
 
 ## Operating the backend
@@ -75,9 +75,10 @@ the [changelog](../CHANGELOG.md). Start with the repository
   ID, optionally with validated `execution` metadata.
 - **Execution metadata:** the request's declaration of approved SQL Resource
   output columns, filter mappings, and default sort; never arbitrary SQL.
-- **Write API:** registered single-object INSERT, UPDATE, DELETE, or UPSERT.
-- **Registry:** a deny-by-default server-owned allowlist in `config/`
-  (query sources, routines, write resources).
+- **Write API:** single-object INSERT, UPDATE, DELETE, or UPSERT on a table
+  named in the request.
+- **Principal:** the authenticated caller (session user, API key, legacy key, or
+  anonymous), whose role permissions decide every authorization.
 - **Runtime configuration directory:** the directory named by
   `GENERIC_RUNTIME_CONFIG_DIR` holding users, roles, API keys, Admin settings,
   and availability state.

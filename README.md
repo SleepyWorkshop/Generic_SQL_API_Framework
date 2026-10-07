@@ -13,27 +13,29 @@ Dashboards and report screens live in separate frontend projects.
 
 ## Release status
 
-The current release is **v2.0.0** (2026-10-05). The `dev` branch also contains
-completed, unreleased v2.1 security verification and hardening work, listed
-under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md). Planned work is in the
-[Roadmap](docs/Roadmap.md).
+The latest completed release is **v2.1.0**, the security verification and
+operational hardening milestone that followed **v2.0.0** (2026-10-05). The `dev`
+branch is the **v2.2** development line (`2.2.0-dev`): generic authorization and
+data-access simplification, listed under `[Unreleased]` in
+[CHANGELOG.md](CHANGELOG.md). Planned work is in the [Roadmap](docs/Roadmap.md).
 
 ## Capabilities
 
 - **JSON Query Mode:** validated SELECT with joins, grouping, HAVING, sorting,
   pagination, CTEs, UNION/UNION ALL, window functions, CASE, arithmetic, and an
-  allowlist of SQL Server functions, over a deny-by-default registry of tables
-  and views.
+  allowlist of SQL Server functions, on any table or view of the configured
+  database.
 - **SQL Resource Mode:** reviewed `.sql` files under `queries/`, discovered
   automatically and executed by ID with validated runtime filters, sorting, and
   pagination.
-- **Write API:** single-object INSERT, UPDATE, DELETE, and UPSERT on
-  deny-by-default registered resources.
-- **Routines and metadata:** registered stored procedures, scalar and
-  table-valued functions, and table, column, view, procedure, and schema
+- **Write API:** single-object INSERT, UPDATE, DELETE, and UPSERT on any user
+  table, validated against live column metadata.
+- **Routines and metadata:** stored procedures, scalar and table-valued
+  functions called by name, and table, column, view, procedure, and schema
   metadata.
 - **Security:** `none`, `session`, `api_key`, or `session+api_key`
-  authentication; fixed backend and frontend roles with resource scopes; managed
+  authentication; one role-and-permission authorization path for every caller,
+  with no application-specific table or resource registration; managed
   one-time-reveal API keys; CSRF; exact-origin CORS; login and API rate limits;
   encrypted database configuration; audit logging.
 - **Operations:** a loopback Admin Console for setup, configuration, users, API

@@ -5,6 +5,60 @@ Planned work is in [docs/Roadmap.md](docs/Roadmap.md).
 
 ## [Unreleased]
 
+Generic authorization and data-access simplification (roadmap v2.2). The API no
+longer needs application-specific table, write-resource, or routine
+registrations; authorization is decided by role permissions alone, and the
+database login's permissions are the data boundary.
+
+### Changed
+
+- Authorization is permission-only and identical for sessions, managed API keys,
+  the legacy key, and anonymous mode: `data.read` for queries, `data.write` for
+  writes, `sql.execute` for SQL Resources, `metadata.read` for metadata,
+  `routine.execute` for functions, and `routine.execute` plus `data.write` for
+  stored procedures. Authorization schema version 4 removes the per-role
+  `sqlResources` and `writeResources` scopes; versions 2 and 3 migrate in place.
+- **Breaking:** write requests name their target with `table` (`Table` or
+  `Schema.Table`) instead of a registered `resource` ID. Any existing column can
+  be filtered on, any non-generated column can be written, the identity column
+  is detected from metadata, and UPSERT `keys` are required and must match the
+  table's primary key or an unfiltered unique index.
+- **Breaking:** routines are called by name. Names must match an existing user
+  routine of the requested kind in the configured database; functions take
+  exactly their declared parameters and procedures at most that many. Stored
+  procedures require `data.write` and, for session callers, CSRF; functions
+  require neither.
+- JSON Query Mode reads any table or view the database catalog confirms;
+  metadata listings are no longer filtered.
+- A SQL Resource runtime mapping whose qualifier is not a top-level source now
+  returns `400 INVALID_SQL_RUNTIME_FILTER` instead of
+  `403 RESOURCE_ACCESS_DENIED`. `RESOURCE_ACCESS_DENIED` and
+  `INVALID_WRITE_RESOURCE` are no longer returned; unknown write tables return
+  `400 INVALID_WRITE_TABLE`.
+- `config/authorization.example.json` reflects schema version 4.
+- Application version metadata reports `2.2.0-dev`.
+
+### Removed
+
+- `config/query-sources.php`, `config/write-resources.php` (including the
+  `crud-test` sample), and `config/routine-resources.php`, with
+  `QuerySourcePolicy`, `QuerySourceRegistry`, `WriteResourceRegistry`, and
+  `RoutineResourceRegistry`.
+
+### Security
+
+- Table and routine names must be `Name` or `Schema.Name`; `sys` and
+  `INFORMATION_SCHEMA` objects, cross-database names, and `sp_`/`xp_` system
+  procedures are rejected, and every table, column, and routine must exist in
+  the configured database's catalog. Identifier validation, prepared
+  parameters, request schema validation, CSRF, result-size limits, and Admin API
+  separation are unchanged.
+- The v2.1.2 registry controls for SSA-01, SSA-03, and SSA-07 are replaced by
+  role permissions plus database-login permissions; see
+  [docs/security/Security-Verification.md](docs/security/Security-Verification.md).
+
+## [2.1.0]
+
 Security verification and operational hardening (roadmap v2.1.1 – v2.1.6).
 Findings and evidence are in
 [docs/security/Security-Verification.md](docs/security/Security-Verification.md).
