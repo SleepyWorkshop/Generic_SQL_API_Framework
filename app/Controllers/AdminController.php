@@ -35,6 +35,9 @@ final class AdminController extends BaseController
             elseif ($action === 'admin.database.restart') $result = $this->service->controlDatabase('restart');
             elseif ($action === 'admin.database.test') $result = $this->service->testDatabase($request['database']);
             elseif ($action === 'admin.database.save') $result = $this->service->saveDatabase($request['database']);
+            elseif (str_starts_with($action, 'admin.servers.') || str_starts_with($action, 'admin.databases.')) {
+                $result = $this->service->databaseAdministration()->dispatch($request);
+            }
             elseif ($action === 'admin.settings.get') $result = $this->service->settings();
             elseif ($action === 'admin.server.save') $result = $this->service->saveServer($request['server']);
             elseif ($action === 'admin.cors.save') $result = $this->service->saveCors($request['cors']);

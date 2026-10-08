@@ -56,11 +56,15 @@ secrets, and is excluded from backups as host-specific state.
   [Monitoring and health](Monitoring-and-Health.md).
 - **System Info** shows application, status, platform, PHP runtime,
   configuration and database status, and Admin/API/SQL Parser service status.
+- **Databases** manages the database registry
+  (`database/config/databases.json`), in two tabs. See
+  [Server profiles and databases](#server-profiles-and-databases).
 - **Configuration** has Server (development only), Database, Security, Runtime &
   Performance, and Advanced tabs.
-  - **Database** edits, tests, and saves SQL Server settings. Test Connection
-    uses the submitted form values and does not save them or change
-    availability. See [Database configuration](Database-Configuration.md).
+  - **Database** edits, tests, and saves the default database's SQL Server
+    settings (the `admin.database.*` actions). Test Connection uses the
+    submitted form values and does not save them or change availability. See
+    [Database configuration](Database-Configuration.md).
   - **Security** holds the API authentication mode, CORS origins, and session
     and CSRF information.
   - **Runtime & Performance** holds query timeout, rate limits, session
@@ -79,6 +83,36 @@ The console labels `system-administrator` as "Super Admin" and both
 `application-administrator` and the API-key role `api-administrator` as
 "Admin". See [Authentication and authorization](Authentication-and-Authorization.md).
 
+## Server profiles and databases
+
+The **Databases** page reads and changes only the registry; nothing is stored
+elsewhere.
+
+- **Servers**: a server profile is one SQL Server connection boundary with its
+  encrypted credentials (driver, host, port, authentication, username,
+  password, TLS options, login timeout). The list shows each profile's host,
+  enabled state, login timeout, and its databases. Add/Edit leave the stored
+  password in place when the field is blank. **Test Connection** connects to
+  the profile's `master` catalog (no database has to be chosen, and disabled
+  profiles can be tested) and reports SQL Server version, edition, and server
+  name. A profile that still hosts databases cannot be deleted
+  (`409 SERVER_PROFILE_IN_USE`), and the profile of the default database
+  cannot be disabled.
+- **Databases**: a database context is a logical id (what clients send as
+  `database`), a display name, its server profile, the SQL Server database
+  (catalog), and an enabled flag. Actions are Add, Edit, Enable/Disable, Set
+  Default, Test Connection, Connect/Disconnect (its availability gate), and
+  Delete.
+- The default database must exist and stay enabled on an enabled profile: it
+  cannot be disabled, deleted, or moved to a disabled profile until another
+  default is chosen, and the first database created becomes the default
+  (`409 DEFAULT_DATABASE_REQUIRED`).
+- **Enabled** is configuration; **available** is the runtime gate opened by a
+  verified connection. A failed test or connection never changes the registry,
+  the default, or credentials, and never falls back to another database.
+- Responses report a password only as `passwordConfigured`; connection
+  strings, encrypted envelopes, and the encryption key are never returned.
+
 ## Database availability
 
 Database controls operate an application access gate, never the SQL Server
@@ -96,6 +130,10 @@ service.
   timeout expired, or `DATABASE_CONFIGURATION_UNAVAILABLE` with
   `reason` `configuration_missing`, `encryption_key_missing`, or
   `configuration_invalid`.
+
+The `admin.database.*` actions keep managing the default database. Each
+database has its own gate; the Databases page connects or disconnects one
+database by id.
 
 System Health reports the database `state` as `disabled` (reason
 `application_access_disabled`), `connected`, or `unhealthy` with a safe
@@ -136,12 +174,16 @@ All actions are `POST` JSON requests to `admin/api.php`. "Gate" means loopback,
 | `admin.system.info` | System information | Gate | no |
 | `admin.settings.get` | Redacted configuration (`server: null` in production) | Gate | no |
 | `admin.database.get` | Safe database configuration | Gate | no |
+| `admin.servers.list`, `admin.databases.list` | Server profiles; database contexts | Gate | no |
+| `admin.databases.health` | Server profiles and their databases, each with its own health | Gate | no |
 | `admin.backup.history`, `admin.backup.schedule` | Recovery points; schedule information | Gate | no |
 | `admin.console.restart` | Revalidate Admin configuration and clear application bytecode caches | Gate | yes |
 | `admin.api.start`, `.stop`, `.restart` | API process lifecycle (development) or Enable/Disable/Reload (production) | Gate | yes |
 | `admin.sqlParser.start`, `.stop`, `.restart` | SQL Parser lifecycle, as above | Gate | yes |
 | `admin.database.test`, `.save` | Test submitted values; save configuration | Gate | yes |
 | `admin.database.connect`, `.disconnect`, `.restart` | Database availability gate | Gate | yes |
+| `admin.servers.save` (`server`), `.enable`, `.disable`, `.delete`, `.test` (`id`) | Manage and test server profiles | Gate | yes |
+| `admin.databases.save` (`database`), `.enable`, `.disable`, `.default`, `.delete`, `.test`, `.connect`, `.disconnect` (`id`) | Manage, test, and gate databases | Gate | yes |
 | `admin.server.save` | Launcher ports and bind address (development only) | Gate | yes |
 | `admin.cors.save` | Exact CORS origins | Gate | yes |
 | `admin.authentication.save` | API mode: `none`, `session`, `api_key`, `session+api_key` | Gate | yes |

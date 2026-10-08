@@ -24,6 +24,9 @@ require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../../core/Logger.php';
 require_once __DIR__ . '/../Backup/BackupRecoveryService.php';
 require_once __DIR__ . '/../../core/OperationalLogger.php';
+require_once __DIR__ . '/../Database/DatabaseConnectionManager.php';
+require_once __DIR__ . '/../../core/QueryEngine.php';
+require_once __DIR__ . '/DatabaseAdministrationService.php';
 
 final class AdminService
 {
@@ -42,6 +45,7 @@ final class AdminService
     private Logger $logger;
     private ApplicationHealthMonitor $healthMonitor;
     private BackupRecoveryService $backupRecovery;
+    private ?DatabaseAdministrationService $databaseAdministration = null;
 
     public function __construct(
         ?AdminConfigurationRepository $configuration = null,
@@ -55,7 +59,8 @@ final class AdminService
         ?Logger $logger = null,
         ?ApplicationHealthMonitor $healthMonitor = null,
         ?ApplicationRuntimeManager $applicationRuntime = null,
-        ?BackupRecoveryService $backupRecovery = null
+        ?BackupRecoveryService $backupRecovery = null,
+        ?callable $serverInspector = null
     ) {
         $this->configuration = $configuration ?? new AdminConfigurationRepository();
         $this->runtimeDatabasePath = $databasePath === null;
@@ -80,13 +85,44 @@ final class AdminService
         $this->databaseResolver = new DatabaseContextResolver($this->databaseRegistry, $this->databaseAvailability);
         $this->applicationRuntime = $applicationRuntime ?? new ApplicationRuntimeManager();
         $this->logger = $logger ?? new Logger();
+        // A server profile check: one request-scoped connection to the profile's
+        // master catalog, reporting only version, edition, and server name.
+        $serverInspector ??= static function (DatabaseContext $server): array {
+            $connections = new DatabaseConnectionManager();
+            try {
+                $row = (new QueryEngine($connections->connection($server)))->executePrepared(
+                    "SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)) AS ProductVersion,"
+                        . " CAST(SERVERPROPERTY('Edition') AS nvarchar(128)) AS Edition,"
+                        . " CAST(@@SERVERNAME AS nvarchar(128)) AS ServerName",
+                    [],
+                    ['queryPhase' => 'metadata']
+                )['data'][0] ?? [];
+                return ['productVersion' => $row['ProductVersion'] ?? null, 'edition' => $row['Edition'] ?? null, 'serverName' => $row['ServerName'] ?? null];
+            } finally {
+                $connections->closeAll();
+            }
+        };
         $this->healthMonitor = $healthMonitor ?? new ApplicationHealthMonitor([
             'databasePath' => $this->databasePath,
             'registry' => $this->databaseRegistry,
             'databaseAvailable' => fn (?string $databaseId = null): bool => $this->databaseAvailability->available($databaseId),
             'databaseTester' => $this->connectionTester,
+            'serverInspector' => $serverInspector,
         ]);
         $this->backupRecovery = $backupRecovery ?? new BackupRecoveryService();
+    }
+
+    /** Server profiles and database contexts, managed through the registry (admin.servers.*, admin.databases.*). */
+    public function databaseAdministration(): DatabaseAdministrationService
+    {
+        return $this->databaseAdministration ??= new DatabaseAdministrationService(
+            $this->databaseRegistry,
+            $this->databaseAvailability,
+            $this->healthMonitor,
+            fn (string $databaseId): array => $this->testCurrentDatabase($databaseId),
+            fn (string $operation, string $databaseId): array => $this->controlDatabase($operation, $databaseId),
+            $this->logger
+        );
     }
 
     public function status(): array

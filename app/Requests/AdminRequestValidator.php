@@ -5,6 +5,7 @@ require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../Runtime/DatabaseAuthenticationSupport.php';
 require_once __DIR__ . '/../Database/DatabaseServerProfile.php';
+require_once __DIR__ . '/../Database/DatabaseRegistry.php';
 require_once __DIR__ . '/../Configuration/RuntimeControls.php';
 require_once __DIR__ . '/../Backup/BackupSchedule.php';
 
@@ -36,6 +37,16 @@ final class AdminRequestValidator
         'admin.backup.history',
         'admin.backup.create',
         'admin.backup.schedule',
+        'admin.servers.list',
+        'admin.databases.list',
+        'admin.databases.health',
+    ];
+
+    /** Registry operations on one server profile or database, named by `id`. */
+    private const ID_ACTIONS = [
+        'admin.servers.enable', 'admin.servers.disable', 'admin.servers.delete', 'admin.servers.test',
+        'admin.databases.enable', 'admin.databases.disable', 'admin.databases.delete', 'admin.databases.default',
+        'admin.databases.test', 'admin.databases.connect', 'admin.databases.disconnect',
     ];
 
     public function validate(array $request): array
@@ -44,6 +55,18 @@ final class AdminRequestValidator
         if (in_array($action, self::SIMPLE_ACTIONS, true)) {
             $this->rejectUnknown($request, ['action']);
             return ['action' => $action];
+        }
+        if (in_array($action, self::ID_ACTIONS, true)) {
+            $this->rejectUnknown($request, ['action', 'id']);
+            return ['action' => $action, 'id' => $this->registryId($request['id'] ?? null, 'id')];
+        }
+        if ($action === 'admin.servers.save') {
+            $this->rejectUnknown($request, ['action', 'server']);
+            return ['action' => $action, 'server' => $this->serverProfile($request['server'] ?? null)];
+        }
+        if ($action === 'admin.databases.save') {
+            $this->rejectUnknown($request, ['action', 'database']);
+            return ['action' => $action, 'database' => $this->databaseContext($request['database'] ?? null)];
         }
         if (in_array($action, ['admin.database.test', 'admin.database.save'], true)) {
             $this->rejectUnknown($request, ['action', 'database']);
@@ -177,55 +200,120 @@ final class AdminRequestValidator
         ];
     }
 
-    private function database($value): array
+    /**
+     * A server profile: id, display name, enabled flag, and its connection
+     * (the single-database connection fields without a database). A blank
+     * password keeps the stored one.
+     */
+    private function serverProfile($value): array
+    {
+        if (!is_array($value) || array_is_list($value)) {
+            $this->invalid([['path' => 'server', 'message' => 'Server profile must be an object.']]);
+        }
+        $this->rejectUnknown($value, [
+            'id', 'name', 'enabled', 'provider', 'driver', 'server', 'port', 'authentication',
+            'username', 'password', 'encrypt', 'trustServerCertificate', 'loginTimeoutSeconds',
+        ], 'server.');
+        $profile = $this->registryEntry($value, 'server');
+        $connection = array_diff_key($value, ['id' => true, 'name' => true, 'enabled' => true]);
+        $connection = $this->database($connection + ['provider' => 'sqlserver'], 'server', false);
+        unset($connection['database']);
+        return $profile + ['connection' => $connection];
+    }
+
+    /** A database context: id, display name, server profile id, enabled flag, and physical catalog. */
+    private function databaseContext($value): array
+    {
+        if (!is_array($value) || array_is_list($value)) {
+            $this->invalid([['path' => 'database', 'message' => 'Database must be an object.']]);
+        }
+        $this->rejectUnknown($value, ['id', 'name', 'server', 'enabled', 'catalog'], 'database.');
+        $database = $this->registryEntry($value, 'database');
+        $errors = [];
+        if (!DatabaseRegistry::isValidId($value['server'] ?? null)) {
+            $errors[] = ['path' => 'database.server', 'message' => 'Server must be a server profile id.'];
+        }
+        $catalog = $this->connectionStringValue($value['catalog'] ?? null, 'catalog', true, $errors);
+        if ($errors !== []) $this->invalid($errors);
+        return $database + ['server' => $value['server'], 'catalog' => $catalog];
+    }
+
+    /** @return array{id: string, name: string, enabled: bool} */
+    private function registryEntry(array $value, string $prefix): array
+    {
+        $errors = [];
+        $id = $value['id'] ?? null;
+        if (!DatabaseRegistry::isValidId($id)) {
+            $errors[] = ['path' => $prefix . '.id', 'message' => 'Id must be lowercase letters, digits, "_" or "-", starting with a letter.'];
+        }
+        $name = is_string($value['name'] ?? null) ? trim($value['name']) : '';
+        if ($name === '' || strlen($name) > 100 || preg_match('/[\x00-\x1F\x7F]/', $name) === 1) {
+            $errors[] = ['path' => $prefix . '.name', 'message' => 'Name must be 1 to 100 printable characters.'];
+        }
+        if (!is_bool($value['enabled'] ?? null)) {
+            $errors[] = ['path' => $prefix . '.enabled', 'message' => 'Value must be boolean.'];
+        }
+        if ($errors !== []) $this->invalid($errors);
+        return ['id' => $id, 'name' => $name, 'enabled' => $value['enabled']];
+    }
+
+    private function registryId($value, string $path): string
+    {
+        if (!DatabaseRegistry::isValidId($value)) $this->invalid([['path' => $path, 'message' => 'A registry id is required.']]);
+        return $value;
+    }
+
+    private function database($value, string $prefix = 'database', bool $withCatalog = true): array
     {
         if (!is_array($value) || array_is_list($value)) {
             $this->invalid([['path' => 'database', 'message' => 'Database configuration must be an object.']]);
         }
-        $this->rejectUnknown($value, [
-            'provider', 'driver', 'server', 'port', 'database', 'authentication',
-            'username', 'password', 'encrypt', 'trustServerCertificate', 'loginTimeoutSeconds',
-        ], 'database.');
+        if ($withCatalog) {
+            $this->rejectUnknown($value, [
+                'provider', 'driver', 'server', 'port', 'database', 'authentication',
+                'username', 'password', 'encrypt', 'trustServerCertificate', 'loginTimeoutSeconds',
+            ], 'database.');
+        }
         $errors = [];
         $provider = strtolower(trim((string)($value['provider'] ?? '')));
         if ($provider !== 'sqlserver') {
-            $errors[] = ['path' => 'database.provider', 'message' => 'Only sqlserver is currently supported.'];
+            $errors[] = ['path' => $prefix . '.provider', 'message' => 'Only sqlserver is currently supported.'];
         }
         $driver = trim((string)($value['driver'] ?? ''));
         if ($driver !== 'auto' && !in_array($driver, SqlServerDriver::supportedDrivers(), true)) {
-            $errors[] = ['path' => 'database.driver', 'message' => 'Unsupported SQL Server ODBC driver.'];
+            $errors[] = ['path' => $prefix . '.driver', 'message' => 'Unsupported SQL Server ODBC driver.'];
         }
-        $server = $this->connectionStringValue($value['server'] ?? null, 'server', true, $errors);
-        $database = $this->connectionStringValue($value['database'] ?? null, 'database', true, $errors);
-        $username = $this->connectionStringValue($value['username'] ?? '', 'username', false, $errors);
+        $server = $this->connectionStringValue($value['server'] ?? null, 'server', true, $errors, $prefix);
+        $database = $withCatalog ? $this->connectionStringValue($value['database'] ?? null, 'database', true, $errors) : '';
+        $username = $this->connectionStringValue($value['username'] ?? '', 'username', false, $errors, $prefix);
         $authentication = strtolower(trim((string)($value['authentication'] ?? '')));
         try {
             $this->databaseAuthentication->validate($authentication);
         } catch (InvalidArgumentException $exception) {
-            $errors[] = ['path' => 'database.authentication', 'message' => $exception->getMessage()];
+            $errors[] = ['path' => $prefix . '.authentication', 'message' => $exception->getMessage()];
         }
         if ($authentication === 'sql' && $username === '') {
-            $errors[] = ['path' => 'database.username', 'message' => 'Username is required for SQL authentication.'];
+            $errors[] = ['path' => $prefix . '.username', 'message' => 'Username is required for SQL authentication.'];
         }
         $port = $value['port'] ?? null;
         if ($port === '') $port = null;
         if ($port !== null && (filter_var($port, FILTER_VALIDATE_INT) === false
             || (int)$port < 1 || (int)$port > 65535)) {
-            $errors[] = ['path' => 'database.port', 'message' => 'Port must be between 1 and 65535.'];
+            $errors[] = ['path' => $prefix . '.port', 'message' => 'Port must be between 1 and 65535.'];
         }
         $password = $value['password'] ?? null;
         if ($password !== null && (!is_string($password) || strlen($password) > 4096)) {
-            $errors[] = ['path' => 'database.password', 'message' => 'Password must be a string of at most 4096 bytes.'];
+            $errors[] = ['path' => $prefix . '.password', 'message' => 'Password must be a string of at most 4096 bytes.'];
         }
         foreach (['encrypt', 'trustServerCertificate'] as $field) {
             if (!is_bool($value[$field] ?? null)) {
-                $errors[] = ['path' => 'database.' . $field, 'message' => 'Value must be boolean.'];
+                $errors[] = ['path' => $prefix . '.' . $field, 'message' => 'Value must be boolean.'];
             }
         }
         // Optional; when omitted, the stored timeout (or the driver default) is kept.
         $loginTimeout = $value['loginTimeoutSeconds'] ?? null;
         if ($loginTimeout !== null && !DatabaseServerProfile::isValidLoginTimeout($loginTimeout)) {
-            $errors[] = ['path' => 'database.loginTimeoutSeconds', 'message' => 'Login timeout must be an integer from 1 to 65534 seconds.'];
+            $errors[] = ['path' => $prefix . '.loginTimeoutSeconds', 'message' => 'Login timeout must be an integer from 1 to 65534 seconds.'];
         }
         if ($errors !== []) $this->invalid($errors);
 
@@ -291,12 +379,12 @@ final class AdminRequestValidator
         ];
     }
 
-    private function connectionStringValue($value, string $field, bool $required, array &$errors): string
+    private function connectionStringValue($value, string $field, bool $required, array &$errors, string $prefix = 'database'): string
     {
         $value = is_string($value) ? trim($value) : '';
         if (($required && $value === '') || strlen($value) > 255
             || preg_match('/[;{}\r\n\x00]/', $value) === 1) {
-            $errors[] = ['path' => 'database.' . $field, 'message' => 'Invalid database connection value.'];
+            $errors[] = ['path' => $prefix . '.' . $field, 'message' => 'Invalid database connection value.'];
         }
         return $value;
     }

@@ -38,6 +38,7 @@ $adminRoutes = [
     '/health',
     '/info',
     '/configuration',
+    '/databases',
     '/users',
     '/api-keys',
     '/backup-recovery'

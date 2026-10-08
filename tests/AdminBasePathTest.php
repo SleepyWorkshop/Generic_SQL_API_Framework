@@ -138,7 +138,7 @@ function adminBasePathHttp(int $port, string $method, string $path, string $body
 }
 
 $root = dirname(__DIR__);
-$routes = ['health', 'info', 'configuration', 'users', 'api-keys', 'backup-recovery'];
+$routes = ['health', 'info', 'configuration', 'databases', 'users', 'api-keys', 'backup-recovery'];
 
 // Server-side base path resolution.
 foreach ([

@@ -37,7 +37,10 @@ host is healthy.
 Readiness validates the supported runtime configuration file set and versions,
 the writable runtime directory, the API application runtime, the explicit
 database availability gate, and the ability to decrypt and validate database
-configuration. It deliberately does not open SQL connections, so proxy probes
+configuration. Its database check is the registry's default database, which
+serves every request that names no database; other registered databases are
+neither contacted nor required, so one unavailable secondary database does not
+make the API unready. Liveness never depends on any database. It deliberately does not open SQL connections, so proxy probes
 cannot generate SQL Server load. When the detailed check has already cached a
 connectivity failure for the current configuration (15 seconds), readiness
 reports that cached category; it never runs the test itself. In production a
@@ -67,6 +70,18 @@ update/reload timestamps. PID, port, and start time are null for all three
 because the answering FastCGI/FPM worker is not owned by the application. The
 database card reports `state` as `disabled` (Disconnected, reason
 `application_access_disabled`), `connected`, or `unhealthy` with a safe reason.
+
+Below the cards, a **Databases** section lists every server profile with its
+databases (`admin.databases.health`). Each server profile's status comes from
+its own connection check (to its `master` catalog) and each database's from
+its own: one failing database never marks its server unhealthy, and a server
+connection failure is shown on the server. Statuses are `healthy`,
+`unhealthy` (with a category such as `connection_timeout` or
+`authentication_failure`), `disabled` (the database or its profile is
+disabled; not contacted), `disconnected` (gate closed; not contacted), and
+`not_configured`. Checks are cached for 15 seconds per server and per database,
+keyed by the registry contents; the cache never hides a disabled or
+disconnected state and never grants access.
 
 The System Health page shows only operational cards: Admin Console, API Server,
 SQL Parser, Database, PHP Runtime, Configuration, Logging, Encryption, and

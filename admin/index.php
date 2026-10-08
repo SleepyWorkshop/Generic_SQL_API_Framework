@@ -50,6 +50,7 @@ $adminUrl = static fn (string $path): string => htmlspecialchars($adminBasePath 
             <a href="<?= $adminUrl('health') ?>" data-route="health" title="System Health"><span class="nav-icon" aria-hidden="true">H</span><span class="nav-label">System Health</span></a>
             <a href="<?= $adminUrl('info') ?>" data-route="info" title="System Info"><span class="nav-icon" aria-hidden="true">I</span><span class="nav-label">System Info</span></a>
             <a href="<?= $adminUrl('configuration') ?>" data-route="configuration" title="Configuration"><span class="nav-icon" aria-hidden="true">C</span><span class="nav-label">Configuration</span></a>
+            <a href="<?= $adminUrl('databases') ?>" data-route="databases" title="Databases"><span class="nav-icon" aria-hidden="true">D</span><span class="nav-label">Databases</span></a>
             <a href="<?= $adminUrl('users') ?>" data-route="users" title="Users"><span class="nav-icon" aria-hidden="true">U</span><span class="nav-label">Users</span></a>
             <a href="<?= $adminUrl('api-keys') ?>" data-route="api-keys" title="API Keys"><span class="nav-icon" aria-hidden="true">K</span><span class="nav-label">API Keys</span></a>
             <a href="<?= $adminUrl('backup-recovery') ?>" data-route="backup-recovery" title="Backup &amp; Recovery"><span class="nav-icon" aria-hidden="true">B</span><span class="nav-label">Backup &amp; Recovery</span></a>

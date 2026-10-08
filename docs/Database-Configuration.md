@@ -10,6 +10,13 @@ System Health manages a runtime availability gate, not a permanent SQL connectio
 
 System Health reports the resulting state as `disabled`, `connected`, or `unhealthy` (enabled but failing its check); see [Monitoring and Health](Monitoring-and-Health.md).
 
+Multiple databases are managed on the Admin Console's **Databases** page:
+server profiles hold connection settings and encrypted credentials, and each
+database context names its profile and SQL Server database. See
+[Admin Console](Admin-Console.md#server-profiles-and-databases). The settings
+below describe the default database's connection, which the Configuration →
+Database tab edits.
+
 ## Configuration file
 
 Runtime database settings come from the ignored local file:

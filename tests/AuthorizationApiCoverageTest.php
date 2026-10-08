@@ -139,7 +139,8 @@ $adminActions = ['admin.status', 'admin.health', 'admin.system.info', 'admin.con
     'admin.sqlParser.start', 'admin.sqlParser.stop', 'admin.sqlParser.restart', 'admin.database.get', 'admin.database.connect',
     'admin.database.disconnect', 'admin.database.restart', 'admin.database.test', 'admin.database.save', 'admin.settings.get', 'admin.server.save',
     'admin.cors.save', 'admin.authentication.save', 'admin.runtime.save', 'admin.backup.history', 'admin.backup.create', 'admin.backup.download',
-    'admin.backup.preview', 'admin.backup.restore', 'admin.backup.schedule', 'admin.backup.schedule.save', 'admin.operational.event'];
+    'admin.backup.preview', 'admin.backup.restore', 'admin.backup.schedule', 'admin.backup.schedule.save', 'admin.operational.event',
+    'admin.servers.save', 'admin.servers.enable', 'admin.servers.disable', 'admin.servers.delete', 'admin.servers.test', 'admin.servers.list', 'admin.databases.save', 'admin.databases.enable', 'admin.databases.disable', 'admin.databases.default', 'admin.databases.delete', 'admin.databases.test', 'admin.databases.connect', 'admin.databases.disconnect', 'admin.databases.list', 'admin.databases.health'];
 $userActions = ['auth.users.list', 'auth.users.create', 'auth.users.update', 'auth.users.enable', 'auth.users.disable', 'auth.users.delete',
     'auth.users.changePassword', 'auth.users.assignAuthorization'];
 $apiKeyActions = ['auth.apiKeys.list', 'auth.apiKeys.create', 'auth.apiKeys.enable', 'auth.apiKeys.disable', 'auth.apiKeys.revoke'];
@@ -150,16 +151,17 @@ $adminCsrfActions = ['auth.login', 'auth.logout', 'auth.users.create', 'auth.use
     'auth.apiKeys.revoke', 'setup.createAdmin', 'admin.database.test', 'admin.database.save', 'admin.database.connect', 'admin.database.disconnect',
     'admin.database.restart', 'admin.server.save', 'admin.console.restart', 'admin.api.start', 'admin.api.stop', 'admin.api.restart',
     'admin.sqlParser.start', 'admin.sqlParser.stop', 'admin.sqlParser.restart', 'admin.cors.save', 'admin.authentication.save', 'admin.runtime.save',
-    'admin.backup.create', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore', 'admin.backup.schedule.save', 'admin.operational.event'];
+    'admin.backup.create', 'admin.backup.download', 'admin.backup.preview', 'admin.backup.restore', 'admin.backup.schedule.save', 'admin.operational.event',
+    'admin.servers.save', 'admin.servers.enable', 'admin.servers.disable', 'admin.servers.delete', 'admin.servers.test', 'admin.databases.save', 'admin.databases.enable', 'admin.databases.disable', 'admin.databases.default', 'admin.databases.delete', 'admin.databases.test', 'admin.databases.connect', 'admin.databases.disconnect'];
 $publicCsrfActions = ['auth.login', 'auth.logout', ...array_slice($frontendUserActions, 1), 'insert', 'update', 'delete', 'upsert'];
-coverageAssert(count($publicDataActions) === 16 && count($frontendUserActions) === 8 && count($adminActions) === 29
-    && count($adminManageActions) === 43 && count($gatedActions) === 44 && count($adminCsrfActions) === 36 && count($publicCsrfActions) === 13,
+coverageAssert(count($publicDataActions) === 16 && count($frontendUserActions) === 8 && count($adminActions) === 45
+    && count($adminManageActions) === 59 && count($gatedActions) === 60 && count($adminCsrfActions) === 49 && count($publicCsrfActions) === 13,
     'Action inventory no longer matches the plan.');
 $adminSource = (string)file_get_contents(dirname(__DIR__) . '/admin/api.php');
 foreach ([...$gatedActions, 'setup.status', 'auth.csrf', 'auth.login', 'auth.session', 'auth.logout'] as $action) {
     coverageAssert(str_contains($adminSource, "'{$action}'"), "Admin API no longer routes {$action}; update the coverage inventory.");
 }
-coverageAssert(preg_match_all("/'(?:admin|auth|setup)\.[A-Za-z.]+'/", substr($adminSource, (int)strpos($adminSource, '$setupActions'), (int)strpos($adminSource, '$allActions') - (int)strpos($adminSource, '$setupActions')), $routed) === 49,
+coverageAssert(preg_match_all("/'(?:admin|auth|setup)\.[A-Za-z.]+'/", substr($adminSource, (int)strpos($adminSource, '$setupActions'), (int)strpos($adminSource, '$allActions') - (int)strpos($adminSource, '$setupActions')), $routed) === 65,
     'Admin API action count changed; update the coverage inventory.');
 
 $root = dirname(__DIR__);

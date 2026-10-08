@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const adminRoutes = ["health", "info", "configuration", "users", "api-keys", "backup-recovery"];
+  const adminRoutes = ["health", "info", "configuration", "databases", "users", "api-keys", "backup-recovery"];
   // Admin may be mounted at the origin root or under any sub-path; the server
   // reports the mount path and every URL below is resolved against it.
   const adminBase = adminBaseUrl(document.body.dataset.adminBase, location.origin),
@@ -22,6 +22,7 @@
   let csrfToken = "",
     currentUser = null,
     activeConfigTab = "server",
+    activeDatabaseTab = "databases",
     toastTimer = 0,
     mobileNavigationOpen = false;
   const sidebarStorageKey = "generic-admin-sidebar-collapsed",
@@ -1367,6 +1368,171 @@
         }
       }),
     );
+    await databaseHealthTree();
+  }
+  // System → server profiles → databases. A server's own connection status is
+  // separate from its databases': one failing database never marks it down.
+  async function databaseHealthTree() {
+    const section = document.createElement("section");
+    section.className = "service-actions database-health";
+    section.setAttribute("aria-labelledby", "database-health-title");
+    section.innerHTML = '<div class="service-actions__heading"><h2 id="database-health-title">Databases</h2><p class="help">Checking server profiles and databases…</p></div>';
+    content.append(section);
+    try {
+      const tree = row(await call({ action: "admin.databases.health" })),
+        statusCell = (item) =>
+          `<span class="status-line"><span class="dot${item.status === "healthy" ? "" : " offline"}"></span>${escapeHtml(item.status)}${item.category && item.status !== "healthy" ? ` <span class="help">(${escapeHtml(item.category)})</span>` : ""}</span>`;
+      section.innerHTML = `<div class="service-actions__heading"><h2 id="database-health-title">Databases</h2><p class="help">Server connection status is checked separately from each database. Results are cached briefly; disabled and disconnected items are not contacted.</p></div>${
+        tree.servers?.length
+          ? `<div class="table-wrap"><table class="service-actions__table"><thead><tr><th>Server / Database</th><th>Status</th><th>Details</th></tr></thead><tbody>${tree.servers
+              .map(
+                (server) =>
+                  `<tr><th scope="row">${escapeHtml(server.name)} <span class="help">${escapeHtml(server.id)}</span></th><td>${statusCell(server)}</td><td>${escapeHtml([server.serverInfo?.edition, server.serverInfo?.productVersion].filter(Boolean).join(" · "))}</td></tr>${server.databases
+                    .map(
+                      (database) =>
+                        `<tr><td>└ ${escapeHtml(database.name)} <span class="help">${escapeHtml(database.id)}${database.id === tree.defaultDatabase ? " · default" : ""}</span></td><td>${statusCell(database)}</td><td>${database.enabled ? (database.available ? "Available" : "Disconnected") : "Disabled"}</td></tr>`,
+                    )
+                    .join("")}`,
+              )
+              .join("")}</tbody></table></div>`
+          : '<div class="empty">No server profiles are configured.</div>'
+      }`;
+    } catch (error) {
+      section.querySelector(".help").textContent = error.message;
+    }
+  }
+  // Server profiles and database contexts, both stored in the database registry.
+  async function databasesView(tab = activeDatabaseTab) {
+    loading();
+    activeDatabaseTab = tab === "servers" ? "servers" : "databases";
+    const [serverList, databaseList] = await Promise.all([
+        call({ action: "admin.servers.list" }),
+        call({ action: "admin.databases.list" }),
+      ]),
+      serverOptions = row(serverList),
+      servers = serverOptions.servers || [],
+      databases = row(databaseList).databases || [];
+    title.textContent = "Databases";
+    content.className = "panel";
+    const badge = (on, yes, no) => `<span class="badge${on ? "" : " disabled"}">${on ? yes : no}</span>`,
+      tabs = `<div class="tabs"><button class="tab${activeDatabaseTab === "databases" ? " active" : ""}" data-database-tab="databases">Databases</button><button class="tab${activeDatabaseTab === "servers" ? " active" : ""}" data-database-tab="servers">Servers</button></div>`;
+    const serverRows = servers
+        .map(
+          (server) =>
+            `<tr><td data-label="Server">${escapeHtml(server.name)}<br><span class="help">${escapeHtml(server.id)}</span></td><td data-label="Host">${escapeHtml(server.readable ? `${server.connection.server}${server.connection.port ? `,${server.connection.port}` : ""}` : "Unreadable")}</td><td data-label="Status">${badge(server.enabled, "Enabled", "Disabled")}</td><td data-label="Databases">${server.databaseCount}</td><td data-label="Login timeout">${escapeHtml(server.readable ? `${server.connection.loginTimeoutSeconds}s` : "")}</td><td class="user-actions-cell" data-label="Actions"><div class="actions"><button class="small secondary" data-server-action="edit" data-id="${escapeHtml(server.id)}">Edit</button><button class="small secondary" data-server-action="test" data-id="${escapeHtml(server.id)}">Test Connection</button><button class="small secondary" data-server-action="${server.enabled ? "disable" : "enable"}" data-id="${escapeHtml(server.id)}">${server.enabled ? "Disable" : "Enable"}</button><button class="small danger" data-server-action="delete" data-id="${escapeHtml(server.id)}"${server.databaseCount ? ' disabled title="Move or delete its databases first"' : ""}>Delete</button></div></td></tr>`,
+        )
+        .join(""),
+      databaseRows = databases
+        .map(
+          (database) =>
+            `<tr><td data-label="Database">${escapeHtml(database.name)}<br><span class="help">${escapeHtml(database.id)}</span>${database.default ? ' <span class="role-badge">Default</span>' : ""}</td><td data-label="Server">${escapeHtml(database.serverName || database.server)}</td><td data-label="Catalog">${escapeHtml(database.catalog ?? "Unreadable")}</td><td data-label="Enabled">${badge(database.usable, "Enabled", database.enabled ? "Server disabled" : "Disabled")}</td><td data-label="Availability">${badge(database.available, "Available", "Disconnected")}</td><td class="user-actions-cell" data-label="Actions"><div class="actions"><button class="small secondary" data-database-action="edit" data-id="${escapeHtml(database.id)}">Edit</button><button class="small secondary" data-database-action="test" data-id="${escapeHtml(database.id)}">Test Connection</button><button class="small secondary" data-database-action="${database.available ? "disconnect" : "connect"}" data-id="${escapeHtml(database.id)}">${database.available ? "Disconnect" : "Connect"}</button><button class="small secondary" data-database-action="default" data-id="${escapeHtml(database.id)}"${database.default || !database.usable ? " disabled" : ""}>Set Default</button><button class="small secondary" data-database-action="${database.enabled ? "disable" : "enable"}" data-id="${escapeHtml(database.id)}"${database.default && database.enabled ? ' disabled title="Choose another default first"' : ""}>${database.enabled ? "Disable" : "Enable"}</button><button class="small danger" data-database-action="delete" data-id="${escapeHtml(database.id)}"${database.default ? ' disabled title="Choose another default first"' : ""}>Delete</button></div></td></tr>`,
+        )
+        .join("");
+    content.innerHTML = `${tabs}${
+      activeDatabaseTab === "servers"
+        ? `<div class="users-heading"><p class="help">A server profile is one SQL Server connection boundary and its encrypted credentials. Databases of one profile can be queried together.</p><button data-server-action="add">+ Add Server</button></div>${servers.length ? `<div class="table-wrap"><table class="users-table"><thead><tr><th>Server</th><th>Host</th><th>Status</th><th>Databases</th><th>Login timeout</th><th>Actions</th></tr></thead><tbody>${serverRows}</tbody></table></div>` : '<div class="empty">No server profiles are configured.</div>'}`
+        : `<div class="users-heading"><p class="help">Clients name databases by id. Enabled is configuration; availability is the runtime gate opened by a verified connection.</p><button data-database-action="add"${servers.length ? "" : ' disabled title="Add a server profile first"'}>+ Add Database</button></div>${databases.length ? `<div class="table-wrap"><table class="users-table"><thead><tr><th>Database</th><th>Server</th><th>Catalog</th><th>Enabled</th><th>Availability</th><th>Actions</th></tr></thead><tbody>${databaseRows}</tbody></table></div>` : '<div class="empty">No databases are configured.</div>'}`
+    }`;
+    const openForm = (heading, body, submit) => {
+      document.querySelector("#user-dialog-content").innerHTML = `<div class="user-dialog__surface"><header class="user-dialog__header"><h2 id="user-dialog-title">${escapeHtml(heading)}</h2><button type="button" class="dialog-close" data-dialog-close aria-label="Close">×</button></header><form class="user-dialog__form"><div class="user-dialog__body stack">${body}<p class="dialog-error" data-dialog-error role="alert" hidden></p></div><footer class="dialog-actions user-dialog__footer"><button type="button" class="secondary" data-dialog-close>Cancel</button><button>Save</button></footer></form></div>`;
+      userDialog.querySelectorAll("[data-dialog-close]").forEach((item) => item.addEventListener("click", closeUserDialog));
+      userDialog.querySelector("form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const done = setButtonBusy(event.currentTarget.querySelector("button:not([type=button])"), "Saving…"),
+          dialogError = userDialog.querySelector("[data-dialog-error]");
+        dialogError.hidden = true;
+        try {
+          await submit(new FormData(event.currentTarget));
+          closeUserDialog();
+          notify("Database registry saved.");
+          await databasesView(activeDatabaseTab);
+        } catch (error) {
+          dialogError.textContent = error.message;
+          dialogError.hidden = false;
+        } finally {
+          done();
+        }
+      });
+      userDialog.showModal();
+    };
+    const serverForm = (server) => {
+      const connection = server?.connection || { driver: "auto", authentication: "sql", encrypt: true, trustServerCertificate: false, loginTimeoutSeconds: 15 };
+      openForm(
+        server ? `Edit ${server.name}` : "Add Server",
+        `<div class="row"><label>Id *<input name="id" required pattern="[a-z][a-z0-9_-]{0,63}" value="${escapeHtml(server?.id || "")}"${server ? " readonly" : ""}></label><label>Name *<input name="name" required maxlength="100" value="${escapeHtml(server?.name || "")}"></label></div><div class="row"><label>ODBC Driver<select name="driver">${(serverOptions.availableDrivers || ["auto"]).map((driver) => `<option${driver === connection.driver ? " selected" : ""}>${escapeHtml(driver)}</option>`).join("")}</select></label><label>Server *<input name="server" required value="${escapeHtml(connection.server || "")}"></label></div><div class="row"><label>Port<input name="port" value="${escapeHtml(connection.port || "")}"></label><label>Login timeout (seconds)<input name="loginTimeoutSeconds" type="number" min="1" max="65534" value="${escapeHtml(connection.loginTimeoutSeconds)}"></label></div><div class="row"><label>Authentication<select name="authentication">${(serverOptions.availableAuthenticationModes || ["sql"]).map((mode) => `<option value="${escapeHtml(mode)}"${mode === connection.authentication ? " selected" : ""}>${mode === "windows" ? "Windows integrated" : "SQL login"}</option>`).join("")}</select></label><label>Username<input name="username" value="${escapeHtml(connection.username || "")}"></label></div><label>Password<input name="password" type="password" autocomplete="new-password" placeholder="${connection.passwordConfigured ? "Stored password retained" : "Required for SQL login"}"></label><div class="row"><label class="check"><input name="encrypt" type="checkbox"${connection.encrypt ? " checked" : ""}> Encrypt connection</label><label class="check"><input name="trustServerCertificate" type="checkbox"${connection.trustServerCertificate ? " checked" : ""}> Trust server certificate</label></div><label class="check"><input name="enabled" type="checkbox"${server?.enabled ?? true ? " checked" : ""}> Enabled</label>`,
+        (v) =>
+          call(
+            {
+              action: "admin.servers.save",
+              server: {
+                id: v.get("id"),
+                name: v.get("name"),
+                enabled: v.get("enabled") === "on",
+                driver: v.get("driver") || "auto",
+                server: v.get("server"),
+                port: v.get("port"),
+                authentication: v.get("authentication"),
+                username: v.get("username"),
+                password: v.get("password") || null,
+                encrypt: v.get("encrypt") === "on",
+                trustServerCertificate: v.get("trustServerCertificate") === "on",
+                ...(v.get("loginTimeoutSeconds") ? { loginTimeoutSeconds: Number(v.get("loginTimeoutSeconds")) } : {}),
+              },
+            },
+            true,
+          ),
+      );
+    };
+    const databaseForm = (database) =>
+      openForm(
+        database ? `Edit ${database.name}` : "Add Database",
+        `<div class="row"><label>Id *<input name="id" required pattern="[a-z][a-z0-9_-]{0,63}" value="${escapeHtml(database?.id || "")}"${database ? " readonly" : ""}></label><label>Name *<input name="name" required maxlength="100" value="${escapeHtml(database?.name || "")}"></label></div><div class="row"><label>Server profile *<select name="server" required>${servers.map((server) => `<option value="${escapeHtml(server.id)}"${server.id === database?.server ? " selected" : ""}>${escapeHtml(server.name)} (${escapeHtml(server.id)})</option>`).join("")}</select></label><label>SQL Server database (catalog) *<input name="catalog" required maxlength="128" value="${escapeHtml(database?.catalog || "")}"></label></div><label class="check"><input name="enabled" type="checkbox"${database?.enabled ?? true ? " checked" : ""}> Enabled</label>`,
+        (v) =>
+          call(
+            {
+              action: "admin.databases.save",
+              database: { id: v.get("id"), name: v.get("name"), server: v.get("server"), catalog: v.get("catalog"), enabled: v.get("enabled") === "on" },
+            },
+            true,
+          ),
+      );
+    const confirmations = {
+      "servers.delete": ["Delete this server profile? Its encrypted credentials are removed.", "Delete server profile"],
+      "servers.disable": ["Disable this server profile? Its databases stop serving requests.", "Disable server profile"],
+      "databases.delete": ["Delete this database from the registry? The SQL Server database itself is not changed.", "Delete database"],
+      "databases.disable": ["Disable this database? Requests naming it are rejected.", "Disable database"],
+      "databases.disconnect": ["Disconnect this database? New requests naming it are denied until it is reconnected.", "Disconnect database"],
+    };
+    content.onclick = async (event) => {
+      const tabButton = event.target.closest("[data-database-tab]");
+      if (tabButton) return databasesView(tabButton.dataset.databaseTab);
+      const button = event.target.closest("[data-server-action], [data-database-action]");
+      if (!button) return;
+      const kind = button.dataset.serverAction ? "servers" : "databases",
+        operation = button.dataset.serverAction || button.dataset.databaseAction,
+        id = button.dataset.id;
+      if (operation === "add") return kind === "servers" ? serverForm(null) : databaseForm(null);
+      if (operation === "edit")
+        return kind === "servers"
+          ? serverForm(servers.find((server) => server.id === id))
+          : databaseForm(databases.find((database) => database.id === id));
+      const prompt = confirmations[`${kind}.${operation}`];
+      if (prompt && !(await confirmAction(...prompt))) return;
+      const done = setButtonBusy(button, operation === "test" ? "Testing…" : "Working…");
+      try {
+        const result = row(await call({ action: `admin.${kind}.${operation}`, id }, true));
+        notify(
+          operation === "test"
+            ? `Connection succeeded${result.edition ? ` (${result.edition} ${result.productVersion || ""})` : ""}.`
+            : "Database registry updated.",
+        );
+        if (operation !== "test") await databasesView(activeDatabaseTab);
+      } catch (error) {
+        notify(error.message, true);
+      } finally {
+        done();
+      }
+    };
   }
 
   function openApiKeyDialog(users, roles, opener) {
@@ -1862,6 +2028,7 @@
     try {
       if (route === "info") await infoView();
       else if (route === "configuration") await configurationView();
+      else if (route === "databases") await databasesView();
       else if (route === "users") await usersView();
       else if (route === "api-keys") await apiKeysView();
       else if (route === "backup-recovery") await backupRecoveryView();

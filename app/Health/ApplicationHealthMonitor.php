@@ -29,6 +29,8 @@ final class ApplicationHealthMonitor
     private int $diskWarningBytes;
     private int $diskCriticalBytes;
     private $databaseTester;
+    /** @var null|callable(DatabaseContext): array connects to a server profile; returns safe server facts */
+    private $serverInspector;
     private $databaseAvailable;
     private $diskSpace;
     private ?bool $production;
@@ -48,6 +50,7 @@ final class ApplicationHealthMonitor
         $this->diskWarningBytes = max(0, (int)($options['diskWarningBytes'] ?? 1073741824));
         $this->diskCriticalBytes = max(0, (int)($options['diskCriticalBytes'] ?? 268435456));
         $this->databaseTester = $options['databaseTester'] ?? null;
+        $this->serverInspector = $options['serverInspector'] ?? null;
         $this->databaseAvailable = $options['databaseAvailable'] ?? null;
         $this->diskSpace = $options['diskSpace'] ?? static fn (string $path) => @disk_free_space($path);
         $this->production = isset($options['production']) ? (bool)$options['production'] : null;
@@ -241,6 +244,58 @@ final class ApplicationHealthMonitor
         if (!$available) return $status + ['status' => 'disconnected', 'category' => 'database_disconnected'];
         if (!is_callable($this->databaseTester)) return $status + ['status' => 'healthy', 'category' => 'database_available'];
         return $status + $this->connectivity($databaseId);
+    }
+
+    /**
+     * One server profile, independent of its databases: `disabled` when the
+     * profile is disabled (never contacted), else one cached connection to
+     * the profile's `master` catalog. A database failure never marks the
+     * server unhealthy; only a failed server connection does. Without an
+     * inspector nothing is contacted (`unknown`). `$checkDisabled` lets an
+     * explicit Admin test check a disabled profile's credentials.
+     */
+    public function serverStatus(string $serverId, bool $checkDisabled = false): array
+    {
+        try {
+            $metadata = $this->registry->metadata();
+        } catch (Throwable $exception) {
+            return ['server' => $serverId, 'configured' => false, 'enabled' => false, 'status' => 'unhealthy', 'category' => 'configuration_invalid'];
+        }
+        $server = $metadata['servers'][$serverId] ?? null;
+        if ($server === null) {
+            return ['server' => $serverId, 'configured' => false, 'enabled' => false, 'status' => 'not_configured', 'category' => 'server_profile_not_found'];
+        }
+        $status = ['server' => $serverId, 'configured' => true, 'enabled' => $server['enabled']];
+        if (!$server['enabled'] && !$checkDisabled) return $status + ['status' => 'disabled', 'category' => 'server_profile_disabled'];
+        if (!is_callable($this->serverInspector)) return $status + ['status' => 'unknown', 'category' => 'not_checked'];
+        $cachePath = dirname($this->databaseCachePath) . DIRECTORY_SEPARATOR . 'server-health.' . $serverId . '.json';
+        $fingerprint = $this->registry->fingerprint();
+        $cached = is_string($fingerprint) ? $this->readDatabaseCache($fingerprint, $cachePath) : null;
+        if ($cached !== null) return $status + ['cached' => true] + $cached;
+        $started = microtime(true);
+        try {
+            $facts = ($this->serverInspector)(self::serverContext($serverId, $server['name'], $this->registry->serverConnection($serverId)));
+            $result = ['status' => 'healthy', 'category' => 'connected', 'serverInfo' => array_intersect_key((array)$facts,
+                ['productVersion' => true, 'edition' => true, 'serverName' => true])];
+        } catch (Throwable $exception) {
+            $result = ['status' => 'unhealthy', 'category' => $this->databaseFailureCategory($exception)];
+        }
+        $result += ['cached' => false, 'checkedAt' => gmdate(DATE_ATOM), 'durationMs' => round((microtime(true) - $started) * 1000, 2)];
+        if (is_string($fingerprint)) $this->writeDatabaseCache($result + ['configurationFingerprint' => $fingerprint], $cachePath);
+        return $status + $result;
+    }
+
+    /** A connection target for a server profile itself: its `master` catalog. */
+    public static function serverContext(string $serverId, string $name, array $connection): DatabaseContext
+    {
+        return new DatabaseContext('server-' . $serverId, $name, true, 'master', new DatabaseServerProfile($serverId, $name, true, $connection));
+    }
+
+    /** Discard a server profile's connection-check cache after a change. */
+    public function forgetServerHealth(string $serverId): void
+    {
+        $path = dirname($this->databaseCachePath) . DIRECTORY_SEPARATOR . 'server-health.' . $serverId . '.json';
+        if (is_file($path)) @unlink($path);
     }
 
     private function databaseReadiness(): array
