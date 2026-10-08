@@ -1,7 +1,7 @@
 # Write API
 
 The Write API performs single-object INSERT, UPDATE, DELETE, and UPSERT
-operations on any user table of the configured database. There is no
+operations on any user table of a registered database. There is no
 per-table registration: a caller holding `data.write` (Data Operator, System
 Administrator, or an `api-administrator` key) can write to any table the
 database login can write to. Session callers must send `X-CSRF-Token`.
@@ -11,16 +11,38 @@ table's live column metadata, and builds parameterized SQL. The database login's
 own permissions remain the final boundary, so grant it only the rights the
 deployment needs (see [Deployment checklist](#deployment-checklist)).
 
+## Target database
+
+A write has exactly one target database: the optional top-level `database`
+(a registered database id, for example `"database": "inventory"`), else the
+registry's default database. Requests without `database` behave as before.
+
+```json
+{"action":"insert","database":"inventory","table":"sales.Product","data":{"Sku":"K1","Region":"EU"}}
+```
+
+- The id is resolved through the registry before any connection opens; the
+  request's connection opens to that database, and the table, its metadata,
+  and the statement all belong to it. The client never supplies a physical
+  database name, server, or credentials.
+- An unknown, disabled, or disconnected database fails with
+  `DATABASE_NOT_FOUND`, `DATABASE_DISABLED`, `SERVER_PROFILE_DISABLED`, or
+  `DATABASE_UNAVAILABLE`; there is no fallback to the default database.
+- There is no syntax for a second database: `database` is one id, the write
+  grammar has no sources, joins, or subqueries, and lists or `targets` are
+  rejected. Multi-target writes, cross-database and cross-server writes, and
+  distributed transactions are not supported.
+
 ## Target table
 
-`table` is `Name` (schema `dbo`) or `Schema.Name`:
+`table` is `Name` (schema `dbo`) or `Schema.Name`, in the target database:
 
 - each part is an unquoted identifier (`[A-Za-z_][A-Za-z0-9_]*`);
 - three-part or cross-database names, brackets, and other punctuation are
   rejected (`400 INVALID_REQUEST`);
 - the `sys` and `INFORMATION_SCHEMA` schemas are rejected
   (`400 INVALID_WRITE_TABLE`);
-- the table must exist as a user table in the configured database
+- the table must exist as a user table in the target database
   (`sys.tables`); otherwise `400 INVALID_WRITE_TABLE`. Views are not write
   targets.
 
@@ -152,7 +174,8 @@ error text is never returned.
 ## Not supported
 
 Bulk or array input, multi-action transactions, writes to views or system
-objects, cross-database targets, identity-insert overrides, SQL expression
+objects, more than one target database, cross-database sources,
+cross-server writes, distributed transactions, identity-insert overrides, SQL expression
 values, explicit requests for database defaults, returned-column selection, soft
 delete, and optimistic concurrency tokens.
 

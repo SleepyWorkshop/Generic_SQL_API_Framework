@@ -1,11 +1,14 @@
 <?php
 
 require_once __DIR__ . '/../../Database/MssqlIdentifier.php';
+require_once __DIR__ . '/../../Database/QualifiedObject.php';
 
 abstract class WriteSqlBuilder
 {
     protected function target(array $resource): string
     {
+        // The connection is the target's database, so the local form is used.
+        if (($resource['object'] ?? null) instanceof QualifiedObject) return $resource['object']->renderLocal();
         return MssqlIdentifier::schema($resource['schema'])->quoted() . '.' . MssqlIdentifier::object($resource['table'])->quoted();
     }
 

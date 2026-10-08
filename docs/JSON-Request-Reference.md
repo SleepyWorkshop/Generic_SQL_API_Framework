@@ -14,10 +14,10 @@ Unknown top-level properties are rejected for every action.
 |---|---|---|
 | `select` | `source`, `fields` | `filters`, `joins`, `groupBy`, `having`, `sort`, `pagination`, `distinct`, `limit`, `filterLogic`, `with` |
 | `sql` | `resource` | `execution`, `filters`, `sort`, `pagination`, `filterLogic`, `database` |
-| `insert` | `resource`, non-empty `data` object | none |
-| `update` | `resource`, non-empty `data` object, non-empty `filters` | `filterLogic` |
-| `delete` | `resource`, non-empty `filters` | `filterLogic` |
-| `upsert` | `resource`, non-empty `data` object, non-empty `keys` list | none |
+| `insert` | `table`, non-empty `data` object | `database` |
+| `update` | `table`, non-empty `data` object, non-empty `filters` | `filterLogic`, `database` |
+| `delete` | `table`, non-empty `filters` | `filterLogic`, `database` |
+| `upsert` | `table`, non-empty `data` object, non-empty `keys` list | `database` |
 | `union`, `unionAll` | non-empty `queries` | none |
 | `procedure` | `source.procedure` | `parameters`, `database` |
 | `function`, `tableFunction` | `source.function` | `parameters`, `database` |
@@ -63,8 +63,10 @@ runtime sort or default sort.
 
 CRUD `table` is `Table` or `Schema.Table`, each part matching
 `[A-Za-z_][A-Za-z0-9_]*`. Three-part names, brackets, the `sys` and
-`INFORMATION_SCHEMA` schemas, and tables that do not exist in the configured
-database are rejected. Clients cannot send `source`, SQL, expressions, file
+`INFORMATION_SCHEMA` schemas, and tables that do not exist in the target
+database are rejected. The optional top-level `database` selects the one
+target database (default: the default database); see
+[Write API](Write-API.md#target-database). Clients cannot send `source`, SQL, expressions, file
 paths, metadata, or connection information. `data` is a JSON object keyed by
 unqualified column names; every value must be a string, number, boolean, or
 null. Arrays and nested objects are not write values.
@@ -347,8 +349,8 @@ Metadata actions and routines accept a top-level `database` the same way; see
 databases with `{{database:id}}` placeholders, or takes the request's
 `database` when it has none; see
 [SQL Resource authoring](SQL-Resource-Authoring.md#database-placeholders).
-`metadata.databases` lists the ids that can be named. Writes do not accept
-`database` and use the default database. Cross-server queries are not
+`metadata.databases` lists the ids that can be named. Writes accept one
+top-level `database` as their single target. Cross-server queries are not
 supported.
 
 ## Routines and metadata

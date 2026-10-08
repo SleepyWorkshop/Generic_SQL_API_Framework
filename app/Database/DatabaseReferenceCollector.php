@@ -19,7 +19,8 @@ require_once __DIR__ . '/../Resources/SqlResourceStatement.php';
 final class DatabaseReferenceCollector
 {
     private const SELECT_ACTIONS = ['select', 'union', 'unionAll'];
-    private const ROUTINE_ACTIONS = ['procedure', 'function', 'tableFunction'];
+    /** Actions that name their one database only at the top level. */
+    private const SINGLE_DATABASE_ACTIONS = ['procedure', 'function', 'tableFunction', 'insert', 'update', 'delete', 'upsert'];
 
     /** @var callable(string): string SQL Resource id → authored SQL */
     private $resourceSql;
@@ -100,7 +101,7 @@ final class DatabaseReferenceCollector
     public static function declaredPrimaryId(array $request): ?string
     {
         $action = $request['action'] ?? null;
-        if (is_string($action) && (str_starts_with($action, 'metadata.') || in_array($action, self::ROUTINE_ACTIONS, true))) {
+        if (is_string($action) && (str_starts_with($action, 'metadata.') || in_array($action, self::SINGLE_DATABASE_ACTIONS, true))) {
             return is_string($request['database'] ?? null) ? $request['database'] : null;
         }
         if ($action === 'sql') {

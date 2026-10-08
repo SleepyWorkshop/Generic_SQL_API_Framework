@@ -196,7 +196,7 @@ Insert one row into a table.
 
 ### Request
 
-Required fields are `action`, `table`, and `data`; no optional properties.
+Required fields are `action`, `table`, and `data`; optional `database`.
 
 ### Minimal example
 
@@ -225,6 +225,7 @@ Required fields are `action`, `table`, and `data`; no optional properties.
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `table` | string | yes | `Table` or `Schema.Table` of a user table. |
+| `database` | database id | no | The one target database; default: the default database. |
 | `data` | non-empty object | yes | One scalar/null value per column; database-generated columns are rejected. |
 
 ### Validation
@@ -256,7 +257,7 @@ Update one or more matching rows of a table.
 ### Request
 
 Required fields are `action`, `table`, `data`, and non-empty `filters`;
-`filterLogic` is optional.
+`filterLogic` and `database` are optional.
 
 ### Minimal example
 
@@ -284,6 +285,7 @@ Required fields are `action`, `table`, `data`, and non-empty `filters`;
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `table` | string | yes | `Table` or `Schema.Table` of a user table. |
+| `database` | database id | no | The one target database; default: the default database. |
 | `data` | non-empty object | yes | Columns to change; database-generated columns are rejected. |
 | `filters` | non-empty array | yes | Conditions on any existing column. |
 | `filterLogic` | string | no | AND or OR; default AND. |
@@ -314,7 +316,7 @@ Delete matching rows of a table.
 ### Request
 
 Required fields are `action`, `table`, and non-empty `filters`; `filterLogic`
-is optional. `data` is not accepted.
+and `database` are optional. `data` is not accepted.
 
 ### Minimal example
 
@@ -341,6 +343,7 @@ is optional. `data` is not accepted.
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `table` | string | yes | `Table` or `Schema.Table` of a user table. |
+| `database` | database id | no | The one target database; default: the default database. |
 | `filters` | non-empty array | yes | Required targeting conditions. |
 | `filterLogic` | string | no | AND or OR; default AND. |
 
@@ -369,8 +372,8 @@ Update an existing row or insert a new row, matched by a unique key.
 
 ### Request
 
-Required fields are `action`, `table`, `data`, and `keys`; no filters or other
-optional properties are accepted.
+Required fields are `action`, `table`, `data`, and `keys`; `database` is
+optional, and no filters or other properties are accepted.
 
 ### Minimal example
 
@@ -400,6 +403,7 @@ optional properties are accepted.
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `table` | string | yes | `Table` or `Schema.Table` of a user table. |
+| `database` | database id | no | The one target database; default: the default database. |
 | `data` | non-empty object | yes | Includes every key and at least one non-key value. |
 | `keys` | non-empty string list | yes | Must exactly match the table's primary key or an unfiltered unique index. |
 

@@ -3,6 +3,8 @@
 require_once __DIR__ . '/../../core/QueryEngine.php';
 require_once __DIR__ . '/MetadataRepository.php';
 require_once __DIR__ . '/../Resources/DatabaseObjectName.php';
+require_once __DIR__ . '/../Database/DatabaseQueryPlanContext.php';
+require_once __DIR__ . '/../Database/SourceResolver.php';
 require_once __DIR__ . '/../Requests/WritePayloadValidator.php';
 require_once __DIR__ . '/../Requests/ApiRequestException.php';
 require_once __DIR__ . '/Write/InsertBuilder.php';
@@ -46,7 +48,7 @@ class WriteRepository
             'schema' => $name['schema'],
             'table' => $name['name'],
             'identityColumn' => $this->identityColumn($metadataRows),
-        ];
+        ] + $this->targetObject($name);
         $request = $this->payloadValidator->validate($request, $target, $metadataRows);
         if ($request['action'] === 'upsert'
             && !$this->metadataRepository->hasUniqueKey($target['schema'], $target['table'], $request['keys'])) {
@@ -69,6 +71,19 @@ class WriteRepository
         }
 
         return $this->formatResult($request['action'], $result);
+    }
+
+    /**
+     * With a database plan, the target is a QualifiedObject of the plan's one
+     * database, which the request's connection opened. A write has exactly one
+     * target database, so a plan naming several is refused.
+     */
+    private function targetObject(array $name): array
+    {
+        $plan = DatabaseQueryPlanContext::current();
+        if ($plan === null) return [];
+        if ($plan->isCrossDatabase) throw new LogicException('A write targets exactly one database.');
+        return ['object' => (new SourceResolver($plan))->qualify(null, $name['schema'], $name['name'], 'table')];
     }
 
     public function build(array $request, array $target): array

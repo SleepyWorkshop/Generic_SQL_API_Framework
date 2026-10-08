@@ -23,8 +23,9 @@ Planned work is tracked separately in [Roadmap](Roadmap.md).
   rejected. SELECT and set-operation requests can combine databases of one
   server profile; metadata actions and routines select one database; SQL
   Resources address registered databases only through `{{database:id}}`
-  placeholders. Cross-server queries and cross-database writes are not
-  supported. Metadata is not cached across requests.
+  placeholders; writes target exactly one selected database. Cross-server
+  queries, multi-target or cross-database writes, and distributed
+  transactions are not supported. Metadata is not cached across requests.
 - Subqueries cannot refer to columns of the outer query (no correlated
   subqueries).
 - There is no separate limit on the number of filters per request; it is bounded

@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/ApiRequestException.php';
+require_once __DIR__ . '/../Database/DatabaseRegistry.php';
 
 class WriteRequestValidator
 {
@@ -19,13 +20,17 @@ class WriteRequestValidator
         }
 
         $allowed = match ($action) {
-            'insert' => ['action', 'table', 'data'],
-            'update' => ['action', 'table', 'data', 'filters', 'filterLogic'],
-            'delete' => ['action', 'table', 'filters', 'filterLogic'],
-            'upsert' => ['action', 'table', 'data', 'keys'],
+            'insert' => ['action', 'table', 'data', 'database'],
+            'update' => ['action', 'table', 'data', 'filters', 'filterLogic', 'database'],
+            'delete' => ['action', 'table', 'filters', 'filterLogic', 'database'],
+            'upsert' => ['action', 'table', 'data', 'keys', 'database'],
             default => ['action'],
         };
         $this->rejectUnknown($request, $allowed, '', $errors);
+        // The one database the write targets: a registered id, default when omitted.
+        if (array_key_exists('database', $request) && !DatabaseRegistry::isValidId($request['database'])) {
+            $errors[] = ['path' => 'database', 'message' => 'Database must be a configured database id.'];
+        }
 
         // Table or schema.table; system schemas and cross-database names are
         // rejected later by DatabaseObjectName.

@@ -222,7 +222,8 @@ try {
         && $collected->references[1]->path === 'joins.0.source.database', 'References do not record where they were named.');
     planAssert(DatabaseReferenceCollector::declaredPrimaryId($select(['database' => 'inventory', 'table' => 'P'])) === 'inventory'
         && DatabaseReferenceCollector::declaredPrimaryId(['action' => 'sql', 'database' => 'inventory']) === 'inventory'
-        && DatabaseReferenceCollector::declaredPrimaryId(['action' => 'insert', 'database' => 'inventory']) === null
+        && DatabaseReferenceCollector::declaredPrimaryId(['action' => 'insert', 'database' => 'inventory']) === 'inventory'
+        && DatabaseReferenceCollector::declaredPrimaryId(['action' => 'auth.login', 'database' => 'inventory']) === null
         && DatabaseReferenceCollector::declaredPrimaryId(['action' => 'union', 'queries' => [['source' => ['database' => 'reporting']]]]) === 'reporting',
         'The early availability gate does not see the selected database.');
     $payloads[] = $rejected($select(['table' => 'Recent'], ['with' => ['name' => 'Recent', 'query' => ['source' => ['table' => 'Orders'], 'fields' => ['Id']]],
@@ -325,9 +326,9 @@ try {
         'A database-qualified write table was accepted.'))[1] === 'INVALID_REQUEST'
         && planResponse(planFailure(fn () => RoutineResolver::name('CompanyDB.dbo.Report', 'procedure'), 'A database-qualified routine was accepted.'))[1] === 'INVALID_ROUTINE',
         'Database-qualified write or routine names were accepted.');
-    // Writes do not name databases; routines and metadata name theirs only at the top level.
+    // Writes, routines, and metadata name their database only at the top level.
     foreach ([
-        ['action' => 'insert', 'table' => 'Customer', 'data' => ['A' => 1], 'database' => 'inventory'],
+        ['action' => 'insert', 'table' => 'Customer', 'data' => ['A' => 1], 'source' => ['database' => 'inventory']],
         ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Run', 'database' => 'inventory']],
         ['action' => 'metadata.columns', 'source' => ['table' => 'Customer', 'database' => 'inventory']],
         ['action' => 'metadata.databases', 'database' => 'inventory'],
