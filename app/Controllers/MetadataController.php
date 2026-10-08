@@ -2,14 +2,28 @@
 
 require_once __DIR__ . '/BaseController.php';
 require_once __DIR__ . '/../Services/MetadataService.php';
+require_once __DIR__ . '/../Database/DatabaseDirectory.php';
 
 class MetadataController extends BaseController
 {
-    private MetadataService $metadataService;
+    private ?MetadataService $metadataService = null;
 
-    public function __construct()
+    /** Created on first use: the database listing never opens a connection. */
+    private function metadata(): MetadataService
     {
-        $this->metadataService = new MetadataService();
+        return $this->metadataService ??= new MetadataService();
+    }
+
+    /**
+     * Logical databases from the registry; no catalog query or connection.
+     */
+    public function databases($request)
+    {
+        $databases = (new DatabaseDirectory())->databases();
+        $this->success(
+            ['rowsReturned' => count($databases), 'data' => $databases],
+            "Databases Loaded Successfully"
+        );
     }
 
     /**
@@ -18,7 +32,7 @@ class MetadataController extends BaseController
     public function tables($request)
     {
         $this->success(
-            $this->metadataService->getTables(),
+            $this->metadata()->getTables(),
             "Tables Loaded Successfully"
         );
     }
@@ -33,8 +47,9 @@ class MetadataController extends BaseController
         ]);
 
         $this->success(
-            $this->metadataService->getColumns(
-                $request['table']
+            $this->metadata()->getColumns(
+                $request['table'],
+                $request['schema'] ?? null
             ),
             "Columns Loaded Successfully"
         );
@@ -46,7 +61,7 @@ class MetadataController extends BaseController
     public function views($request)
     {
         $this->success(
-           $this->metadataService->getViews(),
+           $this->metadata()->getViews(),
         "Views Loaded Successfully"
            );
     }
@@ -57,7 +72,7 @@ class MetadataController extends BaseController
     public function procedures($request)
     {
         $this->success(
-           $this->metadataService->getProcedures(),
+           $this->metadata()->getProcedures(),
         "Stored Procedures Loaded Successfully"
            );
     }
@@ -68,7 +83,7 @@ class MetadataController extends BaseController
     public function schema($request)
     {
         $this->success(
-           $this->metadataService->schema(),
+           $this->metadata()->schema(),
         "Schema Loaded Successfully"
            );
     }

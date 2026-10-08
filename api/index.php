@@ -71,6 +71,7 @@ require_once __DIR__ . '/../app/Requests/QueryRequestValidator.php';
 require_once __DIR__ . '/../app/Requests/QueryRequestNormalizer.php';
 require_once __DIR__ . '/../app/Database/DatabaseQueryPlanner.php';
 require_once __DIR__ . '/../app/Database/DatabaseQueryPlanContext.php';
+require_once __DIR__ . '/../app/Database/DatabaseDirectory.php';
 require_once __DIR__ . '/../app/Requests/SetupRequestValidator.php';
 require_once __DIR__ . '/../app/Controllers/SetupController.php';
 require_once __DIR__ . '/../app/Requests/AuthRequestValidator.php';
@@ -168,8 +169,11 @@ Response::setRequestContext($request);
 ]);
 
 // Database planning: references → registry contexts → access policy → plan.
+// The database listing reads the registry only: no plan, no connection.
 $phaseStarted = microtime(true);
-DatabaseQueryPlanContext::set((new DatabaseQueryPlanner())->plan($publicRequest, PrincipalContext::current()));
+if (!DatabaseDirectory::isRegistryOnly($publicRequest['action'] ?? null)) {
+    DatabaseQueryPlanContext::set((new DatabaseQueryPlanner())->plan($publicRequest, PrincipalContext::current()));
+}
 (new Logger())->timing('database_planning', (microtime(true) - $phaseStarted) * 1000, [
     'action' => $publicRequest['action'] ?? null,
 ]);

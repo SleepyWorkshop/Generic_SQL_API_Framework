@@ -21,8 +21,9 @@ Unknown top-level properties are rejected for every action.
 | `union`, `unionAll` | non-empty `queries` | none |
 | `procedure` | `source.procedure` | `parameters` |
 | `function`, `tableFunction` | `source.function` | `parameters` |
-| `metadata.columns` | `source.table` | none |
-| `metadata.tables`, `metadata.views`, `metadata.procedures`, `metadata.schema` | none beyond `action` | none |
+| `metadata.columns` | `source.table` | `database`, `source.schema` |
+| `metadata.tables`, `metadata.views`, `metadata.procedures`, `metadata.schema` | none beyond `action` | `database` |
+| `metadata.databases` | none beyond `action` | none |
 
 Identifiers use `^[A-Za-z_][A-Za-z0-9_.]*$`: letters/underscore first, then letters, digits, underscores, or dot qualifiers. This is syntax validation; SELECT builders also check tables and columns against live metadata.
 
@@ -341,10 +342,12 @@ renders exactly as in V2 and resolves through SQL Server's default schema.
 Two sources with the same table name must name the same object, and a
 source with `schema` is validated against that schema's catalog entry.
 
-Other actions (`sql`, writes, routines, and metadata) do not accept `database`
-and use the default database: SQL Resources, routines, writes, and metadata
-are not database-selectable yet, and there is no database discovery action.
-Cross-server queries are not supported.
+Metadata actions accept a top-level `database` the same way; see
+[Metadata and routines](Metadata-and-Routines.md). `metadata.databases` lists
+the ids that can be named. Other actions (`sql`, writes, and routines) do not
+accept `database` and use the default database: SQL Resources, routines, and
+writes are not database-selectable yet. Cross-server queries are not
+supported.
 
 ## Routines and metadata
 
@@ -364,7 +367,7 @@ Routine `parameters` is an optional positional array and defaults to `[]`:
 
 The shared source validator also accepts an optional identifier `source.alias` on routine and `metadata.columns` requests, but the normalizer discards it and it has no execution effect. Do not depend on it. `parameters` is only checked as a decoded PHP array; clients should send a JSON list because routine placeholders are positional.
 
-Metadata requests are exactly `{"action":"metadata.tables"}`, `metadata.views`, `metadata.procedures`, or `metadata.schema`. Columns uses `{"action":"metadata.columns","source":{"table":"Items"}}`.
+Metadata requests are `{"action":"metadata.tables"}`, `metadata.views`, `metadata.procedures`, or `metadata.schema`, each with an optional top-level `database`. Columns uses `{"action":"metadata.columns","source":{"table":"Items"}}`, optionally with `source.schema` and a top-level `database`. `{"action":"metadata.databases"}` accepts nothing else.
 
 ## Public versus internal names
 

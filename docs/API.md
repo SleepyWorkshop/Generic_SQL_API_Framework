@@ -36,9 +36,9 @@ The body must be one JSON object. The required `action` is one of:
 - `insert`, `update`, `delete`, `upsert`
 - `union`, `unionAll`
 - `procedure`, `function`, `tableFunction`
-- `metadata.tables`, `metadata.columns`, `metadata.views`, `metadata.procedures`, `metadata.schema`
+- `metadata.tables`, `metadata.columns`, `metadata.views`, `metadata.procedures`, `metadata.schema`, `metadata.databases`
 
-These 16 actions, including minimal/full requests, validation, responses, and
+These 17 actions, including minimal/full requests, validation, responses, and
 errors, are documented in [Action reference](Action-Reference.md). The exact
 accepted field schema is [JSON request reference](JSON-Request-Reference.md).
 

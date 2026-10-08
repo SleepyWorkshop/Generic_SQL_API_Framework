@@ -42,11 +42,15 @@ final class DatabaseReferenceCollector
     /**
      * The database a request selects before it is validated, for the early
      * availability gate: the top-level database, else the base source
-     * database. Null when the request names none or is not a SELECT request.
+     * database. Null when the request names none, or is neither a SELECT nor
+     * a metadata request.
      */
     public static function declaredPrimaryId(array $request): ?string
     {
         $action = $request['action'] ?? null;
+        if (is_string($action) && str_starts_with($action, 'metadata.')) {
+            return is_string($request['database'] ?? null) ? $request['database'] : null;
+        }
         if (!in_array($action, self::SELECT_ACTIONS, true)) return null;
         if (is_string($request['database'] ?? null)) return $request['database'];
         $base = $action === 'select' ? $request : (is_array($request['queries'] ?? null) ? (array_values($request['queries'])[0] ?? null) : null);

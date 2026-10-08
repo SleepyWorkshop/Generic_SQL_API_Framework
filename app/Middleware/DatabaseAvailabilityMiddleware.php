@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Middleware.php';
 require_once __DIR__ . '/../Database/DatabaseContextResolver.php';
 require_once __DIR__ . '/../Database/DatabaseReferenceCollector.php';
+require_once __DIR__ . '/../Database/DatabaseDirectory.php';
 require_once __DIR__ . '/../Runtime/DatabaseAvailabilityManager.php';
 require_once __DIR__ . '/../Requests/ApiRequestException.php';
 
@@ -24,6 +25,9 @@ final class DatabaseAvailabilityMiddleware extends Middleware
 
     public function handle(array $request): void
     {
+        // The database listing reads the registry only and must stay usable
+        // while a database is disconnected.
+        if (DatabaseDirectory::isRegistryOnly($request['action'] ?? null)) return;
         $this->resolver->assertRequestable(DatabaseReferenceCollector::declaredPrimaryId($request));
     }
 }

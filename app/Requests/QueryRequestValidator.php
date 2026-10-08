@@ -22,7 +22,7 @@ class QueryRequestValidator
         'select', 'sql', 'union', 'unionAll', 'procedure', 'function', 'tableFunction',
         'insert', 'update', 'delete', 'upsert',
         'metadata.tables', 'metadata.columns', 'metadata.views',
-        'metadata.procedures', 'metadata.schema'
+        'metadata.procedures', 'metadata.schema', 'metadata.databases'
     ];
 
     private const OPERATORS = [
@@ -86,13 +86,18 @@ class QueryRequestValidator
             if (isset($request['parameters']) && !is_array($request['parameters'])) {
                 $errors[] = ['path' => 'parameters', 'message' => 'Parameters must be an array.'];
             }
+        } elseif ($action === 'metadata.databases') {
+            // Registry listing: no database, source, or connection setting.
+            $this->rejectUnknown($request, ['action'], '', $errors);
         } elseif (str_starts_with($action, 'metadata.')) {
+            // Catalog metadata reads the selected database (default: the registry default).
             if ($action === 'metadata.columns') {
-                $this->rejectUnknown($request, ['action', 'source'], '', $errors);
-                $this->validateSourceName($request, 'table', $errors);
+                $this->rejectUnknown($request, ['action', 'source', 'database'], '', $errors);
+                $this->validateSourceName($request, 'table', $errors, '', false, true);
             } else {
-                $this->rejectUnknown($request, ['action'], '', $errors);
+                $this->rejectUnknown($request, ['action', 'database'], '', $errors);
             }
+            $this->validateDatabase($request, '', $errors);
         }
 
         if ($errors !== []) {
@@ -969,7 +974,8 @@ class QueryRequestValidator
         string $key,
         array &$errors,
         string $prefix = '',
-        bool $allowDatabase = false
+        bool $allowDatabase = false,
+        bool $allowSchema = false
     ): void
     {
         $source = $request['source'] ?? null;
@@ -977,7 +983,8 @@ class QueryRequestValidator
             $errors[] = ['path' => $prefix . "source.{$key}", 'message' => 'A valid source identifier is required.'];
             return;
         }
-        $this->rejectUnknown($source, $allowDatabase ? [$key, 'alias', 'database', 'schema'] : [$key, 'alias'], $prefix . 'source.', $errors);
+        $allowed = $allowDatabase ? [$key, 'alias', 'database', 'schema'] : ($allowSchema ? [$key, 'alias', 'schema'] : [$key, 'alias']);
+        $this->rejectUnknown($source, $allowed, $prefix . 'source.', $errors);
         // Databases are named only by registry id in `database`, never inside
         // the object name.
         if ($key === 'table' && substr_count($source[$key], '.') > 1) {
@@ -985,6 +992,15 @@ class QueryRequestValidator
         } elseif ($allowDatabase && !DatabaseObjectName::isName($source[$key])) {
             // SELECT sources name the schema separately, in `schema`.
             $errors[] = ['path' => $prefix . "source.{$key}", 'message' => 'Table must be a single identifier; name the schema with schema.'];
+        }
+        if ($allowSchema && array_key_exists('schema', $source)) {
+            // With a separate schema, the table is one name.
+            if (!DatabaseObjectName::isName($source[$key])) {
+                $errors[] = ['path' => $prefix . "source.{$key}", 'message' => 'Table must be a single identifier; name the schema with schema.'];
+            }
+            if (!DatabaseObjectName::isSchema($source['schema'])) {
+                $errors[] = ['path' => $prefix . 'source.schema', 'message' => 'Schema must be a single non-system identifier.'];
+            }
         }
         if ($allowDatabase) {
             $this->validateDatabase($source, $prefix . 'source.', $errors);

@@ -324,13 +324,14 @@ try {
         'A database-qualified write table was accepted.'))[1] === 'INVALID_REQUEST'
         && planResponse(planFailure(fn () => RoutineResolver::name('CompanyDB.dbo.Report', 'procedure'), 'A database-qualified routine was accepted.'))[1] === 'INVALID_ROUTINE',
         'Database-qualified write or routine names were accepted.');
-    // Only SELECT and set operations name databases in this phase.
+    // SQL Resources, writes, and routines do not name databases; metadata names
+    // its database only at the top level.
     foreach ([
         ['action' => 'sql', 'resource' => 'reports/sales', 'database' => 'inventory'],
         ['action' => 'insert', 'table' => 'Customer', 'data' => ['A' => 1], 'database' => 'inventory'],
         ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Run', 'database' => 'inventory']],
-        ['action' => 'metadata.tables', 'database' => 'inventory'],
         ['action' => 'metadata.columns', 'source' => ['table' => 'Customer', 'database' => 'inventory']],
+        ['action' => 'metadata.databases', 'database' => 'inventory'],
         ['action' => 'select', 'source' => ['table' => 'C'], 'fields' => ['Id'], 'filters' => [['operator' => 'EXISTS',
             'query' => ['database' => 'inventory', 'source' => ['table' => 'P'], 'fields' => ['Id']]]]],
     ] as $request) {

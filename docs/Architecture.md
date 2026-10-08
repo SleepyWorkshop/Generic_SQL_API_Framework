@@ -162,6 +162,14 @@ read from their own `INFORMATION_SCHEMA` views on the same connection, and the
 query runs as one statement; nothing is merged in PHP and no second
 connection or linked server is used.
 
+Metadata actions are planned the same way: their optional `database` selects
+the primary database, so their catalog queries read the connected database.
+Structured lookups (`objectExists`, `objectColumns`, …) take a
+`QualifiedObject` and read another database's `[Database].INFORMATION_SCHEMA`
+on the same connection. `metadata.databases` is answered by `DatabaseDirectory`
+from registry metadata and availability state only: it is neither planned nor
+gated and opens no connection.
+
 Pagination runs a count query, then checks the database compatibility level:
 110 or newer uses `OFFSET/FETCH`; older levels use a `ROW_NUMBER()` wrapper. A
 complete first-page SQL Resource whose authored `TOP` fits the page skips the

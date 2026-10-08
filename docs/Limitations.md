@@ -21,8 +21,9 @@ Planned work is tracked separately in [Roadmap](Roadmap.md).
 - The data API addresses only user objects of registered databases: system
   schemas, client-written database-qualified names, and system procedures are
   rejected. SELECT and set-operation requests can combine databases of one
-  server profile; cross-server queries, cross-database writes, and
-  database-selectable SQL Resources, routines, and metadata are not supported.
+  server profile, and metadata actions can select a database; cross-server
+  queries, cross-database writes, and database-selectable SQL Resources and
+  routines are not supported. Metadata is not cached across requests.
 - Subqueries cannot refer to columns of the outer query (no correlated
   subqueries).
 - There is no separate limit on the number of filters per request; it is bounded

@@ -1,11 +1,15 @@
 <?php
 
 require_once __DIR__ . '/../Repositories/MetadataRepository.php';
+require_once __DIR__ . '/../Database/DatabaseQueryPlanContext.php';
+require_once __DIR__ . '/../Database/SourceResolver.php';
 
 /**
  * Catalog listings for callers holding metadata.read (or frontend access).
- * Results come from the configured database's INFORMATION_SCHEMA views and so
- * contain only objects the database login can see.
+ * Results come from the INFORMATION_SCHEMA views of the request's database
+ * (its `database`, else the registry default), which is the database the
+ * request's connection opened, and so contain only objects the database
+ * login can see.
  */
 class MetadataService
 {
@@ -21,9 +25,16 @@ class MetadataService
         return $this->metadataRepository->getTables();
     }
 
-    public function getColumns($tableName)
+    /**
+     * Columns of a table; with a schema, of that schema's table only, as a
+     * QualifiedObject of the planned database.
+     */
+    public function getColumns($tableName, ?string $schema = null)
     {
-        return $this->metadataRepository->getColumns($tableName);
+        if ($schema === null) return $this->metadataRepository->getColumns($tableName);
+        $plan = DatabaseQueryPlanContext::current();
+        if ($plan === null) throw new LogicException('Schema-qualified metadata requires a database query plan.');
+        return $this->metadataRepository->objectColumns((new SourceResolver($plan))->qualify(null, $schema, $tableName));
     }
 
     public function getViews()

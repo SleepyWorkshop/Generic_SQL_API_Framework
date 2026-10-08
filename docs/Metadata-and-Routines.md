@@ -12,6 +12,7 @@ Metadata actions return ordinary result rows in `data` and the standard query
 | `metadata.views` | `{"action":"metadata.views"}` | `TABLE_NAME` | `Views Loaded Successfully` |
 | `metadata.procedures` | `{"action":"metadata.procedures"}` | `ROUTINE_NAME` | `Stored Procedures Loaded Successfully` |
 | `metadata.schema` | `{"action":"metadata.schema"}` | `TABLE_NAME`, `COLUMN_NAME`, `DATA_TYPE`, `ORDINAL_POSITION` | `Schema Loaded Successfully` |
+| `metadata.databases` | `{"action":"metadata.databases"}` | `id`, `name`, `default`, `enabled`, `available`, `crossDatabaseGroup` | `Databases Loaded Successfully` |
 
 Tables includes only `INFORMATION_SCHEMA.TABLES` base tables. Columns is ordered
 by ordinal position and binds the table name as a prepared parameter. Views and
@@ -35,15 +36,70 @@ Example response:
 }
 ```
 
-Only `metadata.columns` accepts `source`, requiring `source.table`. The shared
-validator technically permits `source.alias`, but normalization discards it; omit
-it. Other metadata actions accept no fields beyond `action`.
+Only `metadata.columns` accepts `source`, requiring `source.table` and
+optionally `source.schema`. With a schema, only that schema's table is
+described; without one, columns of every table with that name are listed, as
+before. The shared validator technically permits `source.alias`, but
+normalization discards it; omit it. Every catalog action also accepts a
+top-level `database`; `metadata.databases` accepts nothing beyond `action`.
 
 Frontends can use these endpoints to populate table/column pickers. Metadata
 requires `metadata.read` (or frontend access) and returns the user tables,
-views, columns, and procedures of the configured database that its login can
+views, columns, and procedures of the selected database that its login can
 see. Listing an object does not authorize other actions on it; query, write, and
 routine authorization are evaluated independently.
+
+### Database selection
+
+A catalog action reads the database named by its top-level `database`, a
+registered database id, else the registry's default database, so requests
+without `database` behave as before. The id is resolved through the registry
+and the request's connection opens to that database; the client never supplies
+a physical name. An unknown, disabled, or disconnected database fails with
+`DATABASE_NOT_FOUND`, `DATABASE_DISABLED`, `SERVER_PROFILE_DISABLED`, or
+`DATABASE_UNAVAILABLE` before any connection; there is no fallback to the
+default database.
+
+```json
+{"action":"metadata.columns","database":"inventory","source":{"schema":"sales","table":"Product"}}
+```
+
+The same rules validate SELECT sources: in a cross-database query each source's
+tables and columns are checked against its own database's catalog, so a table
+name present in several databases is described independently.
+
+### Databases
+
+`metadata.databases` lists the logical databases a client can name:
+
+```json
+{
+  "success": true,
+  "message": "Databases Loaded Successfully",
+  "data": [
+    { "id": "company", "name": "Company", "default": true, "enabled": true, "available": true, "crossDatabaseGroup": "sql01" },
+    { "id": "inventory", "name": "Inventory", "default": false, "enabled": true, "available": false, "crossDatabaseGroup": "sql01" },
+    { "id": "legacy", "name": "Legacy", "default": false, "enabled": true, "available": true, "crossDatabaseGroup": "sql02" }
+  ],
+  "meta": { "requestId": "7f4dd403d84c99e1", "rowsReturned": 3, "...": "..." }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | Registry id to send as `database` |
+| `name` | Display name |
+| `default` | Used when a request names no database |
+| `enabled` | The database and its server profile are enabled in the registry |
+| `available` | Its availability gate is open (Admin Console Connect/Disconnect); not a live connectivity check |
+| `crossDatabaseGroup` | Its server profile id: databases of one group can be combined in one query |
+
+The listing is read from the registry and the availability state only; it
+does not connect to SQL Server, so disabled and disconnected databases stay
+listed. Physical database names, servers, ports, logins, passwords, TLS
+options, timeouts, and encrypted configuration are never returned; the Admin
+Console remains the place to manage them. Reachability is reported by the
+health endpoints, not here.
 
 ## Routines
 

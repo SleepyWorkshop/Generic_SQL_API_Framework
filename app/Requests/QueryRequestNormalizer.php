@@ -62,6 +62,7 @@ class QueryRequestNormalizer
         $normalized = ['controller' => 'Metadata', 'action' => $metadataAction];
         if ($metadataAction === 'columns') {
             $normalized['table'] = $request['source']['table'];
+            if (isset($request['source']['schema'])) $normalized['schema'] = $request['source']['schema'];
         }
         return $normalized;
     }

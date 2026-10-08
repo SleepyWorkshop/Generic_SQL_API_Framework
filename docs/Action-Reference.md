@@ -634,7 +634,7 @@ List SQL Server base-table names.
 
 ### Request
 
-Only `action` is accepted.
+`action` and an optional `database`.
 
 ### Minimal example
 
@@ -651,6 +651,7 @@ The full request is identical to the minimal request; there are no options.
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `action` | string | yes | Exactly `metadata.tables`. |
+| `database` | database id | no | Registered database to read; default: the default database. |
 
 ### Validation
 
@@ -677,7 +678,7 @@ List a named table's columns in ordinal order.
 
 ### Request
 
-Required: `action` and `source.table`. No other top-level fields.
+Required: `action` and `source.table`. Optional: `database` and `source.schema`.
 
 ### Minimal example
 
@@ -694,6 +695,8 @@ The full request is identical; there are no output-selection options.
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `source.table` | identifier | yes | Table name bound to the metadata query. |
+| `source.schema` | identifier | no | Schema of the table; one non-system identifier. Without it, columns of every table with that name are listed, as before. |
+| `database` | database id | no | Registered database to read; default: the default database. |
 
 ### Validation
 
@@ -722,7 +725,7 @@ List SQL Server view names.
 
 ### Request
 
-Only `action` is accepted.
+`action` and an optional `database`.
 
 ### Minimal example
 
@@ -739,6 +742,7 @@ The full request is identical.
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `action` | string | yes | Exactly `metadata.views`. |
+| `database` | database id | no | Registered database to read; default: the default database. |
 
 ### Validation
 
@@ -764,7 +768,7 @@ List SQL Server stored-procedure names.
 
 ### Request
 
-Only `action` is accepted.
+`action` and an optional `database`.
 
 ### Minimal example
 
@@ -781,6 +785,7 @@ The full request is identical.
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `action` | string | yes | Exactly `metadata.procedures`. |
+| `database` | database id | no | Registered database to read; default: the default database. |
 
 ### Validation
 
@@ -807,7 +812,7 @@ List all table/column/type/ordinal rows.
 
 ### Request
 
-Only `action` is accepted.
+`action` and an optional `database`.
 
 ### Minimal example
 
@@ -824,6 +829,7 @@ The full request is identical.
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `action` | string | yes | Exactly `metadata.schema`. |
+| `database` | database id | no | Registered database to read; default: the default database. |
 
 ### Validation
 
@@ -842,5 +848,52 @@ Invalid shape is `INVALID_REQUEST`; database failure is `QUERY_ERROR`.
 
 The result is a flat ordered row list, not a nested schema document. Metadata
 actions require `metadata.read` (or frontend access) and list the user objects of
-the configured database that its login can see. See
-[Metadata and routines](Metadata-and-Routines.md).
+the selected database (`database`, else the default database) that its login
+can see. See [Metadata and routines](Metadata-and-Routines.md).
+
+## `metadata.databases`
+
+### Purpose
+
+List the logical databases clients can name in `database`.
+
+### Request
+
+Only `action` is accepted.
+
+### Minimal example
+
+```json
+{"action":"metadata.databases"}
+```
+
+### Full example
+
+The full request is identical.
+
+### Parameters
+
+| Field | Type | Required | Description |
+|---|---|---:|---|
+| `action` | string | yes | Exactly `metadata.databases`. |
+
+### Validation
+
+Any additional property is rejected, including `database` and any connection
+setting.
+
+### Response
+
+Rows contain `id`, `name`, `default`, `enabled`, `available`, and
+`crossDatabaseGroup`; message: `Databases Loaded Successfully`.
+
+### Errors
+
+Invalid shape is `INVALID_REQUEST`; an unreadable registry is
+`DATABASE_CONFIGURATION_ERROR`.
+
+### Notes
+
+Answered from the registry without a SQL Server connection, so it also works
+while a database is disconnected. See
+[Metadata and routines](Metadata-and-Routines.md#databases).
