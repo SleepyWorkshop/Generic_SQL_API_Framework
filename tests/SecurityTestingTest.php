@@ -492,7 +492,7 @@ try {
         'config/admin.json' => $runtime . '/admin.json',
         'config/authorization.json' => $runtime . '/authorization.json',
         'config/api-keys.json' => $runtime . '/api-keys.json',
-        'database/config/database.json' => $root . '/encrypted-database.json',
+        'database/config/databases.json' => $root . '/databases.json',
     ];
     $backupManager = new ApplicationBackupManager($applicationRoot, $backupSources, 'security-test');
     securityTestingFailure(fn () => $backupManager->create($root . '/outside-backup.zip'));

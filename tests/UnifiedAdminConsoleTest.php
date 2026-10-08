@@ -131,10 +131,20 @@ try {
     $service->saveDatabase($normalizedDatabase);
     $service->testCurrentDatabase();
     unifiedAdminAssert($connectionTests === 2, 'Current database test did not open a request-scoped connection.');
-    $stored = json_decode((string)file_get_contents($databasePath), true, 512, JSON_THROW_ON_ERROR);
-    unifiedAdminAssert(($stored['encrypted'] ?? false) === true, 'Database configuration was not encrypted.');
-    unifiedAdminAssert(!str_contains((string)file_get_contents($databasePath), 'first-secret'), 'Plaintext password reached database storage.');
-    unifiedAdminAssert(glob($databasePath . '.backup*') === [], 'A plaintext backup artifact was created.');
+    // V3 stores the Admin form as the registry's default server profile and database.
+    $registryPath = dirname($databasePath) . '/databases.json';
+    $stored = json_decode((string)file_get_contents($registryPath), true, 512, JSON_THROW_ON_ERROR);
+    unifiedAdminAssert(
+        ($stored['version'] ?? null) === 2 && $stored['defaultDatabase'] === 'default'
+            && ($stored['servers']['default']['connection']['encrypted'] ?? false) === true
+            && ($stored['databases']['default']['catalog']['encrypted'] ?? false) === true,
+        'Database configuration was not encrypted.'
+    );
+    unifiedAdminAssert(!is_file($databasePath), 'The Admin Console wrote a V2 database configuration.');
+    foreach (['first-secret', 'sql.example.test', 'reporting_user', '"Reporting"'] as $secret) {
+        unifiedAdminAssert(!str_contains((string)file_get_contents($registryPath), $secret), 'Plaintext connection data reached database storage.');
+    }
+    unifiedAdminAssert(glob($databasePath . '.backup*') === [] && glob($registryPath . '.backup*') === [], 'A plaintext backup artifact was created.');
     $publicDatabase = $service->databaseConfiguration();
     unifiedAdminAssert(!array_key_exists('password', $publicDatabase), 'Database password was returned by the admin API.');
     unifiedAdminAssert(!array_key_exists('ciphertext', $publicDatabase), 'Encrypted credential material was returned by the admin API.');
@@ -147,7 +157,7 @@ try {
     $updatedDatabase['password'] = 'second-secret';
     $service->saveDatabase($updatedDatabase);
     unifiedAdminAssert(
-        DatabaseConfigurationResolver::load($databasePath)['password'] === 'second-secret',
+        DatabaseRegistry::forLegacyPath($databasePath)->connectionConfiguration()['password'] === 'second-secret',
         'Database password update was not persisted.'
     );
 

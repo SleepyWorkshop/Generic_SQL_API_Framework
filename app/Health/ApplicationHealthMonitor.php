@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
 require_once __DIR__ . '/../Runtime/DatabaseAvailabilityManager.php';
+require_once __DIR__ . '/../Database/DatabaseRegistry.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../Repositories/AuthRepository.php';
 require_once __DIR__ . '/../Repositories/InstallationRepository.php';
@@ -17,6 +18,7 @@ final class ApplicationHealthMonitor
     private string $root;
     private string $configurationDirectory;
     private string $databasePath;
+    private DatabaseRegistry $registry;
     private string $runtimeDirectory;
     private string $logDirectory;
     private string $databaseCachePath;
@@ -33,6 +35,8 @@ final class ApplicationHealthMonitor
         $this->root = rtrim($options['root'] ?? dirname(__DIR__, 2), '/\\');
         $this->configurationDirectory = $options['configurationDirectory'] ?? RuntimeConfiguration::directory();
         $this->databasePath = $options['databasePath'] ?? $this->root . '/database/config/database.json';
+        // databasePath is the V2 file; the V3 registry is stored beside it.
+        $this->registry = $options['registry'] ?? DatabaseRegistry::forLegacyPath($this->databasePath);
         $this->runtimeDirectory = $options['runtimeDirectory'] ?? $this->root . '/runtime';
         $this->logDirectory = $options['logDirectory'] ?? $this->root . '/logs';
         $this->databaseCachePath = $options['databaseCachePath']
@@ -161,8 +165,8 @@ final class ApplicationHealthMonitor
                 'admin.json' => (new AdminConfigurationRepository($path))->validate($value),
                 'authorization.json' => (new AuthorizationRepository($path))->validate($value),
                 'api-keys.json' => (new ApiKeyRepository($path))->validate($value),
-                'database-state.json' => ($value['version'] ?? null) === 1
-                    && is_bool($value['available'] ?? null) ? null : throw new RuntimeException('invalid'),
+                'database-state.json' => DatabaseAvailabilityManager::isValidState($value)
+                    ? null : throw new RuntimeException('invalid'),
                 'application-runtime-state.json' => ($value['version'] ?? null) === 1
                     && $this->applicationRuntimeShapeIsValid($value) ? null : throw new RuntimeException('invalid'),
                 default => throw new RuntimeException('invalid'),
@@ -206,11 +210,11 @@ final class ApplicationHealthMonitor
             if (!$available) {
                 return ['status' => 'unhealthy', 'category' => 'database_disconnected'];
             }
-            DatabaseConfigurationResolver::load($this->databasePath);
+            $this->registry->connectionConfiguration();
         } catch (Throwable $exception) {
             return ['status' => 'unhealthy', 'category' => $this->databaseConfigurationCategory()];
         }
-        $fingerprint = hash_file('sha256', $this->databasePath);
+        $fingerprint = $this->registry->fingerprint();
         $cached = is_string($fingerprint) ? $this->readDatabaseCache($fingerprint) : null;
         if ($cached !== null && $cached['status'] !== 'healthy') {
             return ['status' => 'unhealthy', 'category' => $cached['category']];
@@ -239,19 +243,22 @@ final class ApplicationHealthMonitor
     private function storedDatabaseAvailability(): bool
     {
         $state = JsonFileStore::load($this->configurationDirectory . '/database-state.json');
-        return ($state['version'] ?? null) === 1 && ($state['available'] ?? null) === true;
+        if (!DatabaseAvailabilityManager::isValidState($state)) return false;
+        if ($state['version'] === 1) return $state['available'] === true;
+        $default = $this->registry->defaultDatabaseId() ?? DatabaseRegistry::DEFAULT_ID;
+        return ($state['databases'][$default]['available'] ?? false) === true;
     }
 
     private function databaseHealth(): array
     {
         $ready = $this->databaseReadiness();
         if ($ready['status'] !== 'healthy' || !is_callable($this->databaseTester)) return $ready;
-        $fingerprint = is_file($this->databasePath) ? hash_file('sha256', $this->databasePath) : false;
+        $fingerprint = $this->registry->fingerprint();
         $cached = is_string($fingerprint) ? $this->readDatabaseCache($fingerprint) : null;
         if ($cached !== null) return $cached + ['cached' => true];
         $started = microtime(true);
         try {
-            ($this->databaseTester)(DatabaseConfigurationResolver::load($this->databasePath));
+            ($this->databaseTester)($this->registry->connectionConfiguration());
             $result = ['status' => 'healthy', 'category' => 'connected'];
         } catch (Throwable $exception) {
             $result = ['status' => 'unhealthy', 'category' => $this->databaseFailureCategory($exception)];
@@ -268,9 +275,10 @@ final class ApplicationHealthMonitor
      */
     private function withTransportWarnings(array $check): array
     {
-        if (!($this->production ?? SecurityConfiguration::isProduction()) || !is_file($this->databasePath)) return $check;
+        if (!($this->production ?? SecurityConfiguration::isProduction())
+            || $this->registry->source() === DatabaseRegistry::SOURCE_NONE) return $check;
         try {
-            $warnings = DatabaseTransportSecurity::warnings(DatabaseConfigurationResolver::load($this->databasePath));
+            $warnings = DatabaseTransportSecurity::warnings($this->registry->connectionConfiguration());
         } catch (Throwable $exception) {
             return $check;
         }
@@ -279,11 +287,8 @@ final class ApplicationHealthMonitor
 
     private function databaseConfigurationCategory(): string
     {
-        if (!is_file($this->databasePath)) return 'configuration_missing';
-        if (!DatabaseConfigurationResolver::encryptionKeyIsAvailable()) return 'encryption_key_missing';
-        try { DatabaseConfigurationResolver::load($this->databasePath); }
-        catch (Throwable $exception) { return 'configuration_invalid'; }
-        return 'database_unavailable';
+        $state = $this->registry->configurationState();
+        return $state === 'configured' ? 'database_unavailable' : $state;
     }
 
     private function databaseFailureCategory(Throwable $exception): string
@@ -300,11 +305,12 @@ final class ApplicationHealthMonitor
         }
         try { new DatabaseCredentialEncryption(); }
         catch (Throwable $exception) { return ['status' => 'unhealthy', 'category' => 'key_invalid']; }
-        if (!is_file($this->databasePath)) {
+        if ($this->registry->source() === DatabaseRegistry::SOURCE_NONE) {
             return ['status' => 'unhealthy', 'category' => 'configuration_missing'];
         }
-        // A wrong key and a tampered envelope both fail AES-GCM authentication.
-        try { DatabaseConfigurationResolver::load($this->databasePath); }
+        // A wrong key, a tampered envelope, and an envelope moved to another
+        // registry entry all fail AES-GCM authentication.
+        try { $this->registry->verify(); }
         catch (Throwable $exception) { return ['status' => 'unhealthy', 'category' => 'invalid']; }
         return ['status' => 'healthy', 'category' => 'configured'];
     }

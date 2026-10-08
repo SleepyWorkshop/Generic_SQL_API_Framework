@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
+require_once __DIR__ . '/../Database/DatabaseRegistry.php';
 require_once __DIR__ . '/../Security/DatabaseTransportSecurity.php';
 require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 
@@ -127,15 +128,22 @@ final class ProductionValidator
         ];
     }
 
-    /** Saved SQL Server transport settings, reported without any secret values. */
+    /**
+     * Saved SQL Server transport settings of every server profile, reported
+     * without any secret values or profile identities.
+     */
     private function databaseTransport(): array
     {
-        $path = ($this->root ?? dirname(__DIR__, 2)) . '/database/config/database.json';
-        if (!is_file($path)) {
+        $registry = DatabaseRegistry::forLegacyPath(($this->root ?? dirname(__DIR__, 2)) . '/database/config/database.json');
+        if ($registry->source() === DatabaseRegistry::SOURCE_NONE) {
             return ['status' => self::NOT_EXECUTED, 'reason' => 'No saved database configuration.'];
         }
         try {
-            $warnings = DatabaseTransportSecurity::warnings(DatabaseConfigurationResolver::load($path));
+            $warnings = [];
+            foreach (array_keys($registry->metadata()['servers']) as $serverId) {
+                $warnings = [...$warnings, ...DatabaseTransportSecurity::warnings($registry->serverConnection((string)$serverId))];
+            }
+            $warnings = array_values(array_unique($warnings));
         } catch (Throwable $exception) {
             return ['status' => self::NOT_EXECUTED, 'reason' => 'Saved database configuration could not be read.'];
         }

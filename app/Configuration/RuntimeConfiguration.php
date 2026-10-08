@@ -132,7 +132,8 @@ final class RuntimeConfiguration
             self::ADMIN_FILE => self::adminDefaults(),
             self::AUTHORIZATION_FILE => self::authorizationDefaults(),
             self::API_KEYS_FILE => ['version' => 3, 'keys' => []],
-            self::DATABASE_STATE_FILE => ['version' => 1, 'available' => false, 'updatedAt' => null],
+            // Per-database availability; every database starts disconnected.
+            self::DATABASE_STATE_FILE => ['version' => 2, 'databases' => new stdClass()],
             self::APPLICATION_RUNTIME_STATE_FILE => [
                 'version' => 1,
                 'generation' => 0,

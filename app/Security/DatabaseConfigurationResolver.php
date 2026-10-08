@@ -42,6 +42,12 @@ class DatabaseConfigurationResolver
         return $key !== false && trim($key) !== '';
     }
 
+    /** Type checks shared by legacy files and decrypted registry entries. */
+    public static function validateResolved(array $configuration): void
+    {
+        self::validate($configuration);
+    }
+
     private static function validate(array $configuration): void
     {
         if (!is_string($configuration['provider'] ?? null)

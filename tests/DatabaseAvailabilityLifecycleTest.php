@@ -347,8 +347,13 @@ try {
             "{$source} introduces a persistent or global database connection."
         );
     }
-    $stateKeys = array_keys(JsonFileStore::load(RuntimeConfiguration::path(RuntimeConfiguration::DATABASE_STATE_FILE)));
-    databaseLifecycleAssert($stateKeys === ['version', 'available', 'updatedAt'], 'Database runtime state stores more than availability.');
+    $state = JsonFileStore::load(RuntimeConfiguration::path(RuntimeConfiguration::DATABASE_STATE_FILE));
+    databaseLifecycleAssert(
+        array_keys($state) === ['version', 'databases'] && $state['version'] === 2
+            && $state['databases'] !== []
+            && array_filter($state['databases'], static fn ($entry): bool => array_keys($entry) !== ['available', 'updatedAt']) === [],
+        'Database runtime state stores more than per-database availability.'
+    );
 
     // 20. Every lifecycle operation is audited with a safe reason and no secrets.
     $auditSource = implode("\n", array_map(

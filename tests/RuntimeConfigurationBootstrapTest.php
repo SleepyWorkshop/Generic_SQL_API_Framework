@@ -46,7 +46,7 @@ try {
     bootstrapAssert($installation['initialized'] === false, 'Fresh installation was initialized automatically.');
     bootstrapAssert(preg_match('/^[a-f0-9]{64}$/', $installation['installationId']) === 1, 'Installation ID was not generated securely.');
     bootstrapAssert($admin['authentication']['mode'] === 'session', 'Authentication default was not session mode.');
-    bootstrapAssert($databaseState === ['version' => 1, 'available' => false, 'updatedAt' => null], 'Database runtime did not start disconnected.');
+    bootstrapAssert($databaseState === ['version' => 2, 'databases' => []], 'Database runtime did not start disconnected.');
     bootstrapAssert(
         $applicationRuntime === [
             'version' => 1,

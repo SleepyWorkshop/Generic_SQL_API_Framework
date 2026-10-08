@@ -24,7 +24,7 @@ repositoryDocumentationAssert(
 );
 repositoryDocumentationAssert(
     $adminExample === RuntimeConfiguration::adminDefaults()
-        && $databaseStateExample === ['version' => 1, 'available' => false, 'updatedAt' => null],
+        && $databaseStateExample === ['version' => 2, 'databases' => []],
     'Tracked runtime configuration examples do not match bootstrap defaults.'
 );
 repositoryDocumentationAssert(

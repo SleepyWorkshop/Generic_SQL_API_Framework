@@ -2,6 +2,8 @@
 
 require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
+require_once __DIR__ . '/../Database/DatabaseRegistry.php';
+require_once __DIR__ . '/../Database/DatabaseRegistryMigrator.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/SafeZipArchive.php';
 require_once __DIR__ . '/BackupSigningKey.php';
@@ -13,7 +15,11 @@ require_once __DIR__ . '/../Repositories/ApiKeyRepository.php';
 
 final class ApplicationBackupManager
 {
-    public const FORMAT_VERSION = 3;
+    /** Format 4 stores the V3 database registry; formats 2 and 3 stored the V2 database.json. */
+    public const FORMAT_VERSION = 4;
+    public const REGISTRY_ENTRY = 'database/config/databases.json';
+    public const LEGACY_DATABASE_ENTRY = 'database/config/database.json';
+    private const CONFIGURATION_ENTRIES = ['config/auth.json', 'config/installation.json', 'config/admin.json', 'config/authorization.json', 'config/api-keys.json'];
     public const MANIFEST_FILE = 'manifest.json';
     public const SIGNATURE_FILE = 'signature.json';
     private string $applicationRoot;
@@ -32,7 +38,7 @@ final class ApplicationBackupManager
             'config/admin.json' => RuntimeConfiguration::path(RuntimeConfiguration::ADMIN_FILE),
             'config/authorization.json' => RuntimeConfiguration::path(RuntimeConfiguration::AUTHORIZATION_FILE),
             'config/api-keys.json' => RuntimeConfiguration::path(RuntimeConfiguration::API_KEYS_FILE),
-            'database/config/database.json' => $this->applicationRoot . '/database/config/database.json',
+            self::REGISTRY_ENTRY => $this->applicationRoot . '/database/config/databases.json',
         ];
         $this->applicationVersion = $applicationVersion ?? $this->readApplicationVersion();
         $this->signingKey = $signingKey ?? new BackupSigningKey($this->applicationRoot);
@@ -57,7 +63,13 @@ final class ApplicationBackupManager
 
     public function hasCompleteSourceSet(): bool
     {
-        foreach ($this->sources as $path) if (!is_file($path)) return false;
+        foreach ($this->sources as $logical => $path) {
+            if ($logical === self::REGISTRY_ENTRY) {
+                if ($this->databaseRegistry()->source() === DatabaseRegistry::SOURCE_NONE) return false;
+            } elseif (!is_file($path)) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -134,6 +146,12 @@ final class ApplicationBackupManager
         $changes = [];
         foreach ($manifest['files'] as $file) {
             $logical = $file['path'];
+            if ($logical === self::LEGACY_DATABASE_ENTRY) {
+                // A V2 database configuration replaces the registry on restore.
+                $changed[] = self::REGISTRY_ENTRY;
+                $changes[] = ['path' => self::REGISTRY_ENTRY, 'type' => 'migrated'];
+                continue;
+            }
             $current = $this->loadAndValidateSource($logical, $this->sources[$logical], true);
             $same = hash_equals(hash('sha256', $this->encodeJson($current)), $file['sha256']);
             if ($same) {
@@ -189,21 +207,45 @@ final class ApplicationBackupManager
             $entries = SafeZipArchive::read($archivePath);
             $previous = [];
             $activated = [];
-            foreach ($this->sources as $logical => $path) $previous[$logical] = $this->loadJsonFile($path, 'Live configuration is unavailable.');
+            foreach ($this->sources as $logical => $path) {
+                // An installation not yet migrated has no registry file; its
+                // V2 database.json is kept in $previousLegacy instead.
+                $previous[$logical] = $logical === self::REGISTRY_ENTRY && !is_file($path)
+                    ? null : $this->loadJsonFile($path, 'Live configuration is unavailable.');
+            }
+            $legacyPath = $this->databaseRegistry()->legacyPath();
+            $previousLegacy = is_file($legacyPath) ? $this->loadJsonFile($legacyPath, 'Live configuration is unavailable.') : null;
             try {
                 foreach ($manifest['files'] as $file) {
                     $logical = $file['path'];
                     $value = $this->decodeJson($entries[$logical], "Backup JSON is invalid: {$logical}.");
                     $this->validateConfiguration($logical, $value, true);
+                    if ($logical === self::LEGACY_DATABASE_ENTRY) {
+                        $value = DatabaseRegistryMigrator::documentFromLegacyStored($value);
+                        $logical = self::REGISTRY_ENTRY;
+                    }
                     JsonFileStore::save($this->sources[$logical], $value);
                     $activated[] = $logical;
                 }
                 foreach ($this->sources as $logical => $path) $this->loadAndValidateSource($logical, $path, true);
                 if ($healthCheck !== null && $healthCheck() !== true) throw new RuntimeException('Post-restore health validation failed.');
+                // The restored registry supersedes a V2 database.json.
+                if ($previousLegacy !== null && is_file($legacyPath) && !@unlink($legacyPath)) {
+                    throw new RuntimeException('Legacy database configuration could not be retired.');
+                }
             } catch (Throwable $exception) {
                 $rollbackFailure = false;
                 foreach ($previous as $logical => $value) {
-                    try { JsonFileStore::save($this->sources[$logical], $value); } catch (Throwable $rollbackException) { $rollbackFailure = true; }
+                    try {
+                        if ($value === null) {
+                            if (is_file($this->sources[$logical]) && !@unlink($this->sources[$logical])) $rollbackFailure = true;
+                        } else {
+                            JsonFileStore::save($this->sources[$logical], $value);
+                        }
+                    } catch (Throwable $rollbackException) { $rollbackFailure = true; }
+                }
+                if ($previousLegacy !== null && !is_file($legacyPath)) {
+                    try { JsonFileStore::save($legacyPath, $previousLegacy); } catch (Throwable $rollbackException) { $rollbackFailure = true; }
                 }
                 if ($rollbackFailure) throw new RuntimeException('Restore activation failed and automatic recovery was incomplete.');
                 throw new RuntimeException('Restore activation failed; the previous configuration was recovered.');
@@ -215,10 +257,11 @@ final class ApplicationBackupManager
     private function verifyArchive(string $archivePath, bool $requireEncryptionKey): array
     {
         $entries = SafeZipArchive::read($archivePath);
-        $expected = [self::MANIFEST_FILE, self::SIGNATURE_FILE, ...array_keys($this->sources)];
-        if (array_keys($entries) !== $expected) throw new RuntimeException('Backup ZIP contains missing, unexpected, or out-of-order entries.');
+        if (!isset($entries[self::MANIFEST_FILE])) throw new RuntimeException('Backup ZIP contains missing, unexpected, or out-of-order entries.');
         $manifest = $this->decodeJson($entries[self::MANIFEST_FILE], 'Backup manifest is missing or invalid.');
         $this->validateManifest($manifest);
+        $expected = [self::MANIFEST_FILE, self::SIGNATURE_FILE, ...$this->entriesForFormat($manifest['formatVersion'])];
+        if (array_keys($entries) !== $expected) throw new RuntimeException('Backup ZIP contains missing, unexpected, or out-of-order entries.');
         $signature = $this->decodeJson($entries[self::SIGNATURE_FILE], 'Backup signature is missing or invalid.');
         if (array_keys($signature) !== ['version', 'algorithm', 'manifestSha256', 'signature']
             || ($signature['version'] ?? null) !== 1 || ($signature['algorithm'] ?? null) !== 'HMAC-SHA256'
@@ -241,6 +284,9 @@ final class ApplicationBackupManager
 
     private function loadAndValidateSource(string $logicalPath, string $sourcePath, bool $requireEncryptionKey): array
     {
+        if ($logicalPath === self::REGISTRY_ENTRY && !is_file($sourcePath)) {
+            return $this->registryFromLegacySource($requireEncryptionKey);
+        }
         try { $value = JsonFileStore::load($sourcePath); }
         catch (Throwable $exception) { throw new RuntimeException("Required backup source is missing or invalid: {$logicalPath}."); }
         $this->validateConfiguration($logicalPath, $value, $requireEncryptionKey);
@@ -256,14 +302,19 @@ final class ApplicationBackupManager
                 'config/admin.json' => (new AdminConfigurationRepository($this->sources[$logicalPath]))->validate($value),
                 'config/authorization.json' => (new AuthorizationRepository($this->sources[$logicalPath]))->validate($value),
                 'config/api-keys.json' => (new ApiKeyRepository($this->sources[$logicalPath]))->validate($value),
-                'database/config/database.json' => DatabaseConfigurationResolver::usesEncryption($value)
+                self::REGISTRY_ENTRY => DatabaseRegistry::validateDocument($value),
+                self::LEGACY_DATABASE_ENTRY => DatabaseConfigurationResolver::usesEncryption($value)
                     ? null : throw new RuntimeException('Plaintext database configuration is not recoverable.'),
                 default => throw new RuntimeException('Unsupported backup configuration.'),
             };
         } catch (Throwable $exception) {
             throw new RuntimeException("Backup configuration schema is invalid: {$logicalPath}.");
         }
-        if ($logicalPath === 'database/config/database.json' && $requireEncryptionKey) {
+        if ($logicalPath === self::REGISTRY_ENTRY && $requireEncryptionKey) {
+            try { DatabaseRegistry::verifyDocument($value); }
+            catch (Throwable $exception) { throw new RuntimeException('Encrypted database configuration cannot be recovered with the available key.'); }
+        }
+        if ($logicalPath === self::LEGACY_DATABASE_ENTRY && $requireEncryptionKey) {
             try { DatabaseConfigurationResolver::resolve($value); }
             catch (Throwable $exception) { throw new RuntimeException('Encrypted database configuration cannot be recovered with the available key.'); }
         }
@@ -275,11 +326,11 @@ final class ApplicationBackupManager
         $expectedKeys = $formatVersion === 2
             ? ['formatVersion', 'recoveryPointId', 'createdAt', 'application', 'scope', 'files', 'excluded']
             : ['formatVersion', 'recoveryPointId', 'createdAt', 'application', 'scope', 'trigger', 'createdBy', 'files', 'excluded'];
-        if (!in_array($formatVersion, [2, self::FORMAT_VERSION], true)
+        if (!in_array($formatVersion, [2, 3, self::FORMAT_VERSION], true)
             || count($manifest) !== count($expectedKeys)
             || array_diff(array_keys($manifest), $expectedKeys) !== []
             || array_diff($expectedKeys, array_keys($manifest)) !== []
-            || ($formatVersion === self::FORMAT_VERSION
+            || ($formatVersion !== 2
                 && (!in_array($manifest['trigger'] ?? null, ['manual', 'scheduled'], true)
                     || !in_array($manifest['createdBy'] ?? null, ['user', 'scheduler'], true)
                     || (($manifest['trigger'] ?? null) === 'manual' && ($manifest['createdBy'] ?? null) !== 'user')
@@ -294,20 +345,55 @@ final class ApplicationBackupManager
             || !is_array($manifest['excluded'] ?? null) || !array_is_list($manifest['excluded'])
             || $manifest['excluded'] !== ['encryption_key', 'backup_signing_key', 'sessions', 'runtime_process_state', 'database_availability_state', 'application_runtime_state', 'rate_limit_state', 'logs', 'exports', 'uploads', 'temporary_files', 'backup_files', 'sql_server_data']) throw new RuntimeException('Backup manifest is invalid or unsupported.');
         $paths = [];
+        $entries = $this->entriesForFormat($formatVersion);
         foreach ($manifest['files'] as $file) {
             if (!is_array($file) || count($file) !== 4
                 || array_diff(array_keys($file), ['path', 'size', 'sha256', 'schemaVersion']) !== []
-                || !is_string($file['path'] ?? null) || !array_key_exists($file['path'], $this->sources)
+                || !is_string($file['path'] ?? null) || !in_array($file['path'], $entries, true)
                 || !is_int($file['size'] ?? null) || $file['size'] < 3 || $file['size'] > SafeZipArchive::MAX_ENTRY_BYTES
                 || preg_match('/^[a-f0-9]{64}$/', $file['sha256'] ?? '') !== 1 || !is_int($file['schemaVersion'] ?? null)) throw new RuntimeException('Backup manifest file metadata is invalid.');
             $paths[] = $file['path'];
         }
-        if ($paths !== array_keys($this->sources)) throw new RuntimeException('Backup manifest file set is incomplete or out of order.');
+        if ($paths !== $entries) throw new RuntimeException('Backup manifest file set is incomplete or out of order.');
+    }
+
+    /** Configuration entries, in archive order, of a backup format version. */
+    private function entriesForFormat(int $formatVersion): array
+    {
+        return $formatVersion === self::FORMAT_VERSION
+            ? [...self::CONFIGURATION_ENTRIES, self::REGISTRY_ENTRY]
+            : [...self::CONFIGURATION_ENTRIES, self::LEGACY_DATABASE_ENTRY];
+    }
+
+    /** The V3 registry and, beside it, the V2 database.json it replaces. */
+    private function databaseRegistry(): DatabaseRegistry
+    {
+        return new DatabaseRegistry(
+            $this->sources[self::REGISTRY_ENTRY],
+            dirname($this->sources[self::REGISTRY_ENTRY]) . DIRECTORY_SEPARATOR . 'database.json'
+        );
+    }
+
+    /**
+     * Registry document for an installation that still has only a V2
+     * database.json. Backups have never accepted a plaintext database
+     * configuration, and converting one requires the encryption key.
+     */
+    private function registryFromLegacySource(bool $requireEncryptionKey): array
+    {
+        $legacyPath = $this->databaseRegistry()->legacyPath();
+        try { $legacy = JsonFileStore::load($legacyPath); }
+        catch (Throwable $exception) { throw new RuntimeException('Required backup source is missing or invalid: ' . self::REGISTRY_ENTRY . '.'); }
+        $this->validateConfiguration(self::LEGACY_DATABASE_ENTRY, $legacy, $requireEncryptionKey);
+        try { $value = DatabaseRegistryMigrator::documentFromLegacyStored($legacy); }
+        catch (Throwable $exception) { throw new RuntimeException('Encrypted database configuration cannot be recovered with the available key.'); }
+        $this->validateConfiguration(self::REGISTRY_ENTRY, $value, $requireEncryptionKey);
+        return $value;
     }
 
     private function validateSourceMap(): void
     {
-        $expected = ['config/auth.json', 'config/installation.json', 'config/admin.json', 'config/authorization.json', 'config/api-keys.json', 'database/config/database.json'];
+        $expected = [...self::CONFIGURATION_ENTRIES, self::REGISTRY_ENTRY];
         if (array_keys($this->sources) !== $expected) throw new InvalidArgumentException('Unsupported backup source map.');
         foreach ($this->sources as $source) if (!is_string($source) || trim($source) === '') throw new InvalidArgumentException('Invalid backup source path.');
     }

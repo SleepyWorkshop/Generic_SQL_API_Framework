@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
+require_once __DIR__ . '/../Database/DatabaseRegistry.php';
 require_once __DIR__ . '/../Security/DatabaseCredentialEncryption.php';
 require_once __DIR__ . '/../Security/ApiKeyAuthenticator.php';
 require_once __DIR__ . '/ApiKeyService.php';
@@ -25,6 +26,7 @@ final class AdminService
 {
     private AdminConfigurationRepository $configuration;
     private string $databasePath;
+    private DatabaseRegistry $databaseRegistry;
     private bool $runtimeDatabasePath;
     private $connectionTester;
     private ApiProcessManager $processManager;
@@ -55,6 +57,9 @@ final class AdminService
         $this->runtimeDatabasePath = $databasePath === null;
         $this->databasePath = $databasePath
             ?? dirname(__DIR__, 2) . '/database/config/database.json';
+        // The single-database Admin actions manage the registry's default
+        // database; the registry lives beside the V2 database.json path.
+        $this->databaseRegistry = DatabaseRegistry::forLegacyPath($this->databasePath);
         $this->connectionTester = $connectionTester ?? function (array $database): void {
             $driver = new SqlServerDriver($database);
             try {
@@ -67,11 +72,12 @@ final class AdminService
         $this->runtimeDetector = $runtimeDetector ?? new RuntimeDetector();
         $this->parserProcessManager = $parserProcessManager ?? new SqlParserProcessManager($this->configuration);
         $this->databaseAuthentication = $databaseAuthentication ?? new DatabaseAuthenticationSupport();
-        $this->databaseAvailability = $databaseAvailability ?? new DatabaseAvailabilityManager();
+        $this->databaseAvailability = $databaseAvailability ?? new DatabaseAvailabilityManager(null, $this->databaseRegistry);
         $this->applicationRuntime = $applicationRuntime ?? new ApplicationRuntimeManager();
         $this->logger = $logger ?? new Logger();
         $this->healthMonitor = $healthMonitor ?? new ApplicationHealthMonitor([
             'databasePath' => $this->databasePath,
+            'registry' => $this->databaseRegistry,
             'databaseAvailable' => fn (): bool => $this->databaseAvailability->available(),
             'databaseTester' => $this->connectionTester,
         ]);
@@ -201,7 +207,7 @@ final class AdminService
 
     public function databaseConfiguration(): array
     {
-        if (!is_file($this->databasePath)) {
+        if ($this->databaseRegistry->source() === DatabaseRegistry::SOURCE_NONE) {
             return [
                 'configured' => false,
                 'encrypted' => false,
@@ -220,8 +226,7 @@ final class AdminService
             ];
         }
         try {
-            $stored = DatabaseConfigurationResolver::readStored($this->databasePath);
-            $database = DatabaseConfigurationResolver::resolve($stored);
+            $database = $this->databaseRegistry->connectionConfiguration();
         } catch (Throwable $exception) {
             $this->logger->audit('database.connection_test', 'failure', 'WARNING', [
                 'reason' => 'connection_failed', 'component' => 'database',
@@ -235,7 +240,7 @@ final class AdminService
         }
         return [
             'configured' => true,
-            'encrypted' => DatabaseConfigurationResolver::usesEncryption($stored),
+            'encrypted' => $this->databaseRegistry->usesEncryption(),
             'provider' => $database['provider'],
             'driver' => $database['driver'] ?? 'auto',
             'server' => $database['server'] ?? '',
@@ -281,7 +286,7 @@ final class AdminService
     {
         (new OperationalLogger())->info('database', 'Database connection test started');
         try {
-            $database = DatabaseConfigurationResolver::load($this->databasePath);
+            $database = $this->databaseRegistry->connectionConfiguration();
         } catch (Throwable $exception) {
             throw $this->databaseConfigurationFailure();
         }
@@ -317,11 +322,9 @@ final class AdminService
             );
         }
         try {
-            $encrypted = (new DatabaseCredentialEncryption())->encryptConfiguration($resolved);
-            if (DatabaseConfigurationResolver::resolve($encrypted) !== $resolved) {
-                throw new RuntimeException('Encrypted database configuration verification failed.');
-            }
-            JsonFileStore::save($this->databasePath, $encrypted);
+            // Encrypts, verifies, and saves; a V2 database.json is migrated
+            // into the registry by this first write.
+            $this->databaseRegistry->saveDefaultConnection($resolved);
         } catch (DatabaseCredentialException $exception) {
             $this->logger->audit('configuration.database', 'failure', 'ERROR', [
                 'configurationCategory' => 'database', 'reason' => 'encryption_unavailable', 'component' => 'admin',
@@ -680,16 +683,15 @@ final class AdminService
 
     private function databaseStatus(): array
     {
-        if (!is_file($this->databasePath)) {
+        if ($this->databaseRegistry->source() === DatabaseRegistry::SOURCE_NONE) {
             return ['configured' => false, 'encrypted' => false, 'readable' => false];
         }
         try {
-            $stored = DatabaseConfigurationResolver::readStored($this->databasePath);
-            $resolved = DatabaseConfigurationResolver::resolve($stored);
+            $resolved = $this->databaseRegistry->connectionConfiguration();
             $this->databaseAuthentication->validate((string)($resolved['authentication'] ?? ''));
             return [
                 'configured' => true,
-                'encrypted' => DatabaseConfigurationResolver::usesEncryption($stored),
+                'encrypted' => $this->databaseRegistry->usesEncryption(),
                 'readable' => true,
                 'server' => (string)($resolved['server'] ?? ''),
                 'port' => isset($resolved['port']) && $resolved['port'] !== '' ? (string)$resolved['port'] : null,
@@ -711,7 +713,7 @@ final class AdminService
             return [...$status, 'connected' => false, 'healthy' => false, 'status' => 'not configured'];
         }
         try {
-            ($this->connectionTester)(DatabaseConfigurationResolver::load($this->databasePath));
+            ($this->connectionTester)($this->databaseRegistry->connectionConfiguration());
             return [...$status, 'connected' => true, 'healthy' => true, 'status' => 'connected'];
         } catch (Throwable $exception) {
             return [...$status, 'connected' => false, 'healthy' => false, 'status' => 'connection failed'];
@@ -742,16 +744,8 @@ final class AdminService
 
     private function databaseConfigurationReason(): string
     {
-        if (!is_file($this->databasePath)) return 'configuration_missing';
-        try {
-            $stored = DatabaseConfigurationResolver::readStored($this->databasePath);
-        } catch (Throwable $exception) {
-            return 'configuration_invalid';
-        }
-        $encrypted = DatabaseConfigurationResolver::usesEncryption($stored)
-            || DatabaseCredentialResolver::usesEncryption($stored['password'] ?? null);
-        return $encrypted && !DatabaseConfigurationResolver::encryptionKeyIsAvailable()
-            ? 'encryption_key_missing' : 'configuration_invalid';
+        $state = $this->databaseRegistry->configurationState();
+        return $state === 'configured' ? 'configuration_invalid' : $state;
     }
 
     private function databaseFailureReason(Throwable $exception): string
@@ -769,9 +763,9 @@ final class AdminService
             return $database;
         }
         $database['password'] = '';
-        if (!is_file($this->databasePath)) return $database;
+        if ($this->databaseRegistry->source() === DatabaseRegistry::SOURCE_NONE) return $database;
         try {
-            $existing = DatabaseConfigurationResolver::load($this->databasePath);
+            $existing = $this->databaseRegistry->connectionConfiguration();
             $database['password'] = (string)($existing['password'] ?? '');
         } catch (Throwable $exception) {
             // Saving a replacement password remains possible when an old
@@ -782,13 +776,7 @@ final class AdminService
 
     private function storedDatabaseIsEncrypted(): bool
     {
-        try {
-            return DatabaseConfigurationResolver::usesEncryption(
-                DatabaseConfigurationResolver::readStored($this->databasePath)
-            );
-        } catch (Throwable $exception) {
-            return false;
-        }
+        return $this->databaseRegistry->usesEncryption();
     }
 
     private function validateDatabaseAuthentication(array $database): void

@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../app/Backup/ApplicationBackupManager.php';
 require_once __DIR__ . '/../app/Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../app/Security/DatabaseCredentialEncryption.php';
+require_once __DIR__ . '/../app/Database/DatabaseRegistry.php';
 require_once __DIR__ . '/../app/Authorization/RoleModel.php';
 require_once __DIR__ . '/../app/Backup/BackupRecoveryService.php';
 require_once __DIR__ . '/../app/Repositories/AuthRepository.php';
@@ -45,12 +46,32 @@ function backupCanonicalJson(array $value): string
     };
     return json_encode($sort($value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 }
-function backupCreateLegacyV2(string $source, string $target, string $encodedSigningKey): void
+/**
+ * Rebuild a current (format 4) archive as a V2-era recovery point: format 2 or
+ * 3, with the V2 database/config/database.json in place of the registry.
+ */
+function backupCreateLegacyArchive(string $source, string $target, string $encodedSigningKey, string $legacyDatabase, int $formatVersion = 2): void
 {
-    $entries = SafeZipArchive::read($source);
-    $manifest = json_decode($entries['manifest.json'], true, 512, JSON_THROW_ON_ERROR);
-    $manifest['formatVersion'] = 2;
-    unset($manifest['trigger'], $manifest['createdBy']);
+    $current = SafeZipArchive::read($source);
+    $manifest = json_decode($current['manifest.json'], true, 512, JSON_THROW_ON_ERROR);
+    $manifest['formatVersion'] = $formatVersion;
+    if ($formatVersion === 2) unset($manifest['trigger'], $manifest['createdBy']);
+    $legacyValue = json_decode($legacyDatabase, true, 512, JSON_THROW_ON_ERROR);
+    foreach ($manifest['files'] as $index => $file) {
+        if ($file['path'] === 'database/config/databases.json') {
+            $manifest['files'][$index] = ['path' => 'database/config/database.json', 'size' => strlen($legacyDatabase),
+                'sha256' => hash('sha256', $legacyDatabase), 'schemaVersion' => $legacyValue['version'] ?? null];
+        }
+    }
+    $entries = ['manifest.json' => '', 'signature.json' => ''];
+    foreach ($current as $path => $contents) {
+        if (in_array($path, ['manifest.json', 'signature.json'], true)) continue;
+        if ($path === 'database/config/databases.json') {
+            $entries['database/config/database.json'] = $legacyDatabase;
+        } else {
+            $entries[$path] = $contents;
+        }
+    }
     $manifestContents = backupCanonicalJson($manifest) . PHP_EOL;
     $key = base64_decode(trim($encodedSigningKey), true);
     backupAssert(is_string($key) && strlen($key) === 32, 'Legacy fixture signing key is invalid.');
@@ -106,18 +127,24 @@ try {
         'database' => 'BackupTest', 'authentication' => 'sql', 'username' => 'backup_user', 'password' => 'fake-database-password',
         'options' => ['encrypt' => true, 'trustServerCertificate' => false]];
     backupWriteFixture($databasePath, (new DatabaseCredentialEncryption())->encryptConfiguration($database));
+    $legacyDatabaseContents = (string)file_get_contents($databasePath);
+    // The V2 file is migrated into the V3 registry, which backups then contain.
+    $registryPath = dirname($databasePath) . '/databases.json';
+    $migration = (new DatabaseRegistry($registryPath, $databasePath))->migrateLegacy();
+    backupAssert($migration['migrated'] && $migration['legacyRetired'] && is_file($registryPath) && !is_file($databasePath),
+        'The V2 database configuration was not migrated into the registry.');
     mkdir($applicationRoot . '/sessions', 0700, true);
     file_put_contents($applicationRoot . '/sessions/sess_fake', 'authenticated-session-data');
 
     $sources = [
         'config/auth.json' => $runtimePath . '/auth.json', 'config/installation.json' => $runtimePath . '/installation.json',
         'config/admin.json' => $runtimePath . '/admin.json', 'config/authorization.json' => $runtimePath . '/authorization.json',
-        'config/api-keys.json' => $runtimePath . '/api-keys.json', 'database/config/database.json' => $databasePath,
+        'config/api-keys.json' => $runtimePath . '/api-keys.json', 'database/config/databases.json' => $registryPath,
     ];
     $manager = new ApplicationBackupManager($applicationRoot, $sources, 'test-version');
     $bundlePath = $backupParent . '/backup-one.zip';
     $manifest = $manager->create($bundlePath);
-    backupAssert($manifest['formatVersion'] === 3 && count($manifest['files']) === 6, 'ZIP backup manifest is incomplete.');
+    backupAssert($manifest['formatVersion'] === 4 && count($manifest['files']) === 6, 'ZIP backup manifest is incomplete.');
     backupAssert($manifest['trigger'] === 'manual' && $manifest['createdBy'] === 'user', 'Manual backup metadata is incorrect.');
     backupAssert(preg_match('/^backup-|\.zip$/', basename($bundlePath)) === 1, 'ZIP filename is invalid.');
     $entries = SafeZipArchive::read($bundlePath);
@@ -131,8 +158,11 @@ try {
     foreach ([$key, 'fake-user-password', 'fake-api-secret', 'fake-database-password', $passwordHash, $apiSecretHash] as $secret) {
         backupAssert(!str_contains($entries['manifest.json'] . $entries['signature.json'], $secret), 'ZIP metadata exposed secret material.');
     }
-    backupAssert(str_contains($entries['database/config/database.json'], '"encrypted": true'), 'Database configuration is not encrypted.');
-    foreach (['fake-database-password', 'backup-db.internal', 'backup_user'] as $secret) backupAssert(!str_contains($entries['database/config/database.json'], $secret), 'Database backup exposed plaintext.');
+    $backedUpRegistry = json_decode($entries['database/config/databases.json'], true, 512, JSON_THROW_ON_ERROR);
+    backupAssert(DatabaseCredentialEncryption::isBoundEnvelope($backedUpRegistry['servers']['default']['connection'] ?? null)
+        && DatabaseCredentialEncryption::isBoundEnvelope($backedUpRegistry['databases']['default']['catalog'] ?? null),
+        'Database configuration is not encrypted.');
+    foreach (['fake-database-password', 'backup-db.internal', 'backup_user', 'BackupTest'] as $secret) backupAssert(!str_contains($entries['database/config/databases.json'], $secret), 'Database backup exposed plaintext.');
     backupAssert(!isset($entries['sessions/sess_fake'], $entries['runtime/secrets/database-encryption.key'], $entries['config/database-state.json'], $entries['config/application-runtime-state.json']), 'Excluded state entered the ZIP.');
     backupAssert(in_array('backup_signing_key', $manifest['excluded'], true) && in_array('sql_server_data', $manifest['excluded'], true), 'Manifest exclusions are incomplete.');
     if (PHP_OS_FAMILY !== 'Windows') backupAssert((fileperms($bundlePath) & 0777) === 0600, 'ZIP permissions are not owner-only.');
@@ -147,7 +177,7 @@ try {
     putenv(BackupSigningKey::ENVIRONMENT_VARIABLE);
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE);
     backupFailure(fn () => $manager->verify($bundlePath, true), 'Backup verified without its encryption key.');
-    backupAssert($manager->verify($bundlePath, false)['formatVersion'] === 3, 'Integrity/authenticity verification incorrectly required the encryption key.');
+    backupAssert($manager->verify($bundlePath, false)['formatVersion'] === 4, 'Integrity/authenticity verification incorrectly required the encryption key.');
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . $wrongKey);
     backupFailure(fn () => $manager->verify($bundlePath, true), 'Backup verified with the wrong encryption key.');
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . $key);
@@ -215,7 +245,7 @@ try {
     backupAssert(str_ends_with($created['filename'], '.zip') && $created['verification'] === 'valid' && $created['authenticity'] === 'valid', 'Admin backup orchestration did not create a verified recovery point.');
     backupAssert($created['trigger'] === 'manual' && $created['createdBy'] === 'user' && $created['type'] === 'manual', 'Manual recovery-point metadata is incorrect.');
     $legacyPath = $managedDirectory . '/backup-' . $manifest['recoveryPointId'] . '.zip';
-    backupCreateLegacyV2($bundlePath, $legacyPath, $signingContents);
+    backupCreateLegacyArchive($bundlePath, $legacyPath, $signingContents, $legacyDatabaseContents);
     $history = $service->history();
     backupAssert(count($history) === 2, 'Recovery-point history is incomplete.');
     $legacy = array_values(array_filter($history, static fn (array $point): bool => $point['type'] === 'legacy'));
@@ -375,10 +405,58 @@ try {
     backupWriteFixture($runtimePath . '/auth.json', $invalidAuth);
     backupFailure(fn () => $manager->create($backupParent . '/invalid-schema.zip'), 'Invalid configuration schema was backed up.');
     backupWriteFixture($runtimePath . '/auth.json', $validAuth);
-    $encryptedDatabase = JsonFileStore::load($databasePath);
+
+    // V2-era recovery points and installations that have not been migrated yet.
+    $liveRegistry = JsonFileStore::load($registryPath);
+    $legacyArchive = $backupParent . '/legacy-format-3.zip';
+    backupCreateLegacyArchive($bundlePath, $legacyArchive, $signingContents, $legacyDatabaseContents, 3);
+    backupAssert($manager->verify($legacyArchive)['formatVersion'] === 3, 'A format 3 recovery point no longer verifies.');
+    $legacyPreview = $manager->preview($legacyArchive);
+    backupAssert(in_array(['path' => 'database/config/databases.json', 'type' => 'migrated'], $legacyPreview['changes'], true)
+        && in_array('database/config/database.json', $legacyPreview['files'], true), 'Legacy restore preview did not report the registry migration.');
+    $legacyStaging = $backupParent . '/legacy-stage';
+    backupAssert($manager->stageRestore($legacyArchive, $legacyStaging)['files'] === 6, 'A format 3 recovery point could not be staged.');
+
+    // Backing up an installation that still has only database.json converts
+    // it in the archive without migrating the live installation.
+    unlink($registryPath);
+    backupWriteFixture($databasePath, json_decode($legacyDatabaseContents, true, 512, JSON_THROW_ON_ERROR));
+    $readThroughBundle = $backupParent . '/read-through.zip';
+    backupAssert($manager->create($readThroughBundle)['formatVersion'] === 4, 'An unmigrated installation could not be backed up.');
+    $readThroughEntries = SafeZipArchive::read($readThroughBundle);
+    DatabaseRegistry::verifyDocument(json_decode($readThroughEntries['database/config/databases.json'], true, 512, JSON_THROW_ON_ERROR));
+    foreach (['fake-database-password', 'backup-db.internal', 'backup_user', 'BackupTest'] as $secret) {
+        backupAssert(!str_contains($readThroughEntries['database/config/databases.json'], $secret), 'Converted database backup exposed plaintext.');
+    }
+    backupAssert(!is_file($registryPath) && (string)file_get_contents($databasePath) === $legacyDatabaseContents,
+        'Creating a backup changed the live database configuration.');
+
+    // A failed restore of a V2 recovery point leaves the V2 installation intact.
+    backupFailure(fn () => $manager->activateRestore($legacyArchive, static fn (): bool => false), 'A failed legacy restore was reported as success.');
+    backupAssert(!is_file($registryPath) && (string)file_get_contents($databasePath) === $legacyDatabaseContents,
+        'A failed legacy restore did not roll back to the V2 configuration.');
+    // A successful one writes the registry and retires database.json.
+    backupAssert($manager->activateRestore($legacyArchive, static fn (): bool => true)['restored'] === true, 'A format 3 recovery point could not be restored.');
+    $restoredRegistry = new DatabaseRegistry($registryPath, $databasePath);
+    backupAssert(is_file($registryPath) && !is_file($databasePath) && $restoredRegistry->connectionConfiguration() == $database,
+        'A format 3 restore did not migrate the database configuration into the registry.');
+    // A format 4 restore over an unmigrated installation also retires database.json.
+    unlink($registryPath);
+    backupWriteFixture($databasePath, json_decode($legacyDatabaseContents, true, 512, JSON_THROW_ON_ERROR));
+    backupAssert($manager->activateRestore($bundlePath, static fn (): bool => true)['restored'] === true && is_file($registryPath) && !is_file($databasePath),
+        'A format 4 restore did not replace the V2 database configuration.');
+
+    // Plaintext V2 credentials are never backed up.
+    unlink($registryPath);
     backupWriteFixture($databasePath, $database);
     backupFailure(fn () => $manager->create($backupParent . '/plaintext-database.zip'), 'Plaintext database credentials were backed up.');
-    backupWriteFixture($databasePath, $encryptedDatabase);
+    unlink($databasePath);
+    // An envelope moved to another registry entry does not decrypt.
+    $swapped = $liveRegistry;
+    $swapped['databases']['default']['catalog'] = $liveRegistry['servers']['default']['connection'];
+    backupWriteFixture($registryPath, $swapped);
+    backupFailure(fn () => $manager->create($backupParent . '/swapped-envelope.zip'), 'A registry with a moved envelope was backed up.');
+    backupWriteFixture($registryPath, $liveRegistry);
 
     $brokenSources = $sources; $brokenSources['config/auth.json'] = $applicationRoot . '/missing-auth.json';
     $brokenManager = new ApplicationBackupManager($applicationRoot, $brokenSources, 'test-version');

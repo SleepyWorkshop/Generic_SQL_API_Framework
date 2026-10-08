@@ -1,11 +1,14 @@
 <?php
 
 require_once __DIR__ . '/../app/Security/DatabaseCredentialEncryption.php';
-require_once __DIR__ . '/../app/Security/DatabaseConfigurationResolver.php';
+require_once __DIR__ . '/../app/Database/DatabaseRegistry.php';
 
 $root = dirname(__DIR__);
 $keyPath = $root . '/runtime/secrets/database-encryption.key';
-$databasePath = $root . '/database/config/database.json';
+$databaseRegistry = new DatabaseRegistry(
+    $root . '/database/config/databases.json',
+    $root . '/database/config/database.json'
+);
 $environmentKey = getenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE);
 
 function validatedKey(string $encodedKey): string
@@ -42,11 +45,9 @@ try {
             echo validatedKey($storedKey);
             exit(0);
         }
-        if (is_file($databasePath)) {
-            $storedDatabase = DatabaseConfigurationResolver::readStored($databasePath);
-            if (DatabaseConfigurationResolver::usesEncryption($storedDatabase)) {
-                throw new RuntimeException('The database configuration is encrypted, but its encryption key is unavailable.');
-            }
+        // A new key cannot open the V3 registry or an encrypted V2 database.json.
+        if ($databaseRegistry->requiresEncryptionKey()) {
+            throw new RuntimeException('The database configuration is encrypted, but its encryption key is unavailable.');
         }
 
         $encodedKey = base64_encode(random_bytes(32));

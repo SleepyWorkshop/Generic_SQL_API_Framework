@@ -99,7 +99,9 @@ try {
         'config/admin.json' => RuntimeConfiguration::path(RuntimeConfiguration::ADMIN_FILE),
         'config/authorization.json' => RuntimeConfiguration::path(RuntimeConfiguration::AUTHORIZATION_FILE),
         'config/api-keys.json' => RuntimeConfiguration::path(RuntimeConfiguration::API_KEYS_FILE),
-        'database/config/database.json' => $databasePath,
+        // The registry beside the V2 file; the fixture keeps the V2 file, so
+        // backups convert it (read-through migration).
+        'database/config/databases.json' => dirname($databasePath) . '/databases.json',
     ], 'test', null, $runtimeDirectory . '/.backup-recovery.lock');
     $schedule = BackupSchedule::defaults();
     $logger = new Logger($logs);

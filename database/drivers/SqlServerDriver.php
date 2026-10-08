@@ -2,7 +2,7 @@
 
 require_once __DIR__ . "/DatabaseDriverInterface.php";
 require_once __DIR__ . "/../../app/Security/DatabaseCredentialResolver.php";
-require_once __DIR__ . "/../../app/Security/DatabaseConfigurationResolver.php";
+require_once __DIR__ . "/../../app/Database/DatabaseRegistry.php";
 require_once __DIR__ . "/../../app/Runtime/DatabaseAuthenticationSupport.php";
 require_once __DIR__ . "/../../app/Security/DatabaseTransportSecurity.php";
 require_once __DIR__ . "/../../app/Security/SecurityConfiguration.php";
@@ -228,11 +228,8 @@ class SqlServerDriver implements DatabaseDriverInterface
      */
     public function connect()
     {
-        $configPath =
-            __DIR__ . '/../config/database.json';
-
         $config = $this->configuration
-            ?? DatabaseConfigurationResolver::load($configPath);
+            ?? (new DatabaseRegistry())->connectionConfiguration();
 
         /*
          * Database configuration.
