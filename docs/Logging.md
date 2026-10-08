@@ -21,6 +21,7 @@ logs/audit/YYYY-MM-DD.jsonl    security audit (JSON Lines)
 |---|---|
 | `GENERIC_OPERATIONAL_LOG_DIR` | Base directory for the operational `.txt` logs |
 | `GENERIC_LOG_DIR` | Base directory for the audit log |
+| `GENERIC_SECURITY_STORAGE_DIR` | Base directory for security state such as rate-limit counters (default `storage/security`) |
 
 Production log directories must be outside every document root.
 

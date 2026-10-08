@@ -135,7 +135,8 @@ final class ResRecordingEngine extends QueryEngine
     public function dataSql(): array
     {
         return array_values(array_filter(array_column($this->statements, 'sql'),
-            fn (string $sql): bool => !str_contains($sql, 'INFORMATION_SCHEMA') && !str_contains($sql, 'compatibility_level')));
+            fn (string $sql): bool => !str_contains($sql, 'INFORMATION_SCHEMA') && !str_contains($sql, 'compatibility_level')
+                && !str_contains($sql, 'EngineEdition')));
     }
 }
 

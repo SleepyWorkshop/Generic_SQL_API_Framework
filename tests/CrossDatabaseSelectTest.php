@@ -57,6 +57,7 @@ function crossRows(string $sql): array
 {
     return match (true) {
         str_contains($sql, 'compatibility_level') => [['CompatibilityLevel' => 150]],
+        str_contains($sql, 'EngineEdition') => [['EngineEdition' => $GLOBALS['crossEngineEdition'] ?? 3]],
         str_contains($sql, 'COUNT(*) AS TotalRows') => [['TotalRows' => 4]],
         str_contains($sql, 'COUNT(*) AS Total') => [['Total' => 1]],
         str_contains($sql, 'COLUMN_NAME, DATA_TYPE') => [['COLUMN_NAME' => 'Id'], ['COLUMN_NAME' => 'Name']],
@@ -125,7 +126,8 @@ final class CrossRecordingEngine extends QueryEngine
     public function dataSql(): array
     {
         return array_values(array_map(fn (array $statement): string => $statement['sql'], array_filter($this->statements,
-            fn (array $statement): bool => !str_contains($statement['sql'], 'INFORMATION_SCHEMA') && !str_contains($statement['sql'], 'compatibility_level'))));
+            fn (array $statement): bool => !str_contains($statement['sql'], 'INFORMATION_SCHEMA') && !str_contains($statement['sql'], 'compatibility_level')
+                && !str_contains($statement['sql'], 'EngineEdition'))));
     }
 }
 
@@ -386,6 +388,28 @@ try {
         && count(CrossSqlServerDriver::$attempts) === 1 && $unionResult['data'] === [['Id' => 1, 'Name' => 'Row']],
         'A cross-database set operation was split, merged in PHP, or run on another connection.');
     $engine->close();
+
+    // Engines without same-instance cross-database names (Azure SQL Database: 5,
+    // Synapse dedicated pool: 6) refuse a multi-database plan before any data
+    // statement; a single-database request is not checked at all.
+    foreach ([5, 6] as $edition) {
+        $GLOBALS['crossEngineEdition'] = $edition;
+        $validator->validate($customerProduct);
+        DatabaseQueryPlanContext::set($planner->plan($customerProduct));
+        $failure = crossFailure(fn () => new CrossRecordingEngine(null, $logger, 0, true,
+            new DatabaseConnectionManager(static fn (array $c): Database => new CrossDatabase($c))), "EngineEdition {$edition} accepted a cross-database plan.");
+        DatabaseQueryPlanContext::clear();
+        [$status, $code, , $payload] = crossResponse($failure);
+        crossAssert($status === 422 && $code === 'CROSS_DATABASE_QUERY_NOT_SUPPORTED' && !str_contains($payload, 'CompanyDB'), "EngineEdition {$edition} was not refused.");
+    }
+    $GLOBALS['crossEngineEdition'] = 5;
+    $single = $select(['table' => 'Customer'], ['database' => 'inventory']);
+    $validator->validate($single);
+    DatabaseQueryPlanContext::set($planner->plan($single));
+    $singleEngine = new CrossRecordingEngine(null, $logger, 0, true, new DatabaseConnectionManager(static fn (array $c): Database => new CrossDatabase($c)));
+    DatabaseQueryPlanContext::clear();
+    crossAssert($singleEngine->statements === [], 'A single-database request checked the engine edition.');
+    unset($GLOBALS['crossEngineEdition']);
 
     // Collation conflicts are reported as COLLATION_CONFLICT, without driver text.
     $engine = new CrossRecordingEngine(null, $logger, 0, false);

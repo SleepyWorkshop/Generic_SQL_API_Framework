@@ -33,6 +33,7 @@ $tests = [
     __DIR__ . '/DatabaseResourceRoutineTest.php',
     __DIR__ . '/DatabaseWriteTest.php',
     __DIR__ . '/AdminDatabaseManagementTest.php',
+    __DIR__ . '/SecurityIsolationRegressionTest.php',
     __DIR__ . '/DatabaseAvailabilityLifecycleTest.php',
     __DIR__ . '/RuntimeConfigurationBootstrapTest.php',
     __DIR__ . '/AuthenticationFoundationTest.php',
@@ -63,6 +64,23 @@ $tests = [
     __DIR__ . '/RepositoryDocumentationTest.php'
 ];
 
+// Tests never write the deployment's logs or security state: unless the caller
+// chose locations, each run gets temporary ones, inherited by every test and
+// by the PHP servers tests start, and removed afterwards.
+$isolatedRoot = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'generic-test-run-' . bin2hex(random_bytes(6));
+foreach (['GENERIC_LOG_DIR' => 'logs', 'GENERIC_OPERATIONAL_LOG_DIR' => 'operational', 'GENERIC_SECURITY_STORAGE_DIR' => 'security'] as $name => $path) {
+    $configured = getenv($name);
+    if (is_string($configured) && trim($configured) !== '') continue;
+    @mkdir($isolatedRoot . DIRECTORY_SEPARATOR . $path, 0700, true);
+    putenv($name . '=' . $isolatedRoot . DIRECTORY_SEPARATOR . $path);
+}
+$removeIsolatedRoot = static function () use ($isolatedRoot): void {
+    if (!is_dir($isolatedRoot)) return;
+    $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($isolatedRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+    foreach ($items as $item) $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+    @rmdir($isolatedRoot);
+};
+
 foreach ($tests as $test) {
     echo 'Running ' . basename($test) . PHP_EOL;
     $command = escapeshellarg(PHP_BINARY)
@@ -71,8 +89,10 @@ foreach ($tests as $test) {
     passthru($command, $status);
     if ($status !== 0) {
         fwrite(STDERR, basename($test) . " failed.\n");
+        $removeIsolatedRoot();
         exit($status);
     }
 }
+$removeIsolatedRoot();
 
 echo "All database-independent backend tests passed.\n";

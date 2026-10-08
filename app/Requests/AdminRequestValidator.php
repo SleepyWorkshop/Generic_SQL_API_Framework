@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../Runtime/DatabaseAuthenticationSupport.php';
 require_once __DIR__ . '/../Database/DatabaseServerProfile.php';
 require_once __DIR__ . '/../Database/DatabaseRegistry.php';
+require_once __DIR__ . '/../Database/MssqlIdentifier.php';
 require_once __DIR__ . '/../Configuration/RuntimeControls.php';
 require_once __DIR__ . '/../Backup/BackupSchedule.php';
 
@@ -234,6 +235,7 @@ final class AdminRequestValidator
             $errors[] = ['path' => 'database.server', 'message' => 'Server must be a server profile id.'];
         }
         $catalog = $this->connectionStringValue($value['catalog'] ?? null, 'catalog', true, $errors);
+        $this->assertCatalogIdentifier($catalog, 'database.catalog', $errors);
         if ($errors !== []) $this->invalid($errors);
         return $database + ['server' => $value['server'], 'catalog' => $catalog];
     }
@@ -255,6 +257,14 @@ final class AdminRequestValidator
         }
         if ($errors !== []) $this->invalid($errors);
         return ['id' => $id, 'name' => $name, 'enabled' => $value['enabled']];
+    }
+
+    /** A catalog is later rendered as a delimited identifier, so it must be one SQL Server can take. */
+    private function assertCatalogIdentifier(string $catalog, string $path, array &$errors): void
+    {
+        if ($catalog !== '' && !MssqlIdentifier::isValid(MssqlIdentifier::DATABASE, $catalog)) {
+            $errors[] = ['path' => $path, 'message' => 'The database name cannot contain control characters, ";", or comment markers.'];
+        }
     }
 
     private function registryId($value, string $path): string
@@ -285,6 +295,7 @@ final class AdminRequestValidator
         }
         $server = $this->connectionStringValue($value['server'] ?? null, 'server', true, $errors, $prefix);
         $database = $withCatalog ? $this->connectionStringValue($value['database'] ?? null, 'database', true, $errors) : '';
+        if ($withCatalog) $this->assertCatalogIdentifier($database, 'database.database', $errors);
         $username = $this->connectionStringValue($value['username'] ?? '', 'username', false, $errors, $prefix);
         $authentication = strtolower(trim((string)($value['authentication'] ?? '')));
         try {

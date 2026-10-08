@@ -95,6 +95,7 @@ message text.
 | `SERVER_PROFILE_DISABLED` | 403 | A requested database's server profile is disabled | Operator action |
 | `SERVER_PROFILE_NOT_FOUND` | 503 | A database references a missing server profile | Operator action |
 | `CROSS_SERVER_QUERY_NOT_SUPPORTED` | 400 | A request names databases on different server profiles | Query one server profile per request |
+| `CROSS_DATABASE_QUERY_NOT_SUPPORTED` | 422 | The SQL Server edition (Azure SQL Database, Synapse dedicated pool) cannot query across databases | Query one database per request |
 | `COLLATION_CONFLICT` | 422 | SQL Server could not compare values with incompatible collations, typically across databases | Compare columns with compatible collations |
 | `DATABASE_UNAVAILABLE` | 503 | Database access is disabled or the database is unreachable | Retry later |
 | `DATABASE_CONNECTION_TIMEOUT` | 504 | SQL Server did not complete the login within the configured login timeout | Retry later; operator checks reachability |

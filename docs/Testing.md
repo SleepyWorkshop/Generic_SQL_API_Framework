@@ -14,8 +14,16 @@ php -n tests/run.php
 ```
 
 Both must pass: `-n` runs without any `php.ini`, which catches tests that depend
-on host settings. `tests/run.php` runs the 51 registered suites in order and
+on host settings. `tests/run.php` runs the 61 registered suites in order and
 stops at the first failure.
+
+Tests never write the deployment's state. Unless the caller sets them,
+`tests/run.php` points `GENERIC_LOG_DIR`, `GENERIC_OPERATIONAL_LOG_DIR`, and
+`GENERIC_SECURITY_STORAGE_DIR` at a temporary directory that every suite and
+every server it starts inherits, and removes it afterwards; suites that need
+runtime configuration, a health cache, or process state create their own
+temporary copies. `config/`, `database/config/`, `runtime/`, `logs/`, and
+`storage/` are unchanged by a run.
 
 Requirements: PHP 8.2 or newer with JSON, OpenSSL, and session support. The
 suite needs no SQL Server, ODBC extension, credentials, `database.json`, or

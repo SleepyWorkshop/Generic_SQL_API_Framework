@@ -1,5 +1,6 @@
 <?php
 
+require_once __DIR__ . '/SecurityStorage.php';
 require_once __DIR__ . '/../../config/constants.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../Requests/ApiRequestException.php';
@@ -17,7 +18,7 @@ final class LoginRateLimiter
     public function __construct(?string $directory = null, ?array $options = null, ?callable $clock = null)
     {
         $options ??= SecurityConfiguration::loginRateLimitOptions();
-        $this->directory = $directory ?? ROOT_PATH . '/storage/security/login-rate-limit';
+        $this->directory = $directory ?? SecurityStorage::directory('login-rate-limit');
         $this->enabled = ($options['enabled'] ?? true) === true;
         $this->maximumAttempts = max(2, (int)($options['maximumAttempts'] ?? 5));
         $this->windowSeconds = max(60, (int)($options['windowSeconds'] ?? 900));

@@ -271,6 +271,32 @@ HSTS, CSP, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, and
 - Application backups never contain database data; SQL Server backup is an
   operator responsibility.
 
+### Database isolation
+
+- The registry (`database/config/databases.json`) is the allowlist of
+  databases. Clients name a database only by its logical id; an id that is not
+  registered fails with `DATABASE_NOT_FOUND`, even for databases the login can
+  reach (`master`, `msdb`, `tempdb`, …). Physical names, servers, ports,
+  credentials, and connection strings are never accepted from a request, and
+  three- or four-part names are rejected in every identifier position.
+- Physical database names come only from the decrypted registry and reach SQL
+  only as delimited identifiers (`MssqlIdentifier`). Each registry entry is
+  encrypted with AES-256-GCM bound to its own id, so swapped, renamed, edited,
+  or plaintext entries fail closed; error responses never contain physical
+  names or hosts.
+- Databases of one server profile may be combined in one SELECT or SQL
+  Resource statement on one connection; other combinations fail with
+  `CROSS_SERVER_QUERY_NOT_SUPPORTED` before connecting. Engines without
+  same-instance cross-database names (Azure SQL Database, Synapse dedicated
+  pools) refuse such queries with `CROSS_DATABASE_QUERY_NOT_SUPPORTED` before
+  any data statement. There are no linked servers; SQL Resources reject
+  literal database-qualified names, four-part names, and `OPENQUERY`,
+  `OPENROWSET`, and `OPENDATASOURCE`, and address other databases only through
+  `{{database:id}}` placeholders resolved from the registry.
+- Writes and routines have exactly one target database; metadata reads only
+  the selected database. Database selection never bypasses permission
+  authorization, which runs first.
+
 ## Logging and auditing
 
 Security audit records (`logs/audit/YYYY-MM-DD.jsonl`) cover login success,
@@ -280,7 +306,10 @@ CSRF and rate-limit rejections; security and database configuration changes;
 database connection tests; runtime lifecycle operations; and backup and restore.
 Records use allowlisted fields and exclude passwords, hashes, raw API keys,
 session IDs, CSRF tokens, encryption keys, connection strings, request bodies,
-and SQL parameter values. Logging fails open. Rotation, retention, and central
+and SQL parameter values. Operational logs record logical database ids; an
+unexpected failure's SQL Server diagnostic text, which may name a database or
+object but never a credential or connection string, is kept there (redacted)
+for operators and never returned to clients. Logging fails open. Rotation, retention, and central
 collection are deployment responsibilities. See [Logging](../Logging.md).
 
 ## Backups

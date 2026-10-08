@@ -39,6 +39,7 @@ $oldEncryptionKey = getenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE);
 $oldApiKey = getenv(ApiKeyAuthenticator::ENVIRONMENT_VARIABLE);
 $oldAdminEnabled = getenv('GENERIC_ADMIN_ENABLED');
 $oldOriginOverride = getenv('GENERIC_API_ALLOWED_ORIGINS');
+$oldRuntimeConfiguration = getenv('GENERIC_RUNTIME_CONFIG_DIR');
 
 try {
     mkdir($temporaryDirectory, 0700, true);
@@ -48,6 +49,15 @@ try {
     putenv('GENERIC_ADMIN_CONFIG_PATH=' . $adminPath);
     putenv('GENERIC_API_ALLOWED_ORIGINS');
     putenv(DatabaseCredentialEncryption::ENVIRONMENT_VARIABLE . '=' . base64_encode(random_bytes(32)));
+    // Runtime state and the health cache stay in the temporary directory.
+    putenv('GENERIC_RUNTIME_CONFIG_DIR=' . $temporaryDirectory . '/config');
+    RuntimeConfiguration::ensure();
+    $isolatedHealth = static fn (callable $tester): ApplicationHealthMonitor => new ApplicationHealthMonitor([
+        'databasePath' => $databasePath,
+        'runtimeDirectory' => $temporaryDirectory . '/runtime',
+        'databaseCachePath' => $temporaryDirectory . '/runtime/health/database-health.json',
+        'databaseTester' => $tester,
+    ]);
 
     $validator = new AdminRequestValidator();
     $linuxValidator = new AdminRequestValidator(new DatabaseAuthenticationSupport('Linux'));
@@ -109,19 +119,21 @@ try {
 
     $connectionTests = 0;
     $testedDatabase = null;
-    $service = new AdminService(
-        $repository,
-        $databasePath,
-        function (array $database) use (&$connectionTests, &$testedDatabase): void {
-            $connectionTests++;
-            $testedDatabase = $database;
-        }
-    );
+    $recordingTester = function (array $database) use (&$connectionTests, &$testedDatabase): void {
+        $connectionTests++;
+        $testedDatabase = $database;
+    };
+    // Process state comes from the temporary directory, never the running launcher's.
+    $service = new AdminService($repository, $databasePath, $recordingTester,
+        new ApiProcessManager($repository, null, null, $temporaryDirectory . '/runtime/api-process.json'), null,
+        new SqlParserProcessManager($repository, null, null, $temporaryDirectory . '/runtime/sqlparser-process.json'),
+        null, null, null, $isolatedHealth($recordingTester));
     $service->testDatabase($normalizedDatabase);
     unifiedAdminAssert($connectionTests === 1 && $testedDatabase['password'] === 'first-secret', 'Connection test did not receive validated credentials.');
-    $failingService = new AdminService($repository, $databasePath, function (): void {
+    $failingTester = function (): void {
         throw new RuntimeException('driver leaked password=do-not-return');
-    });
+    };
+    $failingService = new AdminService($repository, $databasePath, $failingTester, null, null, null, null, null, null, $isolatedHealth($failingTester));
     try {
         $failingService->testDatabase($normalizedDatabase);
         throw new RuntimeException('Failed connection test was accepted.');
@@ -483,8 +495,9 @@ try {
     if (session_status() === PHP_SESSION_ACTIVE) session_destroy();
     $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
     foreach (glob($sessionPath . '/*') ?: [] as $file) @unlink($file);
-    foreach (glob($temporaryDirectory . '/*') ?: [] as $file) {
-        if (is_dir($file)) @rmdir($file); else @unlink($file);
+    if (is_dir($temporaryDirectory)) {
+        $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($temporaryDirectory, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($items as $item) $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
     }
     @rmdir($temporaryDirectory);
     $restore = static function (string $name, $value): void {
@@ -495,4 +508,5 @@ try {
     $restore(ApiKeyAuthenticator::ENVIRONMENT_VARIABLE, $oldApiKey);
     $restore('GENERIC_ADMIN_ENABLED', $oldAdminEnabled);
     $restore('GENERIC_API_ALLOWED_ORIGINS', $oldOriginOverride);
+    $restore('GENERIC_RUNTIME_CONFIG_DIR', $oldRuntimeConfiguration);
 }

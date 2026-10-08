@@ -82,6 +82,17 @@ final class PlanningDatabase extends Database
     public function close() {}
 }
 
+/** The real QueryEngine with ODBC statements answered in memory: SQL Server 2022 Developer (EngineEdition 3). */
+final class PlanningEngine extends QueryEngine
+{
+    public array $statements = [];
+    protected function prepareStatement(string $sql) { $this->statements[] = $sql; return new ArrayObject(['rows' => [['EngineEdition' => 3]]]); }
+    protected function executeStatement($statement, array $params): bool { return true; }
+    protected function fetchRow($statement) { $rows = $statement['rows']; $row = array_shift($rows); $statement['rows'] = $rows; return $row ?? false; }
+    protected function nextResult($statement): bool { return false; }
+    protected function freeStatement($statement): void {}
+}
+
 /** A future-style policy: records what it is asked and denies one database. */
 final class RecordingDenyPolicy implements DatabaseAccessPolicy
 {
@@ -375,13 +386,13 @@ try {
     $connections = fn (): DatabaseConnectionManager => new DatabaseConnectionManager(static fn (array $c): Database => new PlanningDatabase($c));
     DatabaseQueryPlanContext::set($explicit);
     PlanningSqlServerDriver::$attempts = [];
-    $engine = new QueryEngine(null, $logger, null, true, $connections());
+    $engine = new PlanningEngine(null, $logger, 0, true, $connections());
     planAssert(count(PlanningSqlServerDriver::$attempts) === 1 && str_contains(PlanningSqlServerDriver::$attempts[0], 'Database=InventoryDB;'),
         'A single-database plan did not connect to its primary database.');
     $engine->close();
     // A same-profile cross-database plan connects once, to its primary database.
     DatabaseQueryPlanContext::set($cross);
-    $crossEngine = new QueryEngine(null, $logger, null, true, $connections());
+    $crossEngine = new PlanningEngine(null, $logger, 0, true, $connections());
     planAssert(count(PlanningSqlServerDriver::$attempts) === 2 && str_contains(PlanningSqlServerDriver::$attempts[1], 'Database=CompanyDB;'),
         'A cross-database plan did not open one connection to its primary database.');
     $crossEngine->close();

@@ -12,6 +12,9 @@ require_once __DIR__ . '/../app/Requests/ApiRequestException.php';
 
 class QueryEngine
 {
+    /** SERVERPROPERTY('EngineEdition') values without same-instance cross-database names. */
+    private const SINGLE_DATABASE_ENGINE_EDITIONS = [5, 6];
+
     protected ?Database $db = null;
     protected $connection = null;
     protected ?DatabaseConnectionManager $connections = null;
@@ -62,10 +65,35 @@ class QueryEngine
                 ]);
                 throw $exception;
             }
+            if (count($this->databaseReferences) > 1) $this->assertCrossDatabaseEngine();
         }
     }
 
     public function __destruct() { $this->close(); }
+
+    /**
+     * Same-instance cross-database names need a SQL Server engine that has
+     * them. Azure SQL Database (EngineEdition 5) and Azure Synapse dedicated
+     * SQL pools (6) do not, so a multi-database plan is refused there before
+     * any data statement runs. Single-database requests are never checked.
+     */
+    private function assertCrossDatabaseEngine(): void
+    {
+        $edition = $this->executePrepared(
+            "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int) AS EngineEdition",
+            [],
+            ['queryPhase' => 'metadata']
+        )['data'][0]['EngineEdition'] ?? null;
+        if (in_array((int)$edition, self::SINGLE_DATABASE_ENGINE_EDITIONS, true)) {
+            (new OperationalLogger())->warning('database', 'Cross-database query refused by engine edition', [
+                'database_context' => $this->databaseContextId,
+                'engine_edition' => (int)$edition,
+            ]);
+            throw new ApiRequestException('Cross-database queries are not supported by this SQL Server edition.', 'CROSS_DATABASE_QUERY_NOT_SUPPORTED', [
+                ['path' => 'database', 'message' => 'Query one database per request on this server.'],
+            ], 422);
+        }
+    }
 
     /** The registry id of the database this engine connected to, when it resolved one. */
     public function databaseContextId(): ?string { return $this->databaseContextId; }

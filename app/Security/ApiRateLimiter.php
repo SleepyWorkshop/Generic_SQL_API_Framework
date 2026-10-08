@@ -1,5 +1,6 @@
 <?php
 
+require_once __DIR__ . '/SecurityStorage.php';
 require_once __DIR__ . '/../../config/constants.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../Requests/ApiRequestException.php';
@@ -13,7 +14,7 @@ final class ApiRateLimiter
 
     public function __construct(?string $directory = null, ?array $options = null, ?callable $clock = null)
     {
-        $this->directory = $directory ?? ROOT_PATH . '/storage/security/api-rate-limit';
+        $this->directory = $directory ?? SecurityStorage::directory('api-rate-limit');
         $this->options = $options ?? SecurityConfiguration::apiRateLimitOptions();
         $this->clock = $clock ?? fn (): int => time();
     }
