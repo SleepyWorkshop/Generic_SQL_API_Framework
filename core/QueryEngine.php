@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/Database.php';
+require_once __DIR__ . '/../app/Database/DatabaseContextResolver.php';
+require_once __DIR__ . '/../app/Database/DatabaseConnectionManager.php';
 require_once __DIR__ . '/Logger.php';
 require_once __DIR__ . '/QueryTimeoutException.php';
 require_once __DIR__ . '/OperationalLogger.php';
@@ -11,6 +13,8 @@ class QueryEngine
 {
     protected ?Database $db = null;
     protected $connection = null;
+    protected ?DatabaseConnectionManager $connections = null;
+    protected ?string $databaseContextId = null;
     protected Logger $logger;
     protected int $queryTimeoutSeconds;
     protected ?bool $queryTimeoutSupported = null;
@@ -20,15 +24,25 @@ class QueryEngine
         $this->logger = $logger ?? new Logger();
         $this->queryTimeoutSeconds = $queryTimeoutSeconds ?? SecurityConfiguration::queryTimeoutSeconds();
         if ($connect) {
+            // Without an injected connection: the registry default database,
+            // which must be configured, enabled, and available.
+            $context = $database === null ? (new DatabaseContextResolver())->resolveAvailable() : null;
             $started = microtime(true);
             try {
-                $this->db = $database ?? new Database();
+                if ($context !== null) {
+                    $this->databaseContextId = $context->id;
+                    $this->connections = new DatabaseConnectionManager();
+                    $database = $this->connections->connection($context);
+                }
+                $this->db = $database;
                 $this->connection = $this->db->getConnection();
                 (new OperationalLogger())->info('database', 'Database connection successful', [
+                    'database_context' => $this->databaseContextId,
                     'duration_ms' => round($this->elapsed($started), 2),
                 ]);
             } catch (Throwable $exception) {
                 (new OperationalLogger())->error('database', 'Database connection failed', [
+                    'database_context' => $this->databaseContextId,
                     'error_code' => $this->errorCategory($exception),
                     'duration_ms' => round($this->elapsed($started), 2),
                 ]);
@@ -265,10 +279,13 @@ class QueryEngine
 
     public function close(): void
     {
-        if ($this->db !== null) {
+        if ($this->connections !== null) {
+            $this->connections->closeAll();
+            $this->connections = null;
+        } elseif ($this->db !== null) {
             $this->db->close();
-            $this->db = null;
-            $this->connection = null;
         }
+        $this->db = null;
+        $this->connection = null;
     }
 }

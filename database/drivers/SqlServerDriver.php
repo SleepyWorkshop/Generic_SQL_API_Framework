@@ -2,7 +2,9 @@
 
 require_once __DIR__ . "/DatabaseDriverInterface.php";
 require_once __DIR__ . "/../../app/Security/DatabaseCredentialResolver.php";
-require_once __DIR__ . "/../../app/Database/DatabaseRegistry.php";
+require_once __DIR__ . "/../../app/Database/DatabaseContextResolver.php";
+require_once __DIR__ . "/../../app/Database/DatabaseConnectionException.php";
+require_once __DIR__ . "/../../app/Database/DatabaseServerProfile.php";
 require_once __DIR__ . "/../../app/Runtime/DatabaseAuthenticationSupport.php";
 require_once __DIR__ . "/../../app/Security/DatabaseTransportSecurity.php";
 require_once __DIR__ . "/../../app/Security/SecurityConfiguration.php";
@@ -89,6 +91,10 @@ class SqlServerDriver implements DatabaseDriverInterface
 
     /**
      * Build ODBC connection string.
+     *
+     * ConnectTimeout (ODBC Driver 18.7+) is the login timeout. Older drivers
+     * report it as an unrecognized keyword (SQLSTATE 01S00), still connect,
+     * and keep their own 15-second default.
      */
     private function buildDsn(
         string $driver,
@@ -96,7 +102,8 @@ class SqlServerDriver implements DatabaseDriverInterface
         string $database,
         string $authentication,
         string $encrypt,
-        string $trust
+        string $trust,
+        int $loginTimeout
     ): string {
 
         $dsn =
@@ -104,7 +111,8 @@ class SqlServerDriver implements DatabaseDriverInterface
             . "Server={$serverAddress};"
             . "Database={$database};"
             . "Encrypt={$encrypt};"
-            . "TrustServerCertificate={$trust};";
+            . "TrustServerCertificate={$trust};"
+            . "ConnectTimeout={$loginTimeout};";
 
         /*
          * Windows Authentication
@@ -166,10 +174,12 @@ class SqlServerDriver implements DatabaseDriverInterface
         string $password,
         string $authentication,
         string $encrypt,
-        string $trust
+        string $trust,
+        int $loginTimeout
     ): array {
 
         $drivers = self::autoDetectionDrivers($this->production ?? SecurityConfiguration::isProduction());
+        $failure = null;
 
         $serverAddress =
             $this->buildServerAddress(
@@ -186,7 +196,8 @@ class SqlServerDriver implements DatabaseDriverInterface
                     $database,
                     $authentication,
                     $encrypt,
-                    $trust
+                    $trust,
+                    $loginTimeout
                 );
 
             $connection =
@@ -214,13 +225,31 @@ class SqlServerDriver implements DatabaseDriverInterface
              * A TLS or certificate failure is never retried with another
              * (possibly weaker) driver.
              */
-            if (DatabaseTransportSecurity::isTlsFailure($this->connectionError())) {
-                throw new Exception('ODBC TLS or certificate validation failed; automatic driver fallback was stopped.');
+            $error = $this->connectionError();
+            if (DatabaseTransportSecurity::isTlsFailure($error)) {
+                throw new DatabaseConnectionException(DatabaseConnectionException::TLS,
+                    DatabaseConnectionException::fromDriverError($error)->sqlState());
+            }
+
+            // Keep the most specific failure for the final error: a timeout
+            // or rejected login says more than a driver that is not installed.
+            $attempt = DatabaseConnectionException::fromDriverError($error);
+            if ($failure === null || self::failurePriority($attempt) > self::failurePriority($failure)) {
+                $failure = $attempt;
             }
 
         }
 
-        throw new Exception('No compatible SQL Server ODBC driver could establish a connection.');
+        throw $failure ?? new DatabaseConnectionException(DatabaseConnectionException::FAILED);
+    }
+
+    private static function failurePriority(DatabaseConnectionException $failure): int
+    {
+        return match ($failure->kind()) {
+            DatabaseConnectionException::TIMEOUT => 3,
+            DatabaseConnectionException::AUTHENTICATION => 2,
+            default => $failure->sqlState() !== null && !str_starts_with($failure->sqlState(), 'IM') ? 1 : 0,
+        };
     }
 
     /**
@@ -228,8 +257,9 @@ class SqlServerDriver implements DatabaseDriverInterface
      */
     public function connect()
     {
+        // Without an explicit configuration: the registry default database.
         $config = $this->configuration
-            ?? (new DatabaseRegistry())->connectionConfiguration();
+            ?? (new DatabaseContextResolver())->resolve()->driverConfiguration();
 
         /*
          * Database configuration.
@@ -290,6 +320,8 @@ class SqlServerDriver implements DatabaseDriverInterface
                 ? "yes"
                 : "no";
 
+        $loginTimeout = DatabaseServerProfile::loginTimeoutFrom($config);
+
         /*
          * Driver configuration.
          */
@@ -313,7 +345,8 @@ class SqlServerDriver implements DatabaseDriverInterface
                     $password,
                     $authentication,
                     $encrypt,
-                    $trust
+                    $trust,
+                    $loginTimeout
                 );
 
             /*
@@ -344,7 +377,8 @@ class SqlServerDriver implements DatabaseDriverInterface
                 $database,
                 $authentication,
                 $encrypt,
-                $trust
+                $trust,
+                $loginTimeout
             );
 
         $this->connection =
@@ -357,7 +391,7 @@ class SqlServerDriver implements DatabaseDriverInterface
 
         if (!$this->connection) {
 
-            throw new Exception('SQL Server connection failed.');
+            throw DatabaseConnectionException::fromDriverError($this->connectionError());
         }
 
         return $this->connection;

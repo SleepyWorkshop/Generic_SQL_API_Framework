@@ -631,6 +631,7 @@
         password: v.get("password") || null,
         encrypt: v.get("encrypt") === "on",
         trustServerCertificate: v.get("trustServerCertificate") === "on",
+        loginTimeoutSeconds: v.get("loginTimeoutSeconds") ? Number(v.get("loginTimeoutSeconds")) : null,
       };
     }
     return {
@@ -644,6 +645,7 @@
       password: null,
       encrypt: db.encrypt,
       trustServerCertificate: db.trustServerCertificate,
+      loginTimeoutSeconds: db.loginTimeoutSeconds,
     };
   }
   // Server holds the development launcher's listener settings. In production
@@ -762,7 +764,7 @@
             `<option value="${escapeHtml(mode)}"${mode === db.authentication ? " selected" : ""}>${mode === "windows" ? "Windows integrated" : "SQL login"}</option>`,
         )
         .join("");
-    target.innerHTML = `<form id="database-form" class="stack"><p class="help">Stored credentials remain encrypted. Leave password blank to retain the current password.</p><div class="row"><label>ODBC Driver<select name="driver">${options}</select></label><label>Server<input name="server" value="${escapeHtml(db.server)}" required></label></div><div class="row"><label>Port<input name="port" value="${escapeHtml(db.port)}"></label><label>Database<input name="database" value="${escapeHtml(db.database)}" required></label></div><div class="row"><label>Authentication<select name="authentication">${authenticationOptions}</select></label><label>Username<input name="username" value="${escapeHtml(db.username)}"></label></div><label>Password<input name="password" type="password" autocomplete="new-password" placeholder="${db.passwordConfigured ? "Stored password retained" : "Required for SQL login"}"></label><div class="row"><label class="check"><input name="encrypt" type="checkbox"${db.encrypt ? " checked" : ""}> Encrypt connection</label><label class="check"><input name="trustServerCertificate" type="checkbox"${db.trustServerCertificate ? " checked" : ""}> Trust server certificate</label></div><div class="actions"><button type="button" id="test-database" class="secondary">Test Connection</button><button>Save Database</button></div></form>`;
+    target.innerHTML = `<form id="database-form" class="stack"><p class="help">Stored credentials remain encrypted. Leave password blank to retain the current password.</p><div class="row"><label>ODBC Driver<select name="driver">${options}</select></label><label>Server<input name="server" value="${escapeHtml(db.server)}" required></label></div><div class="row"><label>Port<input name="port" value="${escapeHtml(db.port)}"></label><label>Database<input name="database" value="${escapeHtml(db.database)}" required></label></div><div class="row"><label>Authentication<select name="authentication">${authenticationOptions}</select></label><label>Username<input name="username" value="${escapeHtml(db.username)}"></label></div><label>Password<input name="password" type="password" autocomplete="new-password" placeholder="${db.passwordConfigured ? "Stored password retained" : "Required for SQL login"}"></label><label>Login timeout (seconds)<input name="loginTimeoutSeconds" type="number" min="1" max="65534" step="1" value="${escapeHtml(db.loginTimeoutSeconds)}"></label><div class="row"><label class="check"><input name="encrypt" type="checkbox"${db.encrypt ? " checked" : ""}> Encrypt connection</label><label class="check"><input name="trustServerCertificate" type="checkbox"${db.trustServerCertificate ? " checked" : ""}> Trust server certificate</label></div><div class="actions"><button type="button" id="test-database" class="secondary">Test Connection</button><button>Save Database</button></div></form>`;
     const form = target.querySelector("form");
     target
       .querySelector("#test-database")

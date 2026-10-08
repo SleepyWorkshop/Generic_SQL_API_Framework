@@ -1,15 +1,19 @@
 <?php
 
 require_once __DIR__ . "/../drivers/SqlServerDriver.php";
-require_once __DIR__ . "/../../app/Database/DatabaseRegistry.php";
+require_once __DIR__ . "/../../app/Database/DatabaseContextResolver.php";
 
 class DriverFactory
 {
-    public static function create()
+    /**
+     * A driver for one resolved database configuration (see
+     * DatabaseContext::driverConfiguration()); without one, the registry's
+     * default database.
+     */
+    public static function create(?array $configuration = null)
     {
-        // The default database of the registry (or of a not yet migrated
-        // V2 database.json).
-        $config = (new DatabaseRegistry())->connectionConfiguration();
+        $config = $configuration
+            ?? (new DatabaseContextResolver())->resolve()->driverConfiguration();
 
         switch (strtolower($config["provider"])) {
 

@@ -41,6 +41,7 @@ The plaintext form is retained for backward compatibility and as the input to th
 | `password` | string | SQL auth | Empty string if omitted |
 | `options.encrypt` | boolean-like | no | false (`Encrypt=no`) |
 | `options.trustServerCertificate` | boolean-like | no | false (`TrustServerCertificate=no`) |
+| `options.loginTimeoutSeconds` | integer 1-65534 | no | 15, the driver default (`ConnectTimeout=`) |
 
 See `database/config/database.example.json` for a placeholder-only example. The earlier password-only encrypted object remains readable so existing deployments can migrate, but new deployments should encrypt the complete configuration.
 
@@ -176,4 +177,11 @@ The query timeout is separate application configuration: the runtime setting
 `query.timeoutSeconds` (default 45 seconds, overridable by
 `DB_QUERY_TIMEOUT_SECONDS`) is requested when the ODBC driver supports
 `SQL_QUERY_TIMEOUT`; unsupported drivers fall back to the PHP
-execution limit. Neither timeout controls login, HTTP proxy, or browser timeouts.
+execution limit. It does not control the login, HTTP proxy, or browser timeouts.
+
+The login timeout is `options.loginTimeoutSeconds` (Admin Console: **Login
+timeout**), default 15 seconds. It is sent as the `ConnectTimeout` keyword,
+which ODBC Driver 18.7 and later honor; older drivers ignore the keyword and
+keep their own 15-second default. A login that times out returns
+`504 DATABASE_CONNECTION_TIMEOUT`; other connection failures return
+`503 DATABASE_CONNECTION_FAILED` or `503 DATABASE_AUTHENTICATION_FAILED`.

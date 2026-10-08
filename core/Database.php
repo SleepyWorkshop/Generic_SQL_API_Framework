@@ -6,9 +6,10 @@ class Database
 {
     private $driver;
 
-    public function __construct()
+    /** Opens one request-scoped connection; without a configuration, to the default database. */
+    public function __construct(?array $configuration = null)
     {
-        $this->driver = DriverFactory::create();
+        $this->driver = DriverFactory::create($configuration);
         $this->driver->connect();
     }
 

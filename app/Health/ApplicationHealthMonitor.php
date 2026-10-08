@@ -4,6 +4,9 @@ require_once __DIR__ . '/../Configuration/RuntimeConfiguration.php';
 require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
 require_once __DIR__ . '/../Runtime/DatabaseAvailabilityManager.php';
 require_once __DIR__ . '/../Database/DatabaseRegistry.php';
+require_once __DIR__ . '/../Database/DatabaseContextResolver.php';
+require_once __DIR__ . '/../Database/DatabaseConnectionException.php';
+require_once __DIR__ . '/../Requests/ApiRequestException.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/../Repositories/AuthRepository.php';
 require_once __DIR__ . '/../Repositories/InstallationRepository.php';
@@ -193,12 +196,51 @@ final class ApplicationHealthMonitor
     }
 
     /**
-     * Discard the short-lived connection-check cache after an availability
-     * change so the next detailed check reflects the new state.
+     * Discard a database's short-lived connection-check cache (the default
+     * database when null) after an availability change, so the next check
+     * reflects the new state.
      */
-    public function forgetDatabaseHealth(): void
+    public function forgetDatabaseHealth(?string $databaseId = null): void
     {
-        if (is_file($this->databaseCachePath)) @unlink($this->databaseCachePath);
+        $path = $this->databaseCachePathFor($databaseId);
+        if (is_file($path)) @unlink($path);
+    }
+
+    /**
+     * One configured database (the default when null). Configured, enabled
+     * (database and server profile), available (runtime gate), and reachable
+     * are reported separately; disabled or disconnected databases are never
+     * contacted. Without a tester nothing is contacted at all.
+     */
+    public function databaseStatus(?string $databaseId = null): array
+    {
+        try {
+            $metadata = $this->registry->metadata();
+        } catch (Throwable $exception) {
+            return ['database' => $databaseId, 'configured' => false, 'enabled' => false, 'available' => false,
+                'status' => 'unhealthy', 'category' => 'configuration_invalid'];
+        }
+        $databaseId ??= $metadata['defaultDatabase'];
+        $database = $databaseId === null ? null : ($metadata['databases'][$databaseId] ?? null);
+        if ($database === null) {
+            return ['database' => $databaseId, 'configured' => false, 'enabled' => false, 'available' => false,
+                'status' => 'not_configured', 'category' => $databaseId === null ? 'configuration_missing' : 'database_not_found'];
+        }
+        $serverEnabled = ($metadata['servers'][$database['server']]['enabled'] ?? false) === true;
+        $enabled = $database['enabled'] && $serverEnabled;
+        try {
+            $available = $this->databaseAvailable($databaseId);
+        } catch (Throwable $exception) {
+            $available = false;
+        }
+        $status = ['database' => $databaseId, 'serverProfile' => $database['server'],
+            'configured' => true, 'enabled' => $enabled, 'available' => $available];
+        if (!$enabled) {
+            return $status + ['status' => 'disabled', 'category' => $database['enabled'] ? 'server_profile_disabled' : 'database_disabled'];
+        }
+        if (!$available) return $status + ['status' => 'disconnected', 'category' => 'database_disconnected'];
+        if (!is_callable($this->databaseTester)) return $status + ['status' => 'healthy', 'category' => 'database_available'];
+        return $status + $this->connectivity($databaseId);
     }
 
     private function databaseReadiness(): array
@@ -240,33 +282,62 @@ final class ApplicationHealthMonitor
             : ['status' => 'unhealthy', 'category' => 'api_disabled'];
     }
 
-    private function storedDatabaseAvailability(): bool
+    private function storedDatabaseAvailability(?string $databaseId = null): bool
     {
         $state = JsonFileStore::load($this->configurationDirectory . '/database-state.json');
         if (!DatabaseAvailabilityManager::isValidState($state)) return false;
-        if ($state['version'] === 1) return $state['available'] === true;
         $default = $this->registry->defaultDatabaseId() ?? DatabaseRegistry::DEFAULT_ID;
-        return ($state['databases'][$default]['available'] ?? false) === true;
+        $databaseId ??= $default;
+        // A version 1 state described the single V2 database: the default.
+        if ($state['version'] === 1) return $databaseId === $default && $state['available'] === true;
+        return ($state['databases'][$databaseId]['available'] ?? false) === true;
+    }
+
+    private function databaseAvailable(?string $databaseId): bool
+    {
+        return is_callable($this->databaseAvailable)
+            ? (bool)($this->databaseAvailable)($databaseId)
+            : $this->storedDatabaseAvailability($databaseId);
     }
 
     private function databaseHealth(): array
     {
         $ready = $this->databaseReadiness();
         if ($ready['status'] !== 'healthy' || !is_callable($this->databaseTester)) return $ready;
+        return $this->connectivity(null);
+    }
+
+    /**
+     * One cached connection check through the resolver (the default database
+     * when null). The cache is per database and keyed by the stored
+     * configuration, so any registry change forces a new check.
+     */
+    private function connectivity(?string $databaseId): array
+    {
+        $cachePath = $this->databaseCachePathFor($databaseId);
         $fingerprint = $this->registry->fingerprint();
-        $cached = is_string($fingerprint) ? $this->readDatabaseCache($fingerprint) : null;
-        if ($cached !== null) return $cached + ['cached' => true];
+        $cached = is_string($fingerprint) ? $this->readDatabaseCache($fingerprint, $cachePath) : null;
+        if ($cached !== null) return ['cached' => true] + $cached;
         $started = microtime(true);
         try {
-            ($this->databaseTester)($this->registry->connectionConfiguration());
+            ($this->databaseTester)((new DatabaseContextResolver($this->registry))->resolve($databaseId)->driverConfiguration());
             $result = ['status' => 'healthy', 'category' => 'connected'];
         } catch (Throwable $exception) {
             $result = ['status' => 'unhealthy', 'category' => $this->databaseFailureCategory($exception)];
         }
         $result += ['cached' => false, 'checkedAt' => gmdate(DATE_ATOM),
             'durationMs' => round((microtime(true) - $started) * 1000, 2)];
-        if (is_string($fingerprint)) $this->writeDatabaseCache($result + ['configurationFingerprint' => $fingerprint]);
+        if (is_string($fingerprint)) $this->writeDatabaseCache($result + ['configurationFingerprint' => $fingerprint], $cachePath);
         return $result;
+    }
+
+    /** The default database keeps the V2 cache file; others get their own. */
+    private function databaseCachePathFor(?string $databaseId): string
+    {
+        if ($databaseId === null || $databaseId === $this->registry->defaultDatabaseId() || !DatabaseRegistry::isValidId($databaseId)) {
+            return $this->databaseCachePath;
+        }
+        return dirname($this->databaseCachePath) . DIRECTORY_SEPARATOR . 'database-health.' . $databaseId . '.json';
     }
 
     /**
@@ -293,6 +364,15 @@ final class ApplicationHealthMonitor
 
     private function databaseFailureCategory(Throwable $exception): string
     {
+        if ($exception instanceof DatabaseConnectionException) {
+            return match ($exception->kind()) {
+                DatabaseConnectionException::TIMEOUT => 'connection_timeout',
+                DatabaseConnectionException::AUTHENTICATION => 'authentication_failure',
+                default => 'database_unavailable',
+            };
+        }
+        if ($exception instanceof DatabaseCredentialException) return 'configuration_invalid';
+        if ($exception instanceof ApiRequestException) return strtolower($exception->getErrorCode());
         $message = strtoupper($exception->getMessage());
         return str_contains($message, '28000') || str_contains($message, 'LOGIN FAILED')
             ? 'authentication_failure' : 'database_unavailable';
@@ -353,10 +433,11 @@ final class ApplicationHealthMonitor
         return ['status' => $check['status'], 'category' => $check['category'] ?? 'unknown'];
     }
 
-    private function readDatabaseCache(string $fingerprint): ?array
+    private function readDatabaseCache(string $fingerprint, ?string $path = null): ?array
     {
-        if (!is_file($this->databaseCachePath)) return null;
-        try { $value = JsonFileStore::load($this->databaseCachePath); }
+        $path ??= $this->databaseCachePath;
+        if (!is_file($path)) return null;
+        try { $value = JsonFileStore::load($path); }
         catch (Throwable $exception) { return null; }
         $checked = strtotime((string)($value['checkedAt'] ?? ''));
         if ($checked === false || time() - $checked > $this->databaseCacheTtl
@@ -365,11 +446,12 @@ final class ApplicationHealthMonitor
         return isset($value['status'], $value['category']) ? $value : null;
     }
 
-    private function writeDatabaseCache(array $value): void
+    private function writeDatabaseCache(array $value, ?string $path = null): void
     {
-        $directory = dirname($this->databaseCachePath);
+        $path ??= $this->databaseCachePath;
+        $directory = dirname($path);
         if (!is_dir($directory) && !@mkdir($directory, 0700, true) && !is_dir($directory)) return;
-        try { JsonFileStore::save($this->databaseCachePath, $value); } catch (Throwable $exception) {}
+        try { JsonFileStore::save($path, $value); } catch (Throwable $exception) {}
     }
 
     private function applicationVersion(): string

@@ -92,7 +92,8 @@ service.
   availability are unchanged.
 - **Restart** reconnects.
 - A failed Connect or Restart leaves access disabled and returns
-  `DATABASE_CONNECTION_FAILED`, or `DATABASE_CONFIGURATION_UNAVAILABLE` with
+  `DATABASE_CONNECTION_FAILED`, `DATABASE_CONNECTION_TIMEOUT` when the login
+  timeout expired, or `DATABASE_CONFIGURATION_UNAVAILABLE` with
   `reason` `configuration_missing`, `encryption_key_missing`, or
   `configuration_invalid`.
 

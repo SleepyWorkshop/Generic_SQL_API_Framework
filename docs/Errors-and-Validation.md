@@ -91,6 +91,8 @@ message text.
 | `CONSTRAINT_VIOLATION` | 409 | Recognized constraint, null, truncation, or reference failure | Correct input; do not blind-retry |
 | `RESULT_TOO_LARGE` | 413 | Unpaginated read exceeded `GENERIC_MAX_RESULT_ROWS` | Paginate or narrow filters |
 | `DATABASE_UNAVAILABLE` | 503 | Database access is disabled or the database is unreachable | Retry later |
+| `DATABASE_CONNECTION_TIMEOUT` | 504 | SQL Server did not complete the login within the configured login timeout | Retry later; operator checks reachability |
+| `DATABASE_CONNECTION_FAILED` | 503 | SQL Server could not be reached, or TLS validation failed | Operator action |
 | `DATABASE_AUTHENTICATION_FAILED` | 503 | SQL Server rejected the configured credentials | Operator action |
 | `DATABASE_CONFIGURATION_ERROR` | 503 | Encrypted database configuration could not be read | Operator action |
 | `QUERY_ERROR` | 500 | Undisclosed generation, metadata, connection, or execution failure | Show a generic failure; correlate by request ID |

@@ -5,6 +5,7 @@ require_once __DIR__ . '/Logger.php';
 require_once __DIR__ . '/../app/Requests/ApiRequestException.php';
 require_once __DIR__ . '/../app/Security/DatabaseCredentialException.php';
 require_once __DIR__ . '/QueryTimeoutException.php';
+require_once __DIR__ . '/../app/Database/DatabaseConnectionException.php';
 require_once __DIR__ . '/OperationalLogger.php';
 
 final class ExceptionHandler
@@ -89,6 +90,17 @@ final class ExceptionHandler
         }
         if ($exception instanceof QueryTimeoutException) {
             return [504, Response::errorPayload('Query execution timed out.', 'QUERY_ERROR')];
+        }
+        if ($exception instanceof DatabaseConnectionException) {
+            return match ($exception->kind()) {
+                DatabaseConnectionException::TIMEOUT => [504, Response::errorPayload(
+                    'Database connection timed out.', 'DATABASE_CONNECTION_TIMEOUT'
+                )],
+                DatabaseConnectionException::AUTHENTICATION => [503, Response::errorPayload(
+                    'Database authentication failed.', 'DATABASE_AUTHENTICATION_FAILED'
+                )],
+                default => [503, Response::errorPayload('Database connection failed.', 'DATABASE_CONNECTION_FAILED')],
+            };
         }
         if ($exception instanceof DatabaseCredentialException) {
             return [503, Response::errorPayload(

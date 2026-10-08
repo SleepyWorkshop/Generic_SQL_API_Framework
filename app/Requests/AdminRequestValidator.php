@@ -4,6 +4,7 @@ require_once __DIR__ . '/ApiRequestException.php';
 require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../../database/drivers/SqlServerDriver.php';
 require_once __DIR__ . '/../Runtime/DatabaseAuthenticationSupport.php';
+require_once __DIR__ . '/../Database/DatabaseServerProfile.php';
 require_once __DIR__ . '/../Configuration/RuntimeControls.php';
 require_once __DIR__ . '/../Backup/BackupSchedule.php';
 
@@ -183,7 +184,7 @@ final class AdminRequestValidator
         }
         $this->rejectUnknown($value, [
             'provider', 'driver', 'server', 'port', 'database', 'authentication',
-            'username', 'password', 'encrypt', 'trustServerCertificate',
+            'username', 'password', 'encrypt', 'trustServerCertificate', 'loginTimeoutSeconds',
         ], 'database.');
         $errors = [];
         $provider = strtolower(trim((string)($value['provider'] ?? '')));
@@ -221,6 +222,11 @@ final class AdminRequestValidator
                 $errors[] = ['path' => 'database.' . $field, 'message' => 'Value must be boolean.'];
             }
         }
+        // Optional; when omitted, the stored timeout (or the driver default) is kept.
+        $loginTimeout = $value['loginTimeoutSeconds'] ?? null;
+        if ($loginTimeout !== null && !DatabaseServerProfile::isValidLoginTimeout($loginTimeout)) {
+            $errors[] = ['path' => 'database.loginTimeoutSeconds', 'message' => 'Login timeout must be an integer from 1 to 65534 seconds.'];
+        }
         if ($errors !== []) $this->invalid($errors);
 
         return [
@@ -235,6 +241,7 @@ final class AdminRequestValidator
             'options' => [
                 'encrypt' => $value['encrypt'],
                 'trustServerCertificate' => $value['trustServerCertificate'],
+                ...$loginTimeout !== null ? ['loginTimeoutSeconds' => $loginTimeout] : [],
             ],
         ];
     }

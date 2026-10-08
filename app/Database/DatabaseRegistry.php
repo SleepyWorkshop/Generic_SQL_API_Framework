@@ -6,6 +6,8 @@ require_once __DIR__ . '/../Security/DatabaseCredentialEncryption.php';
 require_once __DIR__ . '/../Security/DatabaseCredentialResolver.php';
 require_once __DIR__ . '/../../core/JsonFileStore.php';
 require_once __DIR__ . '/DatabaseRegistryMigrator.php';
+require_once __DIR__ . '/DatabaseRegistryReader.php';
+require_once __DIR__ . '/DatabaseServerProfile.php';
 
 /**
  * V3 database registry (database/config/databases.json).
@@ -21,7 +23,7 @@ require_once __DIR__ . '/DatabaseRegistryMigrator.php';
  * read-only as profile "default" hosting database "default". The first write,
  * or an explicit migration, replaces it with the registry.
  */
-final class DatabaseRegistry
+final class DatabaseRegistry implements DatabaseRegistryReader
 {
     public const VERSION = 2;
     public const DEFAULT_ID = 'default';
@@ -440,13 +442,18 @@ final class DatabaseRegistry
         }
     }
 
-    /** Server profile connection: SQL Server only, and never a database name. */
+    /**
+     * Server profile connection: SQL Server only, never a database name, and an
+     * optional options.loginTimeoutSeconds of 1-65534 (the driver's range).
+     */
     public static function validateConnection(array $connection): void
     {
         if (array_diff(array_keys($connection), self::CONNECTION_KEYS) !== []
             || strtolower(trim((string)($connection['provider'] ?? ''))) !== 'sqlserver'
             || !is_string($connection['server'] ?? null) || trim($connection['server']) === ''
-            || (array_key_exists('password', $connection) && !is_string($connection['password']))) {
+            || (array_key_exists('password', $connection) && !is_string($connection['password']))
+            || (is_array($connection['options'] ?? null) && array_key_exists('loginTimeoutSeconds', $connection['options'])
+                && !DatabaseServerProfile::isValidLoginTimeout($connection['options']['loginTimeoutSeconds']))) {
             throw new DatabaseCredentialException('Invalid database configuration.');
         }
         DatabaseConfigurationResolver::validateResolved($connection);

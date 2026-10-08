@@ -3,6 +3,9 @@
 require_once __DIR__ . '/../Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../Security/DatabaseConfigurationResolver.php';
 require_once __DIR__ . '/../Database/DatabaseRegistry.php';
+require_once __DIR__ . '/../Database/DatabaseContextResolver.php';
+require_once __DIR__ . '/../Database/DatabaseConnectionException.php';
+require_once __DIR__ . '/../Database/DatabaseServerProfile.php';
 require_once __DIR__ . '/../Security/DatabaseCredentialEncryption.php';
 require_once __DIR__ . '/../Security/ApiKeyAuthenticator.php';
 require_once __DIR__ . '/ApiKeyService.php';
@@ -27,6 +30,7 @@ final class AdminService
     private AdminConfigurationRepository $configuration;
     private string $databasePath;
     private DatabaseRegistry $databaseRegistry;
+    private DatabaseContextResolver $databaseResolver;
     private bool $runtimeDatabasePath;
     private $connectionTester;
     private ApiProcessManager $processManager;
@@ -73,12 +77,13 @@ final class AdminService
         $this->parserProcessManager = $parserProcessManager ?? new SqlParserProcessManager($this->configuration);
         $this->databaseAuthentication = $databaseAuthentication ?? new DatabaseAuthenticationSupport();
         $this->databaseAvailability = $databaseAvailability ?? new DatabaseAvailabilityManager(null, $this->databaseRegistry);
+        $this->databaseResolver = new DatabaseContextResolver($this->databaseRegistry, $this->databaseAvailability);
         $this->applicationRuntime = $applicationRuntime ?? new ApplicationRuntimeManager();
         $this->logger = $logger ?? new Logger();
         $this->healthMonitor = $healthMonitor ?? new ApplicationHealthMonitor([
             'databasePath' => $this->databasePath,
             'registry' => $this->databaseRegistry,
-            'databaseAvailable' => fn (): bool => $this->databaseAvailability->available(),
+            'databaseAvailable' => fn (?string $databaseId = null): bool => $this->databaseAvailability->available($databaseId),
             'databaseTester' => $this->connectionTester,
         ]);
         $this->backupRecovery = $backupRecovery ?? new BackupRecoveryService();
@@ -221,6 +226,7 @@ final class AdminService
                 'passwordConfigured' => false,
                 'encrypt' => true,
                 'trustServerCertificate' => false,
+                'loginTimeoutSeconds' => DatabaseServerProfile::DEFAULT_LOGIN_TIMEOUT_SECONDS,
                 'availableDrivers' => array_merge(['auto'], SqlServerDriver::supportedDrivers()),
                 'availableAuthenticationModes' => $this->databaseAuthentication->modes(),
             ];
@@ -251,6 +257,7 @@ final class AdminService
             'passwordConfigured' => (string)($database['password'] ?? '') !== '',
             'encrypt' => ($database['options']['encrypt'] ?? true) === true,
             'trustServerCertificate' => ($database['options']['trustServerCertificate'] ?? false) === true,
+            'loginTimeoutSeconds' => DatabaseServerProfile::loginTimeoutFrom($database),
             'availableDrivers' => array_merge(['auto'], SqlServerDriver::supportedDrivers()),
             'availableAuthenticationModes' => $this->databaseAuthentication->modes(),
         ];
@@ -264,50 +271,63 @@ final class AdminService
         try {
             ($this->connectionTester)($resolved);
         } catch (Throwable $exception) {
-            (new OperationalLogger())->error('database', 'Database connection test failed', [
-                'error_code' => 'DATABASE_CONNECTION_FAILED',
-            ]);
-            $this->logger->audit('database.connection_test', 'failure', 'WARNING', [
-                'reason' => 'connection_failed', 'component' => 'database',
-            ]);
-            throw new ApiRequestException(
-                'Database connection failed.',
-                'DATABASE_CONNECTION_FAILED',
-                [],
-                422
-            );
+            throw $this->connectionTestFailure($exception);
         }
         $this->logger->audit('database.connection_test', 'success', 'INFO', ['component' => 'database']);
         (new OperationalLogger())->info('database', 'Database connection test successful');
         return ['connected' => true];
     }
 
-    public function testCurrentDatabase(): array
+    public function testCurrentDatabase(?string $databaseId = null): array
     {
-        (new OperationalLogger())->info('database', 'Database connection test started');
+        $this->verifyDatabase($databaseId);
+        return ['connected' => true];
+    }
+
+    /**
+     * Resolve a configured, enabled database (the default when null) and open
+     * and close one connection to it. Availability is not required: this is
+     * what decides it.
+     */
+    private function verifyDatabase(?string $databaseId): DatabaseContext
+    {
+        (new OperationalLogger())->info('database', 'Database connection test started', ['database_context' => $databaseId]);
         try {
-            $database = $this->databaseRegistry->connectionConfiguration();
+            $context = $this->databaseResolver->resolve($databaseId);
+        } catch (ApiRequestException $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
             throw $this->databaseConfigurationFailure();
         }
-        $this->validateDatabaseAuthentication($database);
+        $configuration = $context->driverConfiguration();
+        $this->validateDatabaseAuthentication($configuration);
         try {
-            ($this->connectionTester)($database);
+            ($this->connectionTester)($configuration);
         } catch (DatabaseCredentialException $exception) {
             // A legacy encrypted password is decrypted only when the driver connects.
             throw $this->databaseConfigurationFailure();
         } catch (Throwable $exception) {
-            (new OperationalLogger())->error('database', 'Database connection test failed', [
-                'error_code' => 'DATABASE_CONNECTION_FAILED',
-            ]);
-            $this->logger->audit('database.connection_test', 'failure', 'WARNING', [
-                'reason' => 'connection_failed', 'component' => 'database',
-            ]);
-            throw new ApiRequestException('Database connection failed.', 'DATABASE_CONNECTION_FAILED', [], 422);
+            throw $this->connectionTestFailure($exception, $context->id);
         }
         $this->logger->audit('database.connection_test', 'success', 'INFO', ['component' => 'database']);
-        (new OperationalLogger())->info('database', 'Database connection test successful');
-        return ['connected' => true];
+        (new OperationalLogger())->info('database', 'Database connection test successful', ['database_context' => $context->id]);
+        return $context;
+    }
+
+    /** Safe failure for a connection test; a login timeout is reported separately. */
+    private function connectionTestFailure(Throwable $exception, ?string $databaseId = null): ApiRequestException
+    {
+        $timeout = $exception instanceof DatabaseConnectionException && $exception->isTimeout();
+        (new OperationalLogger())->error('database', 'Database connection test failed', array_filter([
+            'database_context' => $databaseId,
+            'error_code' => $timeout ? 'DATABASE_CONNECTION_TIMEOUT' : 'DATABASE_CONNECTION_FAILED',
+        ]));
+        $this->logger->audit('database.connection_test', 'failure', 'WARNING', [
+            'reason' => $timeout ? 'connection_timeout' : 'connection_failed', 'component' => 'database',
+        ]);
+        return $timeout
+            ? new ApiRequestException('Database connection timed out.', 'DATABASE_CONNECTION_TIMEOUT', [], 504)
+            : new ApiRequestException('Database connection failed.', 'DATABASE_CONNECTION_FAILED', [], 422);
     }
 
     public function saveDatabase(array $database): array
@@ -540,35 +560,61 @@ final class AdminService
      * immediately closed test connection; requests still open their own
      * connections. SQL Server itself is never started or stopped.
      */
-    public function controlDatabase(string $operation): array
+    public function controlDatabase(string $operation, ?string $databaseId = null): array
     {
         (new OperationalLogger())->info('database', 'Database runtime operation started', ['operation' => $operation]);
+        $gateId = $this->availabilityGateId($databaseId);
         if ($operation === 'disconnect') {
-            $result = $this->databaseAvailability->setAvailable(false);
-            $this->healthMonitor->forgetDatabaseHealth();
+            $result = $this->databaseAvailability->setAvailable(false, $gateId);
+            $this->healthMonitor->forgetDatabaseHealth($gateId);
             $this->runtimeAudit('database', $operation, 'success', $result);
-            (new OperationalLogger())->info('database', 'Database disconnect successful');
+            (new OperationalLogger())->info('database', 'Database disconnect successful', ['database_context' => $gateId]);
             return [...$result, 'connected' => false, 'state' => 'disabled'];
         }
-        if ($operation === 'restart') $this->databaseAvailability->setAvailable(false);
+        if ($operation === 'restart') $this->databaseAvailability->setAvailable(false, $gateId);
         try {
-            $this->testCurrentDatabase();
+            $context = $this->verifyDatabase($databaseId);
         } catch (Throwable $exception) {
-            $this->databaseAvailability->setAvailable(false);
-            $this->healthMonitor->forgetDatabaseHealth();
+            $this->databaseAvailability->setAvailable(false, $gateId);
+            $this->healthMonitor->forgetDatabaseHealth($gateId);
             $reason = $this->databaseFailureReason($exception);
             $this->runtimeAudit('database', $operation, 'failure', [], $reason);
             (new OperationalLogger())->error('database', 'Database runtime operation failed', [
                 'operation' => $operation,
+                'database_context' => $gateId,
                 'error_code' => $exception instanceof ApiRequestException ? $exception->getErrorCode() : 'DATABASE_UNAVAILABLE',
             ]);
             throw $exception;
         }
-        $result = $this->databaseAvailability->setAvailable(true);
-        $this->healthMonitor->forgetDatabaseHealth();
+        $result = $this->databaseAvailability->setAvailable(true, $context->id);
+        $this->healthMonitor->forgetDatabaseHealth($context->id);
         $this->runtimeAudit('database', $operation, 'success', $result);
-        (new OperationalLogger())->info('database', 'Database runtime operation successful', ['operation' => $operation]);
+        (new OperationalLogger())->info('database', 'Database runtime operation successful', [
+            'operation' => $operation, 'database_context' => $context->id,
+        ]);
         return [...$result, 'connected' => true, 'state' => 'connected'];
+    }
+
+    /**
+     * The availability gate an operation changes: an explicit configured
+     * database, else the default database (or "default" before one exists).
+     */
+    private function availabilityGateId(?string $databaseId): string
+    {
+        if ($databaseId === null) {
+            return $this->databaseRegistry->defaultDatabaseId() ?? DatabaseRegistry::DEFAULT_ID;
+        }
+        try {
+            $known = array_key_exists($databaseId, $this->databaseRegistry->metadata()['databases']);
+        } catch (Throwable $exception) {
+            throw $this->databaseConfigurationFailure();
+        }
+        if (!$known) {
+            throw new ApiRequestException('Database not found.', 'DATABASE_NOT_FOUND', [
+                ['path' => 'database', 'message' => 'The database is not configured.'],
+            ], 404);
+        }
+        return $databaseId;
     }
 
     public function backupHistory(): array
@@ -759,6 +805,7 @@ final class AdminService
 
     private function withExistingPassword(array $database): array
     {
+        $database = $this->withExistingLoginTimeout($database);
         if ($database['password'] !== null && $database['password'] !== '') {
             return $database;
         }
@@ -771,6 +818,22 @@ final class AdminService
             // Saving a replacement password remains possible when an old
             // encrypted file cannot be opened. Empty passwords fail validation.
         }
+        return $database;
+    }
+
+    /** A form that omits the login timeout keeps the stored one. */
+    private function withExistingLoginTimeout(array $database): array
+    {
+        if (array_key_exists('loginTimeoutSeconds', $database['options'] ?? [])
+            || $this->databaseRegistry->source() === DatabaseRegistry::SOURCE_NONE) {
+            return $database;
+        }
+        try {
+            $existing = $this->databaseRegistry->connectionConfiguration()['options']['loginTimeoutSeconds'] ?? null;
+        } catch (Throwable $exception) {
+            return $database;
+        }
+        if (DatabaseServerProfile::isValidLoginTimeout($existing)) $database['options']['loginTimeoutSeconds'] = $existing;
         return $database;
     }
 
