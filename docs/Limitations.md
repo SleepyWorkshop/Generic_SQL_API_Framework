@@ -18,8 +18,13 @@ Planned work is tracked separately in [Roadmap](Roadmap.md).
   database login can read, and `data.write` can change any table the login can
   write (ST-003). Restrict data exposure with the database login's own
   permissions, least-privilege views, and SQL Resources.
-- The data API addresses only user objects of the configured database: system
-  schemas, cross-database names, and system procedures are rejected.
+- The data API addresses only user objects of registered databases: system
+  schemas, client-written database-qualified names, and system procedures are
+  rejected. SELECT and set-operation requests can combine databases of one
+  server profile; cross-server queries, cross-database writes, and
+  database-selectable SQL Resources, routines, and metadata are not supported.
+- Subqueries cannot refer to columns of the outer query (no correlated
+  subqueries).
 - There is no separate limit on the number of filters per request; it is bounded
   by the request body limit (ST-004).
 - Unpaginated reads are limited to `GENERIC_MAX_RESULT_ROWS` rows (default 10,000)

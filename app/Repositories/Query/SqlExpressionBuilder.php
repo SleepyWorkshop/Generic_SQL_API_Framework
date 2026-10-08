@@ -1,14 +1,40 @@
 <?php
 
 require_once __DIR__ . '/QueryFunctionRegistry.php';
+require_once __DIR__ . '/../../Database/QuerySource.php';
 
 class SqlExpressionBuilder
 {
+    /** @var array<string, string> name or alias → table key used for metadata lookups */
     private array $tableMap = [];
+    /** @var array<string, QuerySource> source reference (alias, else name) → source */
+    private array $sources = [];
 
     public function resetTables(): void
     {
         $this->tableMap = [];
+        $this->sources = [];
+    }
+
+    public function registerSource(string $reference, QuerySource $source): void
+    {
+        $this->sources[$reference] = $source;
+    }
+
+    /** The planned source a reference names, or null without a database plan. */
+    public function source(string $reference): ?QuerySource
+    {
+        return $this->sources[$reference] ?? null;
+    }
+
+    public function getSources(): array
+    {
+        return $this->sources;
+    }
+
+    public function setSources(array $sources): void
+    {
+        $this->sources = $sources;
     }
 
     public function getTables(): array

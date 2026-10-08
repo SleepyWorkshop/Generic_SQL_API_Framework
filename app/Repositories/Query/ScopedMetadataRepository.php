@@ -12,8 +12,9 @@ class ScopedMetadataRepository extends MetadataRepository
 {
     private MetadataRepository $delegate;
     private array $virtualTables = [];
-    /** @var array<string, QualifiedObject> lower-case source name → object */
+    /** @var array<string, QualifiedObject> lower-case source name or reference → object */
     private array $physicalSources = [];
+    private ?string $primaryDatabaseId = null;
 
     public function __construct(MetadataRepository $delegate)
     {
@@ -30,10 +31,14 @@ class ScopedMetadataRepository extends MetadataRepository
         return $this->virtualTables;
     }
 
-    /** @param array<string, QualifiedObject> $sources lower-case source name → object */
-    public function setPhysicalSources(array $sources): void
+    /**
+     * @param array<string, QualifiedObject> $sources lower-case source name or reference → object
+     * @param ?string $primaryDatabaseId the connected (primary) database of the plan
+     */
+    public function setPhysicalSources(array $sources, ?string $primaryDatabaseId = null): void
     {
         $this->physicalSources = $sources;
+        $this->primaryDatabaseId = $primaryDatabaseId;
     }
 
     public function getPhysicalSources(): array
@@ -47,7 +52,8 @@ class ScopedMetadataRepository extends MetadataRepository
             return true;
         }
         $object = $this->physicalSource($table);
-        return $object !== null ? $this->delegate->objectExists($object) : $this->delegate->tableExists($table);
+        if ($object === null) return $this->delegate->tableExists($this->tableName($table));
+        return $this->delegate->objectExists($object);
     }
 
     public function columnExists($table, $column)
@@ -57,7 +63,7 @@ class ScopedMetadataRepository extends MetadataRepository
             $object = $this->physicalSource($table);
             return $object !== null
                 ? $this->delegate->objectColumnExists($object, $column)
-                : $this->delegate->columnExists($table, $column);
+                : $this->delegate->columnExists($this->tableName($table), $column);
         }
         foreach ($this->virtualTables[$virtualTable] as $virtualColumn) {
             if (strcasecmp($virtualColumn, (string)$column) === 0) {
@@ -75,7 +81,7 @@ class ScopedMetadataRepository extends MetadataRepository
         $object = $this->physicalSource($table);
         return $object !== null
             ? $this->delegate->objectColumnDataType($object, $column)
-            : $this->delegate->getColumnDataType($table, $column);
+            : $this->delegate->getColumnDataType($this->tableName($table), $column);
     }
 
     public function getColumns($table)
@@ -83,7 +89,7 @@ class ScopedMetadataRepository extends MetadataRepository
         $virtualTable = $this->findVirtualTable((string)$table);
         if ($virtualTable === null) {
             $object = $this->physicalSource($table);
-            return $object !== null ? $this->delegate->objectColumns($object) : $this->delegate->getColumns($table);
+            return $object !== null ? $this->delegate->objectColumns($object) : $this->delegate->getColumns($this->tableName($table));
         }
         return [
             'data' => array_map(
@@ -93,11 +99,23 @@ class ScopedMetadataRepository extends MetadataRepository
         ];
     }
 
-    /** Only schema-qualified sources need object lookups; others keep name lookups. */
+    /**
+     * The object a source key needs an object lookup for: schema-qualified
+     * sources and sources of another planned database. Sources of the
+     * connected database without a schema keep V2's name lookups.
+     */
     private function physicalSource($table): ?QualifiedObject
     {
         $object = $this->physicalSources[strtolower((string)$table)] ?? null;
-        return $object !== null && $object->schemaName() !== null ? $object : null;
+        if ($object === null) return null;
+        return $object->schemaName() !== null || $object->databaseId !== $this->primaryDatabaseId ? $object : null;
+    }
+
+    /** The table name for a name lookup: a source alias key maps to its object's name. */
+    private function tableName($table)
+    {
+        $object = $this->physicalSources[strtolower((string)$table)] ?? null;
+        return $object === null ? $table : $object->objectName();
     }
 
     private function findVirtualTable(string $table): ?string

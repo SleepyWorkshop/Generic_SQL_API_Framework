@@ -85,18 +85,21 @@ class MetadataRepository
     }
 
     /**
-     * Structured lookups for a physical object of the connection's database.
-     * Without a schema they are the name-based lookups above; with one, the
-     * schema must match too. Objects of other databases are refused: catalog
-     * views describe only the connected database.
+     * Structured lookups for a physical object. A schema-less object of the
+     * connected database uses the name-based lookups above. Otherwise the
+     * schema (when given) must match too, and an object of another database
+     * on the same server profile is read from that database's catalog views
+     * (`[Database].INFORMATION_SCHEMA`), on this connection. The database
+     * part is a registry identifier rendered by QualifiedObject's rules;
+     * schema, object, and column names are bound values.
      */
     public function objectExists(QualifiedObject $object): bool
     {
-        if ($object->schemaName() === null) return $this->tableExists($object->objectName());
-        $this->assertConnectedDatabase($object);
+        if ($this->isLocalUnqualified($object)) return $this->tableExists($object->objectName());
+        [$where, $params] = $this->objectPredicate($object);
         $result = $this->queryEngine->executePrepared(
-            'SELECT COUNT(*) AS Total FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
-            [$object->schemaName(), $object->objectName()],
+            'SELECT COUNT(*) AS Total FROM ' . $this->catalog($object) . 'INFORMATION_SCHEMA.TABLES WHERE ' . $where,
+            $params,
             ['queryPhase' => 'metadata']
         );
         return ($result['data'][0]['Total'] ?? 0) > 0;
@@ -104,17 +107,17 @@ class MetadataRepository
 
     public function objectColumnExists(QualifiedObject $object, $column): bool
     {
-        if ($object->schemaName() === null) return $this->columnExists($object->objectName(), $column);
+        if ($this->isLocalUnqualified($object)) return $this->columnExists($object->objectName(), $column);
         return $this->objectColumnDataType($object, $column) !== null;
     }
 
     public function objectColumnDataType(QualifiedObject $object, $column)
     {
-        if ($object->schemaName() === null) return $this->getColumnDataType($object->objectName(), $column);
-        $this->assertConnectedDatabase($object);
+        if ($this->isLocalUnqualified($object)) return $this->getColumnDataType($object->objectName(), $column);
+        [$where, $params] = $this->objectPredicate($object);
         $result = $this->queryEngine->executePrepared(
-            'SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?',
-            [$object->schemaName(), $object->objectName(), $column],
+            'SELECT DATA_TYPE FROM ' . $this->catalog($object) . 'INFORMATION_SCHEMA.COLUMNS WHERE ' . $where . ' AND COLUMN_NAME = ?',
+            [...$params, $column],
             ['queryPhase' => 'metadata']
         );
         return $result['data'][0]['DATA_TYPE'] ?? null;
@@ -122,22 +125,37 @@ class MetadataRepository
 
     public function objectColumns(QualifiedObject $object)
     {
-        if ($object->schemaName() === null) return $this->getColumns($object->objectName());
-        $this->assertConnectedDatabase($object);
+        if ($this->isLocalUnqualified($object)) return $this->getColumns($object->objectName());
+        [$where, $params] = $this->objectPredicate($object);
         return $this->queryEngine->executePrepared(
-            'SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS'
-                . ' WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION',
-            [$object->schemaName(), $object->objectName()],
+            'SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM ' . $this->catalog($object) . 'INFORMATION_SCHEMA.COLUMNS'
+                . ' WHERE ' . $where . ' ORDER BY ORDINAL_POSITION',
+            $params,
             ['queryPhase' => 'metadata']
         );
     }
 
-    private function assertConnectedDatabase(QualifiedObject $object): void
+    private function isLocal(QualifiedObject $object): bool
     {
-        $connected = $this->queryEngine->databaseContextId();
-        if ($connected !== null && $connected !== $object->databaseId) {
-            throw new LogicException('Cross-database metadata is not supported.');
-        }
+        return $this->queryEngine->databaseContextId() === $object->databaseId;
+    }
+
+    private function isLocalUnqualified(QualifiedObject $object): bool
+    {
+        return $object->schemaName() === null && $this->isLocal($object);
+    }
+
+    /** `` for the connected database, else `[Database].`; never other text. */
+    private function catalog(QualifiedObject $object): string
+    {
+        return $this->isLocal($object) ? '' : MssqlIdentifier::database($object->databaseName())->quoted() . '.';
+    }
+
+    private function objectPredicate(QualifiedObject $object): array
+    {
+        return $object->schemaName() === null
+            ? ['TABLE_NAME = ?', [$object->objectName()]]
+            : ['TABLE_SCHEMA = ? AND TABLE_NAME = ?', [$object->schemaName(), $object->objectName()]];
     }
 
     /**

@@ -319,9 +319,14 @@ never supplies a physical database name, server, port, or credential.
   `DATABASE_UNAVAILABLE`. Error details give the path where it was named.
 - All databases in one request must belong to the primary database's server
   profile, or the request fails with `CROSS_SERVER_QUERY_NOT_SUPPORTED`.
-- A request that names more than one database is validated and planned but
-  not executed yet: it fails with `CROSS_DATABASE_EXECUTION_NOT_SUPPORTED`
-  before any connection is opened.
+- A request that names more than one database on one server profile runs as
+  one SQL statement on one connection, opened to the primary database. Every
+  physical source is then rendered with its own database, for example
+  `[InventoryDB].[dbo].[Product] AS [p]`, or `[InventoryDB]..[Product] AS
+  [Product]` without a schema or alias. Column references keep using the
+  source's alias (or table name). Sources that share a table name, or an
+  alias, need distinct aliases. Subqueries still cannot refer to aliases of
+  the outer query.
 
 ```json
 { "action": "select", "database": "inventory", "source": { "schema": "sales", "table": "Product" }, "fields": ["ProductCode"] }
@@ -337,7 +342,9 @@ Two sources with the same table name must name the same object, and a
 source with `schema` is validated against that schema's catalog entry.
 
 Other actions (`sql`, writes, routines, and metadata) do not accept `database`
-and use the default database.
+and use the default database: SQL Resources, routines, writes, and metadata
+are not database-selectable yet, and there is no database discovery action.
+Cross-server queries are not supported.
 
 ## Routines and metadata
 

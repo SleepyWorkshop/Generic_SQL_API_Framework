@@ -44,14 +44,16 @@ final class QuerySource
     }
 
     /**
-     * The FROM/JOIN text. Database-qualified: `[Db].[schema].[object] AS [p]`.
+     * The FROM/JOIN text. Database-qualified: `[Db].[schema].[object] AS [p]`,
+     * aliased by its own name when it has no alias so expressions keep
+     * addressing it by that name.
      * Otherwise sources without a schema keep their established unqualified
      * form (`Product p`), and schema-qualified sources render `[schema].[object] p`.
      */
     public function renderFrom(bool $databaseQualified = false): string
     {
         if ($databaseQualified && $this->object !== null) {
-            return $this->object->render() . ($this->alias === null ? '' : ' AS ' . MssqlIdentifier::alias($this->alias)->quoted());
+            return $this->object->render() . ' AS ' . MssqlIdentifier::alias($this->reference())->quoted();
         }
         $name = $this->object !== null && $this->object->schemaName() !== null
             ? $this->object->renderLocal()

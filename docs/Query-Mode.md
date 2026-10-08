@@ -18,7 +18,7 @@ The public schema is authoritative in [JSON request reference](JSON-Request-Refe
 
 ## Sources
 
-Any table or view of the configured database can be queried by a caller holding
+Any table or view of the configured databases can be queried by a caller holding
 `data.read` (or frontend access); nothing has to be registered. Every physical
 table or view referenced by a request—source, join, subquery, set-operation
 branch, or CTE body—must exist in the database's `INFORMATION_SCHEMA` and each
@@ -29,6 +29,37 @@ The database login's permissions remain the final boundary.
 
 Unpaginated results are limited to `GENERIC_MAX_RESULT_ROWS` rows (default
 10,000) and return `413 RESULT_TOO_LARGE` instead of being truncated.
+
+### Databases
+
+A SELECT or set-operation request can name registered databases with a
+top-level `database` and with `database` (and `schema`) on any source; see
+[Database selection](JSON-Request-Reference.md#database-selection). All named
+databases must belong to one server profile. A request that uses several
+databases runs as one statement on one connection to its primary database:
+
+```json
+{
+  "action": "select",
+  "database": "company",
+  "source": { "table": "Customer", "alias": "c" },
+  "fields": ["c.Name", "p.Name"],
+  "joins": [
+    { "type": "INNER", "source": { "database": "inventory", "schema": "dbo", "table": "Product", "alias": "p" },
+      "on": { "left": "c.ProductId", "right": "p.Id" } }
+  ]
+}
+```
+
+```sql
+SELECT c.Name, p.Name FROM [CompanyDB]..[Customer] AS [c]
+INNER JOIN [InventoryDB].[dbo].[Product] AS [p] ON c.ProductId = p.Id ORDER BY [Name] ASC
+```
+
+Physical database names come only from the registry. Each source's tables and
+columns are validated against its own database's `INFORMATION_SCHEMA`.
+Comparing text columns whose databases use different collations fails with
+`422 COLLATION_CONFLICT`; collations are never converted automatically.
 
 ## Selection and aliases
 

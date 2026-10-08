@@ -292,27 +292,24 @@ try {
     $payloads[] = sourceResponse(sourceFailure(fn () => $run($conflict, $planner->plan($conflict)), 'Two objects with one table name were accepted.'))[3];
     sourceAssert(sourceFailure(fn () => $run($schemaRequest, null), 'A schema source was built without a plan.') instanceof LogicException,
         'A schema source was built without a database plan.');
-    // Builders never render another database: cross-database plans stay unexecuted.
-    [$status, $code] = sourceResponse(sourceFailure(fn () => $run($crossRequest, $crossPlan), 'A cross-database query was built.'));
-    sourceAssert($status === 501 && $code === 'CROSS_DATABASE_EXECUTION_NOT_SUPPORTED', 'The builder accepted a cross-database plan.');
-    DatabaseQueryPlanContext::set($crossPlan);
-    [$status, $code] = sourceResponse(sourceFailure(fn () => new QueryEngine(null, new Logger($directory . '/logs')), 'A cross-database plan connected.'));
-    DatabaseQueryPlanContext::clear();
-    sourceAssert($status === 501 && $code === 'CROSS_DATABASE_EXECUTION_NOT_SUPPORTED', 'The engine accepted a cross-database plan.');
+    // A cross-database plan qualifies every physical source with its own database.
+    sourceAssert($run($crossRequest, $crossPlan)[0] === 'SELECT Id FROM [InventoryDB]..[Product] AS [Product] INNER JOIN [CompanyDB]..[Customer] AS [Customer] ON Id = Id ORDER BY [Id] ASC',
+        'A cross-database query was not database-qualified.');
     $writeSql = (new InsertBuilder())->build(['schema' => 'dbo', 'table' => 'Customer', 'identityColumn' => null], ['Name' => 'A'])['sql'];
     sourceAssert(str_contains($writeSql, 'INSERT INTO [dbo].[Customer] ([Name])')
         && (new RoutineBuilder())->buildProcedure(['schema' => 'dbo', 'name' => 'RunReport'], [1])['sql'] === 'EXEC [dbo].[RunReport] ?',
         'Write or routine identifiers changed.');
 
-    // Metadata: structured lookups are bound, and only for the connected database.
+    // Metadata: structured lookups are bound; another planned database is read from its own catalog.
     $engine = new SourceRecordingEngine('company');
     $catalog = new MetadataRepository($engine);
     sourceAssert($catalog->objectExists(QualifiedObject::in($company, 'sales', 'Customer'))
         && $catalog->objectColumnDataType(QualifiedObject::in($company, 'sales', 'Customer'), 'Name') === 'int', 'Structured metadata lookups failed.');
     sourceAssert($engine->statements[0]['params'] === ['sales', 'Customer'] && str_contains($engine->statements[0]['sql'], 'TABLE_SCHEMA = ? AND TABLE_NAME = ?')
         && !str_contains($engine->statements[0]['sql'], 'Customer'), 'Structured metadata lookups interpolated identifiers.');
-    sourceAssert(sourceFailure(fn () => $catalog->objectExists(QualifiedObject::in($inventory, 'dbo', 'Product')), 'Another database was looked up.') instanceof LogicException,
-        'Metadata of another database was read through this connection.');
+    $catalog->objectExists(QualifiedObject::in($inventory, 'dbo', 'Product'));
+    sourceAssert(end($engine->statements)['sql'] === 'SELECT COUNT(*) AS Total FROM [InventoryDB].INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?'
+        && end($engine->statements)['params'] === ['dbo', 'Product'], 'Metadata of another planned database was not read from its catalog.');
 
     // SQL Resource parsing keeps every name part.
     $statement = SqlResourceStatement::analyze('SELECT o.Id, c.Name FROM OtherDB.dbo.Orders o JOIN dbo.Customer c ON c.Id = o.CustomerId JOIN Region r ON r.Id = c.RegionId');

@@ -151,6 +151,17 @@ integer-backed date handling; writes also read `sys.columns`, `sys.tables`,
 `sys.schemas`, and `sys.types` for length, precision, nullability, identity,
 computed, generated, and default flags.
 
+A SELECT or set-operation request is planned before any connection opens:
+its database references are collected, resolved through the registry,
+checked by the access policy and availability gate, and required to share
+one server profile (`DatabaseQueryPlanner`). `QueryEngine` connects to the
+plan's primary database. When the plan names several databases, the builders
+render each physical source as a `QualifiedObject`
+(`[Database].[schema].[object] AS [alias]`), metadata for other databases is
+read from their own `INFORMATION_SCHEMA` views on the same connection, and the
+query runs as one statement; nothing is merged in PHP and no second
+connection or linked server is used.
+
 Pagination runs a count query, then checks the database compatibility level:
 110 or newer uses `OFFSET/FETCH`; older levels use a `ROW_NUMBER()` wrapper. A
 complete first-page SQL Resource whose authored `TOP` fits the page skips the

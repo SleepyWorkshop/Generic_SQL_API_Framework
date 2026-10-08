@@ -378,10 +378,12 @@ try {
     planAssert(count(PlanningSqlServerDriver::$attempts) === 1 && str_contains(PlanningSqlServerDriver::$attempts[0], 'Database=InventoryDB;'),
         'A single-database plan did not connect to its primary database.');
     $engine->close();
+    // A same-profile cross-database plan connects once, to its primary database.
     DatabaseQueryPlanContext::set($cross);
-    [$status, $code] = planResponse(planFailure(fn () => new QueryEngine(null, $logger, null, true, $connections()), 'A cross-database plan was executed.'));
-    planAssert($status === 501 && $code === 'CROSS_DATABASE_EXECUTION_NOT_SUPPORTED' && count(PlanningSqlServerDriver::$attempts) === 1,
-        'A cross-database plan opened a connection.');
+    $crossEngine = new QueryEngine(null, $logger, null, true, $connections());
+    planAssert(count(PlanningSqlServerDriver::$attempts) === 2 && str_contains(PlanningSqlServerDriver::$attempts[1], 'Database=CompanyDB;'),
+        'A cross-database plan did not open one connection to its primary database.');
+    $crossEngine->close();
     DatabaseQueryPlanContext::clear();
     $api = (string)file_get_contents(dirname(__DIR__) . '/api/index.php');
     planAssert(strpos($api, 'new AuthorizationMiddleware') < strpos($api, '$validator->validate($publicRequest)')

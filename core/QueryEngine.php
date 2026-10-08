@@ -16,6 +16,8 @@ class QueryEngine
     protected $connection = null;
     protected ?DatabaseConnectionManager $connections = null;
     protected ?string $databaseContextId = null;
+    /** @var list<string> logical ids of the databases the planned request references */
+    protected array $databaseReferences = [];
     protected Logger $logger;
     protected int $queryTimeoutSeconds;
     protected ?bool $queryTimeoutSupported = null;
@@ -44,6 +46,7 @@ class QueryEngine
                 $this->connection = $this->db->getConnection();
                 (new OperationalLogger())->info('database', 'Database connection successful', [
                     'database_context' => $this->databaseContextId,
+                    'database_references' => $this->databaseReferences,
                     'duration_ms' => round($this->elapsed($started), 2),
                 ]);
             } catch (Throwable $exception) {
@@ -68,20 +71,18 @@ class QueryEngine
     public function databaseContextId(): ?string { return $this->databaseContextId; }
 
     /**
-     * The database to connect to: the plan's primary database, which must
-     * still be available. Cross-database plans are not executed yet: their
-     * SQL would address every source in the primary database.
+     * The database to connect to: the plan's primary database. Every database
+     * of the plan shares its server profile, so a cross-database query runs
+     * as one statement on this one connection; each referenced database must
+     * still be available.
      */
     private function plannedContext(): DatabaseContext
     {
         $plan = DatabaseQueryPlanContext::current();
         if ($plan === null) return (new DatabaseContextResolver())->resolveAvailable();
-        if ($plan->isCrossDatabase) {
-            throw new ApiRequestException('Cross-database query execution is not supported yet.', 'CROSS_DATABASE_EXECUTION_NOT_SUPPORTED', [
-                ['path' => 'database', 'message' => 'A request can currently read from one database only.'],
-            ], 501);
-        }
-        (new DatabaseContextResolver())->assertAvailable($plan->primaryDatabase);
+        $resolver = new DatabaseContextResolver();
+        foreach ($plan->referencedDatabases as $database) $resolver->assertAvailable($database);
+        $this->databaseReferences = $plan->databaseIds();
         return $plan->primaryDatabase;
     }
 
@@ -163,9 +164,11 @@ class QueryEngine
         } catch (ApiRequestException $exception) {
             throw $exception;
         } catch (Throwable $exception) {
-            $converted = $this->isTimeout($exception)
-                ? new QueryTimeoutException("Database query exceeded the configured {$this->queryTimeoutSeconds}-second timeout.", 0, $exception)
-                : $exception;
+            $converted = match (true) {
+                $this->isTimeout($exception) => new QueryTimeoutException("Database query exceeded the configured {$this->queryTimeoutSeconds}-second timeout.", 0, $exception),
+                $this->isCollationConflict($exception) => self::collationConflict(),
+                default => $exception,
+            };
             $this->logger->audit(
                 $converted instanceof QueryTimeoutException ? 'database.query_timeout' : 'database.query_failure',
                 'failure',
@@ -272,6 +275,24 @@ class QueryEngine
     {
         return $exception instanceof QueryTimeoutException
             || preg_match('/(?:HYT00|HYT01|timeout|timed out|time limit)/i', $exception->getMessage()) === 1;
+    }
+
+    /**
+     * SQL Server reports collation conflicts (errors 468 and 457, often
+     * between databases with different default collations) only as message
+     * text under the generic SQLSTATE 42000, so the driver message is matched,
+     * as write errors are classified.
+     */
+    private function isCollationConflict(Throwable $exception): bool
+    {
+        return preg_match('/collation conflict/i', $exception->getMessage()) === 1;
+    }
+
+    private static function collationConflict(): ApiRequestException
+    {
+        return new ApiRequestException('Collation conflict.', 'COLLATION_CONFLICT', [
+            ['path' => '', 'message' => 'The compared values use incompatible collations.'],
+        ], 422);
     }
 
     private function sqlState(Throwable $exception): ?string

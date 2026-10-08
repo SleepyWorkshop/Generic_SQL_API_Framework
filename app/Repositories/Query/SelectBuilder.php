@@ -210,6 +210,10 @@ if (isset($request['cte'])) {
         */
         $this->expressionBuilder->resetTables();
 
+        if ($this->isCrossDatabase()) {
+            $this->registerCrossDatabaseSources($request, $baseSource);
+        } else {
+
         $this->expressionBuilder->registerTable($request['table'], $request['table']);
 
         if (!empty($request['alias'])) {
@@ -230,6 +234,12 @@ if (isset($request['cte'])) {
         }
        }
       }
+            if ($baseSource !== null) {
+                foreach ([$baseSource, ...array_column($request['joins'] ?? [], '_source')] as $source) {
+                    $this->expressionBuilder->registerSource($source->reference(), $source);
+                }
+            }
+        }
 
         /*
         * Validate Select Columns
@@ -2724,7 +2734,7 @@ if ($function == "STRING_AGG") {
         $baseAlias = " " . $request['alias'];
     }
 
-    $from = $baseSource !== null ? $baseSource->renderFrom() : $request['table'] . $baseAlias;
+    $from = $baseSource !== null ? $baseSource->renderFrom($this->isCrossDatabase()) : $request['table'] . $baseAlias;
 
     $sql = "
         SELECT
@@ -2839,6 +2849,7 @@ $pagination = $this->paginationBuilder->apply(
     private function buildNested(array $request, bool $isUnion): array
     {
         $tables = $this->expressionBuilder->getTables();
+        $querySources = $this->expressionBuilder->getSources();
         $virtualTables = $this->metadataRepository->getVirtualTables();
         $physicalSources = $this->metadataRepository->getPhysicalSources();
         if (!isset($request['_virtualTables']) && $virtualTables !== []) {
@@ -2848,16 +2859,24 @@ $pagination = $this->paginationBuilder->apply(
             return $this->build($request, $isUnion);
         } finally {
             $this->expressionBuilder->setTables($tables);
+            $this->expressionBuilder->setSources($querySources);
             $this->metadataRepository->setVirtualTables($virtualTables);
-            $this->metadataRepository->setPhysicalSources($physicalSources);
+            $this->metadataRepository->setPhysicalSources($physicalSources, $this->primaryDatabaseId());
         }
     }
 
     /**
      * Resolve the base and JOIN sources of one SELECT body to QuerySources
-     * when the request has a database plan, and scope schema-aware metadata
-     * lookups to them. Each JOIN keeps its source in `_source`. Without a
-     * plan, sources keep their unresolved V2 handling.
+     * when the request has a database plan, and scope metadata lookups to
+     * their physical objects. Each JOIN keeps its QuerySource in `_source`,
+     * its FROM text in `_from`, and its metadata key in `_lookup`. Without a plan, sources keep their
+     * unresolved V2 handling.
+     *
+     * A single-database plan keys objects by table name, exactly as V2 looked
+     * them up. A cross-database plan keys them by source reference (alias,
+     * else name), which expressions resolve to, and also by table name where
+     * that is unambiguous; every physical source then renders database-
+     * qualified, so each keeps its own database on the one connection.
      */
     private function resolveSources(array &$request, bool $isCTE): ?QuerySource
     {
@@ -2871,17 +2890,39 @@ $pagination = $this->paginationBuilder->apply(
             $this->metadataRepository->setPhysicalSources([]);
             return null;
         }
-        $physical = [];
-        $base = $this->querySource($request, $isCTE, 'source', $physical);
+        $cross = $this->isCrossDatabase();
+        $sources = ['source' => $this->querySource($request, $isCTE, 'source')];
         foreach ($joins as $index => $join) {
-            $request['joins'][$index]['_source'] = $this->querySource($join, false, "joins.{$index}.source", $physical);
+            $source = $this->querySource($join, false, "joins.{$index}.source");
+            $sources["joins.{$index}.source"] = $source;
+            $request['joins'][$index]['_source'] = $source;
+            $request['joins'][$index]['_from'] = $source->renderFrom($cross);
+            $request['joins'][$index]['_lookup'] = $cross && !$source->isVirtual() ? $source->reference() : $join['table'];
         }
-        $this->metadataRepository->setPhysicalSources($physical);
-        return $base;
+
+        $physical = [];
+        foreach ($sources as $path => $source) {
+            if ($source->isVirtual()) continue;
+            $keys = $cross ? ['reference' => $source->reference(), 'name' => $source->name] : ['name' => $source->name];
+            foreach ($keys as $kind => $key) {
+                $key = strtolower($key);
+                if (isset($physical[$key]) && !$physical[$key]->equals($source->object)) {
+                    // In a cross-database query a shared table name is reached through aliases.
+                    if ($cross && $kind === 'name') continue;
+                    throw new ApiRequestException('Invalid request.', 'INVALID_REQUEST', [
+                        ['path' => $path, 'message' => $cross
+                            ? 'Sources that share a table name or alias need distinct aliases.'
+                            : 'Sources with the same table name must name the same object.'],
+                    ]);
+                }
+                $physical[$key] = $source->object;
+            }
+        }
+        $this->metadataRepository->setPhysicalSources($physical, $this->primaryDatabaseId());
+        return $sources['source'];
     }
 
-    /** @param array<string, QualifiedObject> $physical */
-    private function querySource(array $source, bool $isCTE, string $path, array &$physical): QuerySource
+    private function querySource(array $source, bool $isCTE, string $path): QuerySource
     {
         $virtual = $isCTE;
         foreach (array_keys($this->metadataRepository->getVirtualTables()) as $name) {
@@ -2890,21 +2931,39 @@ $pagination = $this->paginationBuilder->apply(
         if ($virtual) {
             return QuerySource::virtual($source['table'], $source['alias'] ?? null);
         }
-        $resolved = $this->sources->resolve($source, $path);
-        if (!$resolved->object->isIn($this->sources->plan()->primaryDatabase)) {
-            // Cross-database SQL is not generated yet; the engine refuses such plans.
-            throw new ApiRequestException('Cross-database query execution is not supported yet.', 'CROSS_DATABASE_EXECUTION_NOT_SUPPORTED', [
-                ['path' => $path . '.database', 'message' => 'A request can currently read from one database only.'],
-            ], 501);
+        // The plan holds the only resolved databases: any of them, never another.
+        return $this->sources->resolve($source, $path);
+    }
+
+    /**
+     * Expressions resolve `alias.column` (or `name.column`) to the source's
+     * reference, which keys its physical object; the alias, never the physical
+     * name, stays the qualifier in generated SQL.
+     */
+    private function registerCrossDatabaseSources(array $request, QuerySource $base): void
+    {
+        $sources = [$base, ...array_map(fn (array $join): QuerySource => $join['_source'], $request['joins'] ?? [])];
+        foreach ($sources as $source) {
+            // Physical sources are keyed by reference; CTEs keep their name.
+            $key = $source->isVirtual() ? $source->name : $source->reference();
+            $this->expressionBuilder->registerSource($source->reference(), $source);
+            if (!isset($this->expressionBuilder->getTables()[$source->name])) {
+                $this->expressionBuilder->registerTable($source->name, $key);
+            }
+            if ($source->alias !== null) {
+                $this->expressionBuilder->registerTable($source->alias, $key);
+            }
         }
-        $key = strtolower($resolved->name);
-        if (isset($physical[$key]) && !$physical[$key]->equals($resolved->object)) {
-            throw new ApiRequestException('Invalid request.', 'INVALID_REQUEST', [
-                ['path' => $path, 'message' => 'Sources with the same table name must name the same object.'],
-            ]);
-        }
-        $physical[$key] = $resolved->object;
-        return $resolved;
+    }
+
+    private function isCrossDatabase(): bool
+    {
+        return $this->sources !== null && $this->sources->plan()->isCrossDatabase;
+    }
+
+    private function primaryDatabaseId(): ?string
+    {
+        return $this->sources?->plan()->primaryDatabase->id;
     }
 
     private function getOutputColumns(array $request): array

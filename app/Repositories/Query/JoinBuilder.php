@@ -22,19 +22,21 @@ class JoinBuilder
             if (!in_array($type, ['INNER', 'LEFT', 'RIGHT'])) {
                 throw new Exception("Invalid JOIN type: {$type}");
             }
-            if (!$this->metadataRepository->tableExists($join['table'])) {
+            // A planned source supplies its metadata key and FROM text.
+            $lookup = $join['_lookup'] ?? $join['table'];
+            if (!$this->metadataRepository->tableExists($lookup)) {
                 throw new Exception("Invalid JOIN table: {$join['table']}");
             }
             foreach (['left', 'right'] as $side) {
                 $resolved = ($this->columnResolver)($join[$side]);
                 $table = $resolved['table']
-                    ?? ($side === 'left' ? $request['table'] : $join['table']);
+                    ?? ($side === 'left' ? $request['table'] : $lookup);
                 if (!$this->metadataRepository->columnExists($table, $resolved['column'])) {
                     throw new Exception("Invalid JOIN column: {$join[$side]}");
                 }
             }
             $alias = !empty($join['alias']) ? ' ' . $join['alias'] : '';
-            $source = isset($join['_source']) ? $join['_source']->renderFrom() : $join['table'] . $alias;
+            $source = $join['_from'] ?? $join['table'] . $alias;
             $sql .= "
             {$type} JOIN {$source}
             ON {$join['left']} = {$join['right']}
