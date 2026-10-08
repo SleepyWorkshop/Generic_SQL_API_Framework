@@ -101,9 +101,10 @@ selection, or client override for identity insertion.
 | Name | Type | Required | Allowed/default | Example/notes |
 |---|---|---:|---|---|
 | `database` | database id | no | Base source database, else the default database | Top-level request only; see [Database selection](#database-selection) |
-| `source` | object | yes | Exactly `table`, optional `alias`, optional `database` | `{"table":"Items","alias":"I"}` |
-| `source.table` | identifier | yes | No default | Table or matching CTE name; database-qualified names such as `Db.dbo.Items` are rejected |
-| `source.alias` | identifier | no | none | Table alias |
+| `source` | object | yes | Exactly `table`, optional `alias`, `schema`, `database` | `{"table":"Items","alias":"I"}` |
+| `source.table` | identifier | yes | No default | One table or matching CTE name; dotted names such as `dbo.Items` or `Db.dbo.Items` are rejected |
+| `source.alias` | identifier | no | none | Table alias; a single identifier |
+| `source.schema` | identifier | no | none (SQL Server's default schema for the login) | One schema name; `sys` and `INFORMATION_SCHEMA` are rejected; not allowed on a CTE reference |
 | `source.database` | database id | no | The request's primary database | Registered database id; not allowed on a CTE reference |
 | `fields` | array | yes | Non-empty | Strings or field objects |
 | `fields[]` string | identifier | no | `*` also allowed | `"I.ItemCode"` |
@@ -237,7 +238,7 @@ Ordinary values, IN lists, BETWEEN bounds, and HAVING values become prepared par
 |---|---|---:|---|
 | `joins` | array | no | empty |
 | `joins[].type` | string | yes | `INNER`, `LEFT`, `RIGHT` (case-insensitive during normalization) |
-| `joins[].source` | object | yes | `table`, optional `alias`, optional `database` |
+| `joins[].source` | object | yes | `table`, optional `alias`, `schema`, `database` |
 | `joins[].on.left/right` | identifier | yes | Logical fields |
 | `joins[].on.operator` | string | no | `=` only; defaults to `=` |
 | `groupBy` | identifier/ExpressionNode array | no | empty; aggregate/window nodes rejected |
@@ -323,8 +324,17 @@ never supplies a physical database name, server, port, or credential.
   before any connection is opened.
 
 ```json
-{ "action": "select", "database": "inventory", "source": { "table": "Product" }, "fields": ["ProductCode"] }
+{ "action": "select", "database": "inventory", "source": { "schema": "sales", "table": "Product" }, "fields": ["ProductCode"] }
 ```
+
+Each source resolves on the server to a structured object: the registered
+database's physical name, the schema, and the table, each validated and
+quoted as a separate SQL Server identifier. Clients never supply the
+physical name, and multi-part names are never parsed from one field. A
+source with `schema` renders as `[schema].[table]`; a source without one
+renders exactly as in V2 and resolves through SQL Server's default schema.
+Two sources with the same table name must name the same object, and a
+source with `schema` is validated against that schema's catalog entry.
 
 Other actions (`sql`, writes, routines, and metadata) do not accept `database`
 and use the default database.

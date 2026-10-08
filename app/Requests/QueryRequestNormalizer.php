@@ -73,6 +73,7 @@ class QueryRequestNormalizer
             'columns' => array_map(fn ($field) => $this->normalizeField($field), $request['fields'])
         ];
         if (!empty($request['source']['alias'])) { $normalized['alias'] = $request['source']['alias']; }
+        $normalized += $this->sourceLocation($request['source']);
         if (array_key_exists('distinct', $request)) { $normalized['distinct'] = $request['distinct']; }
         if (isset($request['limit'])) { $normalized['top'] = $request['limit']; }
         if (isset($request['filterLogic'])) { $normalized['condition'] = $request['filterLogic']; }
@@ -88,7 +89,7 @@ class QueryRequestNormalizer
                     'right' => $join['on']['right']
                 ];
                 if (!empty($join['source']['alias'])) { $item['alias'] = $join['source']['alias']; }
-                return $item;
+                return $item + $this->sourceLocation($join['source']);
             }, $request['joins']);
         }
         if (isset($request['groupBy'])) {
@@ -134,6 +135,12 @@ class QueryRequestNormalizer
             }
         }
         return $normalized;
+    }
+
+    /** A source's database id and schema, only when the request names them. */
+    private function sourceLocation(array $source): array
+    {
+        return array_intersect_key($source, ['database' => true, 'schema' => true]);
     }
 
     private function normalizeField($field)

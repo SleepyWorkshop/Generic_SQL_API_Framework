@@ -6,6 +6,7 @@ require_once __DIR__ . '/WriteRequestValidator.php';
 require_once __DIR__ . '/../Repositories/Query/QueryFunctionRegistry.php';
 require_once __DIR__ . '/../Security/SecurityConfiguration.php';
 require_once __DIR__ . '/../Database/DatabaseRegistry.php';
+require_once __DIR__ . '/../Resources/DatabaseObjectName.php';
 
 class QueryRequestValidator
 {
@@ -976,14 +977,23 @@ class QueryRequestValidator
             $errors[] = ['path' => $prefix . "source.{$key}", 'message' => 'A valid source identifier is required.'];
             return;
         }
-        $this->rejectUnknown($source, $allowDatabase ? [$key, 'alias', 'database'] : [$key, 'alias'], $prefix . 'source.', $errors);
+        $this->rejectUnknown($source, $allowDatabase ? [$key, 'alias', 'database', 'schema'] : [$key, 'alias'], $prefix . 'source.', $errors);
         // Databases are named only by registry id in `database`, never inside
         // the object name.
         if ($key === 'table' && substr_count($source[$key], '.') > 1) {
             $errors[] = ['path' => $prefix . "source.{$key}", 'message' => 'Database-qualified names are not accepted; name the database with database.'];
+        } elseif ($allowDatabase && !DatabaseObjectName::isName($source[$key])) {
+            // SELECT sources name the schema separately, in `schema`.
+            $errors[] = ['path' => $prefix . "source.{$key}", 'message' => 'Table must be a single identifier; name the schema with schema.'];
         }
         if ($allowDatabase) {
             $this->validateDatabase($source, $prefix . 'source.', $errors);
+            if (isset($source['alias']) && !DatabaseObjectName::isName($source['alias'])) {
+                $errors[] = ['path' => $prefix . 'source.alias', 'message' => 'Alias must be a single identifier.'];
+            }
+            if (array_key_exists('schema', $source) && !DatabaseObjectName::isSchema($source['schema'])) {
+                $errors[] = ['path' => $prefix . 'source.schema', 'message' => 'Schema must be a single non-system identifier.'];
+            }
         }
         if (isset($source['alias']) && !$this->isIdentifier($source['alias'])) {
             $errors[] = ['path' => $prefix . 'source.alias', 'message' => 'Alias must be a valid identifier.'];

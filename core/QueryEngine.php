@@ -64,6 +64,9 @@ class QueryEngine
 
     public function __destruct() { $this->close(); }
 
+    /** The registry id of the database this engine connected to, when it resolved one. */
+    public function databaseContextId(): ?string { return $this->databaseContextId; }
+
     /**
      * The database to connect to: the plan's primary database, which must
      * still be available. Cross-database plans are not executed yet: their

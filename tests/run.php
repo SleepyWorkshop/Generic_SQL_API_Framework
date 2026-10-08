@@ -27,6 +27,7 @@ $tests = [
     __DIR__ . '/DatabaseRegistryTest.php',
     __DIR__ . '/DatabaseContextResolutionTest.php',
     __DIR__ . '/DatabaseQueryPlanningTest.php',
+    __DIR__ . '/SourceResolutionTest.php',
     __DIR__ . '/DatabaseAvailabilityLifecycleTest.php',
     __DIR__ . '/RuntimeConfigurationBootstrapTest.php',
     __DIR__ . '/AuthenticationFoundationTest.php',

@@ -293,8 +293,8 @@ try {
     // 20-25. Plans.
     planAssert(!$v2->isCrossDatabase && $v2->serverProfileId === 'sql01' && count($v2->referencedDatabases) === 1
         && $v2->referencedDatabases[0] === $v2->primaryDatabase && $v2->references[0]->id === 'company', 'The single-database plan is wrong.');
-    // source.schema is not accepted until SQL generation can honor it.
-    $payloads[] = $rejected($select(['database' => 'company', 'schema' => 'dbo', 'table' => 'Customer']), 400, 'INVALID_REQUEST', 'source.schema');
+    // A schema is one identifier, never a qualified name.
+    $payloads[] = $rejected($select(['database' => 'company', 'schema' => 'dbo.Customer', 'table' => 'Customer']), 400, 'INVALID_REQUEST', 'source.schema');
     $cross = $plan($select(['database' => 'company', 'table' => 'Customer'], ['database' => 'company',
         'joins' => [$join(['database' => 'inventory', 'table' => 'Product'])]]));
     planAssert($cross->primaryDatabase->id === 'company' && $cross->databaseIds() === ['company', 'inventory']
@@ -347,8 +347,17 @@ try {
         'filters' => [['field' => 'Id', 'operator' => 'IN', 'query' => ['source' => ['table' => 'Sales', 'database' => 'company'], 'fields' => ['Id']]]]]);
     $validator->validate($v2Request);
     $validator->validate($v3Request);
-    planAssert($normalizer->normalize($v2Request) === $normalizer->normalize($v3Request) && !str_contains(json_encode($normalizer->normalize($v3Request)), 'database'),
-        'Database references reached the query builders.');
+    // V2 normalization is unchanged; database ids travel as structured source locations only.
+    $withoutDatabases = function (array $value) use (&$withoutDatabases): array {
+        unset($value['database']);
+        return array_map(fn ($item) => is_array($item) ? $withoutDatabases($item) : $item, $value);
+    };
+    $v2Normalized = $normalizer->normalize($v2Request);
+    $v3Normalized = $normalizer->normalize($v3Request);
+    planAssert(!str_contains(json_encode($v2Normalized), 'database') && ($v3Normalized['database'] ?? null) === 'company'
+        && ($v3Normalized['joins'][0]['database'] ?? null) === 'company' && ($v3Normalized['where'][0]['subquery']['database'] ?? null) === 'company'
+        && $withoutDatabases($v3Normalized) === $v2Normalized,
+        'Database locations changed the V2 normalized request.');
     foreach ([['action' => 'sql', 'resource' => 'reports/sales'], ['action' => 'metadata.tables'], ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Run']],
         ['action' => 'insert', 'table' => 'Customer', 'data' => ['A' => 1]]] as $request) {
         planAssert($planner->plan($request)->databaseIds() === ['company'], 'A V2 action did not plan the default database.');

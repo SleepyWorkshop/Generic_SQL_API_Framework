@@ -73,6 +73,13 @@ on. Discovery does not parse the projection or infer an output schema.
   joins of every kind, `APPLY`, subqueries, derived tables, CTEs, aggregates,
   windows, set operations, `PIVOT`/`UNPIVOT`, JSON/XML functions, `TOP`, and
   ordering.
+- Objects of the configured database may be written as `Table`,
+  `schema.Table`, or `Database.schema.Table`; the parser keeps every part.
+  Runtime filters resolve source columns only through the connected
+  database's catalog, so a filter that would need a column of a
+  database-qualified source cannot be placed. Four-part (linked-server) names
+  in the main query's FROM/JOIN clauses, and `OPENQUERY`, `OPENROWSET`, and
+  `OPENDATASOURCE` anywhere in the file, are rejected.
 - Never put runtime values in the file. Clients supply values through runtime
   filters, which are always prepared parameters.
 - Authored `OFFSET/FETCH` makes the resource fixed-page: any request filters,

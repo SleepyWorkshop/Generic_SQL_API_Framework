@@ -4,6 +4,9 @@ require_once __DIR__ . '/../Requests/ApiRequestException.php';
 
 class SqlResourceStatement
 {
+    /** Rowset functions that reach other servers or files. */
+    private const REMOTE_ROWSETS = ['OPENQUERY', 'OPENROWSET', 'OPENDATASOURCE'];
+
     private string $prefix;
     private string $body;
     private string $suffix;
@@ -42,6 +45,12 @@ class SqlResourceStatement
             throw new RuntimeException('Approved SQL resources must be read-only queries.');
         }
 
+        self::scan($sql, function (string $type, int $start, string $value): void {
+            if ($type === 'word' && in_array(strtoupper($value), self::REMOTE_ROWSETS, true)) {
+                throw new RuntimeException('Approved SQL resources cannot read remote or ad hoc data sources.');
+            }
+        }, true);
+
         $prefix = substr($sql, 0, $bodyStart);
         $body = substr($sql, $bodyStart);
         $bodyTokens = self::topLevelTokens($body);
@@ -73,7 +82,13 @@ class SqlResourceStatement
             }
         }
 
-        return new self($prefix, $body, $suffix, $authoredPagination);
+        $statement = new self($prefix, $body, $suffix, $authoredPagination);
+        foreach ($statement->topLevelSources() as $source) {
+            if ($source['server'] !== null) {
+                throw new RuntimeException('Approved SQL resources cannot reference linked-server objects.');
+            }
+        }
+        return $statement;
     }
 
     public function prefix(): string
@@ -139,6 +154,8 @@ class SqlResourceStatement
         return array_values(array_map(
             fn (array $source): array => [
                 'table' => $source['table'],
+                'schema' => $source['schema'],
+                'database' => $source['database'],
                 'column' => $physicalColumn,
                 'expression' => $source['qualifier'] . '.' . $physicalColumn,
             ],
@@ -148,7 +165,8 @@ class SqlResourceStatement
 
     /**
      * Physical-or-CTE sources named in the main SELECT's top-level FROM/JOIN
-     * clauses, as unqualified table names with their effective qualifiers.
+     * clauses: the object name (`table`), its `schema`, `database`, and
+     * `server` parts when written (else null), and the effective qualifier.
      */
     public function topLevelSources(): array
     {
@@ -313,7 +331,7 @@ class SqlResourceStatement
     {
         $identifier = '(?:[A-Za-z_][A-Za-z0-9_]*|\[[A-Za-z_][A-Za-z0-9_]*\])';
         if (preg_match(
-            '/^\s*((?:' . $identifier . '\s*\.\s*){0,2}' . $identifier . ')'
+            '/^\s*((?:' . $identifier . '\s*\.\s*){0,3}' . $identifier . ')'
                 . '(?:\s+(?:AS\s+)?(' . $identifier . '))?/i',
             $sql,
             $matches
@@ -337,7 +355,16 @@ class SqlResourceStatement
             return null;
         }
 
-        return ['table' => $table, 'qualifier' => $alias ?? $table];
+        // Keep every written part: a database- or server-qualified source must
+        // never be mistaken for a table of the connected database.
+        $count = count($parts);
+        return [
+            'table' => $table,
+            'schema' => $parts[$count - 2] ?? null,
+            'database' => $parts[$count - 3] ?? null,
+            'server' => $parts[$count - 4] ?? null,
+            'qualifier' => $alias ?? $table,
+        ];
     }
 
     private static function topLevelTokens(string $sql): array
@@ -362,7 +389,8 @@ class SqlResourceStatement
         return $found;
     }
 
-    private static function scan(string $sql, callable $visitor): void
+    /** Visit top-level tokens, or with $allDepths words inside parentheses too. */
+    private static function scan(string $sql, callable $visitor, bool $allDepths = false): void
     {
         $length = strlen($sql);
         $depth = 0;
@@ -425,7 +453,7 @@ class SqlResourceStatement
                 $index++;
                 continue;
             }
-            if ($depth === 0 && preg_match('/[A-Za-z_]/', $character) === 1) {
+            if (($depth === 0 || $allDepths) && preg_match('/[A-Za-z_]/', $character) === 1) {
                 $start = $index;
                 while ($index < $length && preg_match('/[A-Za-z0-9_]/', $sql[$index]) === 1) {
                     $index++;

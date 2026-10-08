@@ -83,13 +83,18 @@ final class DatabaseReferenceCollector
     /** @param array<string, DatabaseReference> $found */
     private function source($source, string $path, array $cteNames, array &$found): ?DatabaseReference
     {
-        if (!is_array($source) || !array_key_exists('database', $source)) return null;
-        $reference = DatabaseReference::fromRequest($source['database'], $path . '.database');
+        if (!is_array($source)) return null;
         if (is_string($source['table'] ?? null) && in_array(strtolower($source['table']), $cteNames, true)) {
-            throw new ApiRequestException('Invalid request.', 'INVALID_REQUEST', [
-                ['path' => $path . '.database', 'message' => 'A CTE reference is request-local and cannot name a database.'],
-            ]);
+            foreach (['database', 'schema'] as $key) {
+                if (array_key_exists($key, $source)) {
+                    throw new ApiRequestException('Invalid request.', 'INVALID_REQUEST', [
+                        ['path' => $path . '.' . $key, 'message' => "A CTE reference is request-local and cannot name a {$key}."],
+                    ]);
+                }
+            }
         }
+        if (!array_key_exists('database', $source)) return null;
+        $reference = DatabaseReference::fromRequest($source['database'], $path . '.database');
         $found[$reference->id] ??= $reference;
         return $reference;
     }

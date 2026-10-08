@@ -11,6 +11,8 @@ require_once __DIR__ . '/GroupByBuilder.php';
 require_once __DIR__ . '/HavingBuilder.php';
 require_once __DIR__ . '/SqlExpressionBuilder.php';
 require_once __DIR__ . '/ScopedMetadataRepository.php';
+require_once __DIR__ . '/../../Database/SourceResolver.php';
+require_once __DIR__ . '/../../Requests/ApiRequestException.php';
 
 class SelectBuilder
 {
@@ -25,12 +27,15 @@ class SelectBuilder
     private HavingBuilder $havingBuilder;
     private SqlExpressionBuilder $expressionBuilder;
     private ?Logger $logger;
+    private ?SourceResolver $sources;
 
     public function __construct(
         QueryEngine $queryEngine,
         MetadataRepository $metadataRepository,
-        ?Logger $logger = null
+        ?Logger $logger = null,
+        ?SourceResolver $sources = null
     ) {
+        $this->sources = $sources;
         $this->queryEngine = $queryEngine;
         $this->metadataRepository = new ScopedMetadataRepository($metadataRepository);
         $this->logger = $logger;
@@ -188,6 +193,8 @@ if (isset($request['cte'])) {
              isset($request['recursiveCte']) &&
              $request['table'] === $request['recursiveCte']['name']
          );
+
+         $baseSource = $this->resolveSources($request, $isCTE);
 
          if (
              !$isCTE &&
@@ -2717,11 +2724,13 @@ if ($function == "STRING_AGG") {
         $baseAlias = " " . $request['alias'];
     }
 
+    $from = $baseSource !== null ? $baseSource->renderFrom() : $request['table'] . $baseAlias;
+
     $sql = "
         SELECT
         {$distinct} {$top} {$columns}
     FROM
-        {$request['table']}{$baseAlias}
+        {$from}
     ";
         $sql .= $this->joinBuilder->build($request);
 
@@ -2831,6 +2840,7 @@ $pagination = $this->paginationBuilder->apply(
     {
         $tables = $this->expressionBuilder->getTables();
         $virtualTables = $this->metadataRepository->getVirtualTables();
+        $physicalSources = $this->metadataRepository->getPhysicalSources();
         if (!isset($request['_virtualTables']) && $virtualTables !== []) {
             $request['_virtualTables'] = $virtualTables;
         }
@@ -2839,7 +2849,62 @@ $pagination = $this->paginationBuilder->apply(
         } finally {
             $this->expressionBuilder->setTables($tables);
             $this->metadataRepository->setVirtualTables($virtualTables);
+            $this->metadataRepository->setPhysicalSources($physicalSources);
         }
+    }
+
+    /**
+     * Resolve the base and JOIN sources of one SELECT body to QuerySources
+     * when the request has a database plan, and scope schema-aware metadata
+     * lookups to them. Each JOIN keeps its source in `_source`. Without a
+     * plan, sources keep their unresolved V2 handling.
+     */
+    private function resolveSources(array &$request, bool $isCTE): ?QuerySource
+    {
+        $joins = $request['joins'] ?? [];
+        if ($this->sources === null) {
+            foreach ([$request, ...$joins] as $source) {
+                if (isset($source['database']) || isset($source['schema'])) {
+                    throw new LogicException('Sources with a database or schema require a database query plan.');
+                }
+            }
+            $this->metadataRepository->setPhysicalSources([]);
+            return null;
+        }
+        $physical = [];
+        $base = $this->querySource($request, $isCTE, 'source', $physical);
+        foreach ($joins as $index => $join) {
+            $request['joins'][$index]['_source'] = $this->querySource($join, false, "joins.{$index}.source", $physical);
+        }
+        $this->metadataRepository->setPhysicalSources($physical);
+        return $base;
+    }
+
+    /** @param array<string, QualifiedObject> $physical */
+    private function querySource(array $source, bool $isCTE, string $path, array &$physical): QuerySource
+    {
+        $virtual = $isCTE;
+        foreach (array_keys($this->metadataRepository->getVirtualTables()) as $name) {
+            $virtual = $virtual || strcasecmp($name, (string)$source['table']) === 0;
+        }
+        if ($virtual) {
+            return QuerySource::virtual($source['table'], $source['alias'] ?? null);
+        }
+        $resolved = $this->sources->resolve($source, $path);
+        if (!$resolved->object->isIn($this->sources->plan()->primaryDatabase)) {
+            // Cross-database SQL is not generated yet; the engine refuses such plans.
+            throw new ApiRequestException('Cross-database query execution is not supported yet.', 'CROSS_DATABASE_EXECUTION_NOT_SUPPORTED', [
+                ['path' => $path . '.database', 'message' => 'A request can currently read from one database only.'],
+            ], 501);
+        }
+        $key = strtolower($resolved->name);
+        if (isset($physical[$key]) && !$physical[$key]->equals($resolved->object)) {
+            throw new ApiRequestException('Invalid request.', 'INVALID_REQUEST', [
+                ['path' => $path, 'message' => 'Sources with the same table name must name the same object.'],
+            ]);
+        }
+        $physical[$key] = $resolved->object;
+        return $resolved;
     }
 
     private function getOutputColumns(array $request): array

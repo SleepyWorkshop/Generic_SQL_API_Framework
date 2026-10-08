@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/../../Database/MssqlIdentifier.php';
+
 /**
  * Builds routine calls from routines resolved by RoutineResolver. The schema
  * and name are validated identifiers confirmed against database metadata;
@@ -40,7 +42,7 @@ class RoutineBuilder
                 throw new RuntimeException('Invalid routine identifier.');
             }
         }
-        return '[' . $routine['schema'] . '].[' . $routine['name'] . ']';
+        return MssqlIdentifier::schema($routine['schema'])->quoted() . '.' . MssqlIdentifier::object($routine['name'])->quoted();
     }
 
     private function buildPlaceholders(array $params): string

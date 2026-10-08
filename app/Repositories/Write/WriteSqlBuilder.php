@@ -1,15 +1,17 @@
 <?php
 
+require_once __DIR__ . '/../../Database/MssqlIdentifier.php';
+
 abstract class WriteSqlBuilder
 {
     protected function target(array $resource): string
     {
-        return $this->quote($resource['schema']) . '.' . $this->quote($resource['table']);
+        return MssqlIdentifier::schema($resource['schema'])->quoted() . '.' . MssqlIdentifier::object($resource['table'])->quoted();
     }
 
     protected function quote(string $identifier): string
     {
-        return '[' . $identifier . ']';
+        return MssqlIdentifier::column($identifier)->quoted();
     }
 
     protected function outputClause(array $resource, bool $includeOperation = false, bool $includeIdentity = false): string

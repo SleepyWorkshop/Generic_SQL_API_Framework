@@ -34,8 +34,9 @@ class JoinBuilder
                 }
             }
             $alias = !empty($join['alias']) ? ' ' . $join['alias'] : '';
+            $source = isset($join['_source']) ? $join['_source']->renderFrom() : $join['table'] . $alias;
             $sql .= "
-            {$type} JOIN {$join['table']}{$alias}
+            {$type} JOIN {$source}
             ON {$join['left']} = {$join['right']}
         ";
         }

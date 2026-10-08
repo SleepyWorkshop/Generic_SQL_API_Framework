@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../../config/constants.php';
 require_once __DIR__ . '/../../core/QueryEngine.php';
+require_once __DIR__ . '/../Database/QualifiedObject.php';
 
 class MetadataRepository
 {
@@ -81,6 +82,62 @@ class MetadataRepository
         return (
             ($result["data"][0]["Total"] ?? 0) > 0
         );
+    }
+
+    /**
+     * Structured lookups for a physical object of the connection's database.
+     * Without a schema they are the name-based lookups above; with one, the
+     * schema must match too. Objects of other databases are refused: catalog
+     * views describe only the connected database.
+     */
+    public function objectExists(QualifiedObject $object): bool
+    {
+        if ($object->schemaName() === null) return $this->tableExists($object->objectName());
+        $this->assertConnectedDatabase($object);
+        $result = $this->queryEngine->executePrepared(
+            'SELECT COUNT(*) AS Total FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+            [$object->schemaName(), $object->objectName()],
+            ['queryPhase' => 'metadata']
+        );
+        return ($result['data'][0]['Total'] ?? 0) > 0;
+    }
+
+    public function objectColumnExists(QualifiedObject $object, $column): bool
+    {
+        if ($object->schemaName() === null) return $this->columnExists($object->objectName(), $column);
+        return $this->objectColumnDataType($object, $column) !== null;
+    }
+
+    public function objectColumnDataType(QualifiedObject $object, $column)
+    {
+        if ($object->schemaName() === null) return $this->getColumnDataType($object->objectName(), $column);
+        $this->assertConnectedDatabase($object);
+        $result = $this->queryEngine->executePrepared(
+            'SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+            [$object->schemaName(), $object->objectName(), $column],
+            ['queryPhase' => 'metadata']
+        );
+        return $result['data'][0]['DATA_TYPE'] ?? null;
+    }
+
+    public function objectColumns(QualifiedObject $object)
+    {
+        if ($object->schemaName() === null) return $this->getColumns($object->objectName());
+        $this->assertConnectedDatabase($object);
+        return $this->queryEngine->executePrepared(
+            'SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS'
+                . ' WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION',
+            [$object->schemaName(), $object->objectName()],
+            ['queryPhase' => 'metadata']
+        );
+    }
+
+    private function assertConnectedDatabase(QualifiedObject $object): void
+    {
+        $connected = $this->queryEngine->databaseContextId();
+        if ($connected !== null && $connected !== $object->databaseId) {
+            throw new LogicException('Cross-database metadata is not supported.');
+        }
     }
 
     /**

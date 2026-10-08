@@ -434,7 +434,13 @@ class SqlRepository
     ): ?array
     {
         $matches = [];
-        foreach ($statement->sourceCandidates($field, $requireDirectProjection) as $candidate) {
+        $candidates = $statement->sourceCandidates($field, $requireDirectProjection);
+        foreach ($candidates as $candidate) {
+            // Metadata describes only the connected database, so a column of a
+            // database-qualified source cannot be confirmed or placed.
+            if ($candidate['database'] !== null) return null;
+        }
+        foreach ($candidates as $candidate) {
             if (!$this->metadataRepository->columnExists($candidate['table'], $candidate['column'])) {
                 continue;
             }

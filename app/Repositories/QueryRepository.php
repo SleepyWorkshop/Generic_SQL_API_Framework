@@ -6,6 +6,8 @@ require_once __DIR__ . '/Query/SelectBuilder.php';
 require_once __DIR__ . '/Query/RoutineBuilder.php';
 require_once __DIR__ . '/SetOperationBuilder.php';
 require_once __DIR__ . '/../Resources/RoutineResolver.php';
+require_once __DIR__ . '/../Database/DatabaseQueryPlanContext.php';
+require_once __DIR__ . '/../Database/SourceResolver.php';
 
 /** Public compatibility facade for query construction and execution. */
 class QueryRepository
@@ -21,12 +23,16 @@ class QueryRepository
         ?QueryEngine $queryEngine = null,
         ?MetadataRepository $metadataRepository = null,
         ?Logger $logger = null,
-        ?RoutineResolver $routines = null
+        ?RoutineResolver $routines = null,
+        ?SourceResolver $sources = null
     ) {
         $this->logger = $logger ?? new Logger();
         $this->queryEngine = $queryEngine ?? new QueryEngine(null, $this->logger);
         $metadataRepository = $metadataRepository ?? new MetadataRepository($this->queryEngine);
-        $this->selectBuilder = new SelectBuilder($this->queryEngine, $metadataRepository, $this->logger);
+        // Sources resolve within the request's database plan, when there is one.
+        $plan = DatabaseQueryPlanContext::current();
+        $sources ??= $plan === null ? null : new SourceResolver($plan);
+        $this->selectBuilder = new SelectBuilder($this->queryEngine, $metadataRepository, $this->logger, $sources);
         $this->routineBuilder = new RoutineBuilder();
         $this->routines = $routines ?? new RoutineResolver($metadataRepository);
         $this->setOperationBuilder = new SetOperationBuilder($this, $this->queryEngine);
