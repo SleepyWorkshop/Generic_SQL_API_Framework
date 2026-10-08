@@ -5,6 +5,7 @@ require_once __DIR__ . '/SqlRequestValidator.php';
 require_once __DIR__ . '/WriteRequestValidator.php';
 require_once __DIR__ . '/../Repositories/Query/QueryFunctionRegistry.php';
 require_once __DIR__ . '/../Security/SecurityConfiguration.php';
+require_once __DIR__ . '/../Database/DatabaseRegistry.php';
 
 class QueryRequestValidator
 {
@@ -54,7 +55,8 @@ class QueryRequestValidator
         } elseif ($action === 'select') {
             $this->validateSelect($request, '', $errors);
         } elseif ($action === 'union' || $action === 'unionAll') {
-            $this->rejectUnknown($request, ['action', 'queries'], '', $errors);
+            $this->rejectUnknown($request, ['action', 'queries', 'database'], '', $errors);
+            $this->validateDatabase($request, '', $errors);
             if (empty($request['queries']) || !is_array($request['queries'])) {
                 $errors[] = ['path' => 'queries', 'message' => 'At least one query is required.'];
             } else {
@@ -107,10 +109,11 @@ class QueryRequestValidator
         $this->rejectUnknown($request, [
             'action', 'source', 'fields', 'filters', 'joins', 'groupBy',
             'having', 'sort', 'pagination', 'distinct', 'limit',
-            'filterLogic', 'with'
+            'filterLogic', 'with', 'database'
         ], $prefix, $errors);
         if ($context !== 'top-level') {
-            foreach (['action', 'sort', 'pagination', 'with'] as $unsupported) {
+            // Nested bodies name databases on their sources only.
+            foreach (['action', 'sort', 'pagination', 'with', 'database'] as $unsupported) {
                 if (array_key_exists($unsupported, $request)) {
                     $errors[] = [
                         'path' => $prefix . $unsupported,
@@ -119,7 +122,10 @@ class QueryRequestValidator
                 }
             }
         }
-        $this->validateSourceName($request, 'table', $errors, $prefix);
+        if ($context === 'top-level') {
+            $this->validateDatabase($request, $prefix, $errors);
+        }
+        $this->validateSourceName($request, 'table', $errors, $prefix, true);
         if (empty($request['fields']) || !is_array($request['fields'])) {
             $errors[] = ['path' => $prefix . 'fields', 'message' => 'Fields must be a non-empty array.'];
         } else {
@@ -259,7 +265,7 @@ class QueryRequestValidator
                     }
                     if (!is_array($join)) { continue; }
                     $this->rejectUnknown($join, ['type', 'source', 'on'], $path . '.', $errors);
-                    $this->validateSourceName($join, 'table', $errors, $path . '.');
+                    $this->validateSourceName($join, 'table', $errors, $path . '.', true);
                     $on = $join['on'] ?? null;
                     if (!is_array($on) || ($on['operator'] ?? '=') !== '='
                         || !$this->isIdentifier($on['left'] ?? null)
@@ -957,16 +963,38 @@ class QueryRequestValidator
             || is_bool($value) || $value === null;
     }
 
-    private function validateSourceName(array $request, string $key, array &$errors, string $prefix = ''): void
+    private function validateSourceName(
+        array $request,
+        string $key,
+        array &$errors,
+        string $prefix = '',
+        bool $allowDatabase = false
+    ): void
     {
         $source = $request['source'] ?? null;
         if (!is_array($source) || !$this->isIdentifier($source[$key] ?? null)) {
             $errors[] = ['path' => $prefix . "source.{$key}", 'message' => 'A valid source identifier is required.'];
             return;
         }
-        $this->rejectUnknown($source, [$key, 'alias'], $prefix . 'source.', $errors);
+        $this->rejectUnknown($source, $allowDatabase ? [$key, 'alias', 'database'] : [$key, 'alias'], $prefix . 'source.', $errors);
+        // Databases are named only by registry id in `database`, never inside
+        // the object name.
+        if ($key === 'table' && substr_count($source[$key], '.') > 1) {
+            $errors[] = ['path' => $prefix . "source.{$key}", 'message' => 'Database-qualified names are not accepted; name the database with database.'];
+        }
+        if ($allowDatabase) {
+            $this->validateDatabase($source, $prefix . 'source.', $errors);
+        }
         if (isset($source['alias']) && !$this->isIdentifier($source['alias'])) {
             $errors[] = ['path' => $prefix . 'source.alias', 'message' => 'Alias must be a valid identifier.'];
+        }
+    }
+
+    /** A database is named only by its logical registry id. */
+    private function validateDatabase(array $value, string $prefix, array &$errors): void
+    {
+        if (array_key_exists('database', $value) && !DatabaseRegistry::isValidId($value['database'])) {
+            $errors[] = ['path' => $prefix . 'database', 'message' => 'Database must be a configured database id.'];
         }
     }
 

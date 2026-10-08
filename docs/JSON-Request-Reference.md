@@ -100,9 +100,11 @@ selection, or client override for identity insertion.
 
 | Name | Type | Required | Allowed/default | Example/notes |
 |---|---|---:|---|---|
-| `source` | object | yes | Exactly `table`, optional `alias` | `{"table":"Items","alias":"I"}` |
-| `source.table` | identifier | yes | No default | Table or matching CTE name |
+| `database` | database id | no | Base source database, else the default database | Top-level request only; see [Database selection](#database-selection) |
+| `source` | object | yes | Exactly `table`, optional `alias`, optional `database` | `{"table":"Items","alias":"I"}` |
+| `source.table` | identifier | yes | No default | Table or matching CTE name; database-qualified names such as `Db.dbo.Items` are rejected |
 | `source.alias` | identifier | no | none | Table alias |
+| `source.database` | database id | no | The request's primary database | Registered database id; not allowed on a CTE reference |
 | `fields` | array | yes | Non-empty | Strings or field objects |
 | `fields[]` string | identifier | no | `*` also allowed | `"I.ItemCode"` |
 | `fields[].field` | identifier | conditional | `*` for applicable aggregate | Public name for a selected/function field |
@@ -235,7 +237,7 @@ Ordinary values, IN lists, BETWEEN bounds, and HAVING values become prepared par
 |---|---|---:|---|
 | `joins` | array | no | empty |
 | `joins[].type` | string | yes | `INNER`, `LEFT`, `RIGHT` (case-insensitive during normalization) |
-| `joins[].source` | object | yes | `table`, optional `alias` |
+| `joins[].source` | object | yes | `table`, optional `alias`, optional `database` |
 | `joins[].on.left/right` | identifier | yes | Logical fields |
 | `joins[].on.operator` | string | no | `=` only; defaults to `=` |
 | `groupBy` | identifier/ExpressionNode array | no | empty; aggregate/window nodes rejected |
@@ -294,7 +296,38 @@ Subqueries are accepted only as filter `query` values for IN, NOT IN, EXISTS, an
 }
 ```
 
-`queries` is a non-empty array of SELECT bodies without nested actions, sorting, pagination, or CTEs. Explicit branch projections must have the same field count during public validation; wildcard counts are resolved from metadata before execution. SQL Server remains responsible for checking data-type compatibility between corresponding expressions. The current set-operation contract has no top-level sorting or pagination. Public actions are only `union` and `unionAll`; internal support for INTERSECT/EXCEPT is not public.
+A set-operation request also accepts a top-level `database`. `queries` is a non-empty array of SELECT bodies without nested actions, sorting, pagination, or CTEs. Explicit branch projections must have the same field count during public validation; wildcard counts are resolved from metadata before execution. SQL Server remains responsible for checking data-type compatibility between corresponding expressions. The current set-operation contract has no top-level sorting or pagination. Public actions are only `union` and `unionAll`; internal support for INTERSECT/EXCEPT is not public.
+
+## Database selection
+
+`select`, `union`, and `unionAll` requests can name databases by their registry
+id (lowercase letters, digits, `_`, `-`; configured by an operator). A request
+never supplies a physical database name, server, port, or credential.
+
+- The top-level `database` is the request's primary database. Without it, the
+  base source's `source.database` is primary (for set operations, the first
+  branch's source); without either, the configured default database is used,
+  so requests without `database` behave as before.
+- `source.database` may appear on the base source, join sources, filter
+  subquery sources, CTE branch sources, and set-operation branch sources.
+  Nested SELECT bodies do not accept a top-level `database`. A source without
+  `database` belongs to the primary database.
+- Every named database must be configured and enabled, on an enabled server
+  profile, and available; otherwise the request fails with
+  `DATABASE_NOT_FOUND`, `DATABASE_DISABLED`, `SERVER_PROFILE_DISABLED`, or
+  `DATABASE_UNAVAILABLE`. Error details give the path where it was named.
+- All databases in one request must belong to the primary database's server
+  profile, or the request fails with `CROSS_SERVER_QUERY_NOT_SUPPORTED`.
+- A request that names more than one database is validated and planned but
+  not executed yet: it fails with `CROSS_DATABASE_EXECUTION_NOT_SUPPORTED`
+  before any connection is opened.
+
+```json
+{ "action": "select", "database": "inventory", "source": { "table": "Product" }, "fields": ["ProductCode"] }
+```
+
+Other actions (`sql`, writes, routines, and metadata) do not accept `database`
+and use the default database.
 
 ## Routines and metadata
 

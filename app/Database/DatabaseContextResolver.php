@@ -88,6 +88,20 @@ final class DatabaseContextResolver
         return new ApiRequestException('Database access is currently unavailable.', 'DATABASE_UNAVAILABLE', [], 503);
     }
 
+    public static function disabled(): ApiRequestException
+    {
+        return new ApiRequestException('Database is disabled.', 'DATABASE_DISABLED', [
+            ['path' => 'database', 'message' => 'The database is disabled.'],
+        ], 403);
+    }
+
+    public static function serverProfileDisabled(): ApiRequestException
+    {
+        return new ApiRequestException('Database server profile is disabled.', 'SERVER_PROFILE_DISABLED', [
+            ['path' => 'database', 'message' => 'The database server profile is disabled.'],
+        ], 403);
+    }
+
     private function metadata(): array
     {
         try {
@@ -118,21 +132,13 @@ final class DatabaseContextResolver
                 ['path' => 'database', 'message' => 'The database is not configured.'],
             ], 404);
         }
-        if (!$database['enabled']) {
-            throw new ApiRequestException('Database is disabled.', 'DATABASE_DISABLED', [
-                ['path' => 'database', 'message' => 'The database is disabled.'],
-            ], 403);
-        }
+        if (!$database['enabled']) throw self::disabled();
         $server = $metadata['servers'][$database['server']] ?? null;
         if ($server === null) {
             // The registry rejects dangling references; this guards other readers.
             throw new ApiRequestException('Database server profile not found.', 'SERVER_PROFILE_NOT_FOUND', [], 503);
         }
-        if (!$server['enabled']) {
-            throw new ApiRequestException('Database server profile is disabled.', 'SERVER_PROFILE_DISABLED', [
-                ['path' => 'database', 'message' => 'The database server profile is disabled.'],
-            ], 403);
-        }
+        if (!$server['enabled']) throw self::serverProfileDisabled();
         return $database;
     }
 

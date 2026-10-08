@@ -90,6 +90,12 @@ message text.
 | `DUPLICATE_KEY` | 409 | SQL Server duplicate-key error (2601/2627) | Refresh or choose another key |
 | `CONSTRAINT_VIOLATION` | 409 | Recognized constraint, null, truncation, or reference failure | Correct input; do not blind-retry |
 | `RESULT_TOO_LARGE` | 413 | Unpaginated read exceeded `GENERIC_MAX_RESULT_ROWS` | Paginate or narrow filters |
+| `DATABASE_NOT_FOUND` | 404 | A requested `database` id is not configured | Use a configured database id |
+| `DATABASE_DISABLED` | 403 | A requested database is disabled | Use an enabled database; operator action |
+| `SERVER_PROFILE_DISABLED` | 403 | A requested database's server profile is disabled | Operator action |
+| `SERVER_PROFILE_NOT_FOUND` | 503 | A database references a missing server profile | Operator action |
+| `CROSS_SERVER_QUERY_NOT_SUPPORTED` | 400 | A request names databases on different server profiles | Query one server profile per request |
+| `CROSS_DATABASE_EXECUTION_NOT_SUPPORTED` | 501 | A request names more than one database; cross-database execution is not available yet | Query one database per request |
 | `DATABASE_UNAVAILABLE` | 503 | Database access is disabled or the database is unreachable | Retry later |
 | `DATABASE_CONNECTION_TIMEOUT` | 504 | SQL Server did not complete the login within the configured login timeout | Retry later; operator checks reachability |
 | `DATABASE_CONNECTION_FAILED` | 503 | SQL Server could not be reached, or TLS validation failed | Operator action |

@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/../app/Database/DatabaseContextResolver.php';
 require_once __DIR__ . '/../app/Database/DatabaseConnectionManager.php';
+require_once __DIR__ . '/../app/Database/DatabaseQueryPlanContext.php';
 require_once __DIR__ . '/Logger.php';
 require_once __DIR__ . '/QueryTimeoutException.php';
 require_once __DIR__ . '/OperationalLogger.php';
@@ -19,19 +20,24 @@ class QueryEngine
     protected int $queryTimeoutSeconds;
     protected ?bool $queryTimeoutSupported = null;
 
-    public function __construct(?Database $database = null, ?Logger $logger = null, ?int $queryTimeoutSeconds = null, bool $connect = true)
-    {
+    public function __construct(
+        ?Database $database = null,
+        ?Logger $logger = null,
+        ?int $queryTimeoutSeconds = null,
+        bool $connect = true,
+        ?DatabaseConnectionManager $connections = null
+    ) {
         $this->logger = $logger ?? new Logger();
         $this->queryTimeoutSeconds = $queryTimeoutSeconds ?? SecurityConfiguration::queryTimeoutSeconds();
         if ($connect) {
-            // Without an injected connection: the registry default database,
-            // which must be configured, enabled, and available.
-            $context = $database === null ? (new DatabaseContextResolver())->resolveAvailable() : null;
+            // Without an injected connection: the primary database of the
+            // request's plan, else the registry default database.
+            $context = $database === null ? $this->plannedContext() : null;
             $started = microtime(true);
             try {
                 if ($context !== null) {
                     $this->databaseContextId = $context->id;
-                    $this->connections = new DatabaseConnectionManager();
+                    $this->connections = $connections ?? new DatabaseConnectionManager();
                     $database = $this->connections->connection($context);
                 }
                 $this->db = $database;
@@ -57,6 +63,24 @@ class QueryEngine
     }
 
     public function __destruct() { $this->close(); }
+
+    /**
+     * The database to connect to: the plan's primary database, which must
+     * still be available. Cross-database plans are not executed yet: their
+     * SQL would address every source in the primary database.
+     */
+    private function plannedContext(): DatabaseContext
+    {
+        $plan = DatabaseQueryPlanContext::current();
+        if ($plan === null) return (new DatabaseContextResolver())->resolveAvailable();
+        if ($plan->isCrossDatabase) {
+            throw new ApiRequestException('Cross-database query execution is not supported yet.', 'CROSS_DATABASE_EXECUTION_NOT_SUPPORTED', [
+                ['path' => 'database', 'message' => 'A request can currently read from one database only.'],
+            ], 501);
+        }
+        (new DatabaseContextResolver())->assertAvailable($plan->primaryDatabase);
+        return $plan->primaryDatabase;
+    }
 
     public function getQuery($file)
     {
