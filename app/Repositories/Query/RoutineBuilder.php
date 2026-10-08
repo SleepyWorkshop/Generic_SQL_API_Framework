@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/../../Database/MssqlIdentifier.php';
+require_once __DIR__ . '/../../Database/QualifiedObject.php';
 
 /**
  * Builds routine calls from routines resolved by RoutineResolver. The schema
@@ -37,6 +38,8 @@ class RoutineBuilder
 
     private function qualifiedName(array $routine): string
     {
+        // The connection is the routine's database, so the local form is used.
+        if (($routine['object'] ?? null) instanceof QualifiedObject) return $routine['object']->renderLocal();
         foreach (['schema', 'name'] as $part) {
             if (!is_string($routine[$part] ?? null) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $routine[$part]) !== 1) {
                 throw new RuntimeException('Invalid routine identifier.');

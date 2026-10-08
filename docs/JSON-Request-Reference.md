@@ -13,14 +13,14 @@ Unknown top-level properties are rejected for every action.
 | Action | Required fields | Optional fields |
 |---|---|---|
 | `select` | `source`, `fields` | `filters`, `joins`, `groupBy`, `having`, `sort`, `pagination`, `distinct`, `limit`, `filterLogic`, `with` |
-| `sql` | `resource` | `execution`, `filters`, `sort`, `pagination`, `filterLogic` |
+| `sql` | `resource` | `execution`, `filters`, `sort`, `pagination`, `filterLogic`, `database` |
 | `insert` | `resource`, non-empty `data` object | none |
 | `update` | `resource`, non-empty `data` object, non-empty `filters` | `filterLogic` |
 | `delete` | `resource`, non-empty `filters` | `filterLogic` |
 | `upsert` | `resource`, non-empty `data` object, non-empty `keys` list | none |
 | `union`, `unionAll` | non-empty `queries` | none |
-| `procedure` | `source.procedure` | `parameters` |
-| `function`, `tableFunction` | `source.function` | `parameters` |
+| `procedure` | `source.procedure` | `parameters`, `database` |
+| `function`, `tableFunction` | `source.function` | `parameters`, `database` |
 | `metadata.columns` | `source.table` | `database`, `source.schema` |
 | `metadata.tables`, `metadata.views`, `metadata.procedures`, `metadata.schema` | none beyond `action` | `database` |
 | `metadata.databases` | none beyond `action` | none |
@@ -342,11 +342,13 @@ renders exactly as in V2 and resolves through SQL Server's default schema.
 Two sources with the same table name must name the same object, and a
 source with `schema` is validated against that schema's catalog entry.
 
-Metadata actions accept a top-level `database` the same way; see
-[Metadata and routines](Metadata-and-Routines.md). `metadata.databases` lists
-the ids that can be named. Other actions (`sql`, writes, and routines) do not
-accept `database` and use the default database: SQL Resources, routines, and
-writes are not database-selectable yet. Cross-server queries are not
+Metadata actions and routines accept a top-level `database` the same way; see
+[Metadata and routines](Metadata-and-Routines.md). A SQL Resource names its
+databases with `{{database:id}}` placeholders, or takes the request's
+`database` when it has none; see
+[SQL Resource authoring](SQL-Resource-Authoring.md#database-placeholders).
+`metadata.databases` lists the ids that can be named. Writes do not accept
+`database` and use the default database. Cross-server queries are not
 supported.
 
 ## Routines and metadata

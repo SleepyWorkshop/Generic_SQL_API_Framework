@@ -155,8 +155,14 @@ parameter declarations, result-set selection, or transaction controls.
   cross-database names, brackets, the `sys` and `INFORMATION_SCHEMA` schemas,
   and names starting with `sp_` or `xp_` are rejected before any database
   lookup (`INVALID_ROUTINE`).
+- A routine request may name a registered database with a top-level
+  `database` (default: the default database). The request's connection opens
+  to that database, and the routine runs there only; unknown, disabled, or
+  disconnected databases fail before connecting, without falling back. A
+  routine never targets several databases (what its own body does is SQL
+  Server's business).
 - The name must match a user-defined routine of the requested kind in the
-  configured database's `INFORMATION_SCHEMA.ROUTINES` (procedure, scalar
+  selected database's `INFORMATION_SCHEMA.ROUTINES` (procedure, scalar
   function, or table-valued function); otherwise `INVALID_ROUTINE`. System
   procedures are not listed there and cannot be called.
 - Functions require exactly their declared number of parameters. Procedures

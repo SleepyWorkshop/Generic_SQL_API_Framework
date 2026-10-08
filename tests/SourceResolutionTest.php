@@ -312,9 +312,11 @@ try {
         && end($engine->statements)['params'] === ['dbo', 'Product'], 'Metadata of another planned database was not read from its catalog.');
 
     // SQL Resource parsing keeps every name part.
-    $statement = SqlResourceStatement::analyze('SELECT o.Id, c.Name FROM OtherDB.dbo.Orders o JOIN dbo.Customer c ON c.Id = o.CustomerId JOIN Region r ON r.Id = c.RegionId');
+    // Since Phase 8 another database is named only through a {{database:id}} placeholder.
+    $statement = SqlResourceStatement::analyze('SELECT o.Id, c.Name FROM {{database:other}}.dbo.Orders o JOIN dbo.Customer c ON c.Id = o.CustomerId JOIN Region r ON r.Id = c.RegionId');
     $parsed = array_map(fn (array $source): array => [$source['database'], $source['schema'], $source['table'], $source['qualifier']], $statement->topLevelSources());
-    sourceAssert($parsed === [['OtherDB', 'dbo', 'Orders', 'o'], [null, 'dbo', 'Customer', 'c'], [null, null, 'Region', 'r']],
+    sourceAssert(sourceFailure(fn () => SqlResourceStatement::analyze('SELECT o.Id FROM OtherDB.dbo.Orders o'), 'A literal database name was accepted.') instanceof RuntimeException
+        && $parsed === [['other', 'dbo', 'Orders', 'o'], [null, 'dbo', 'Customer', 'c'], [null, null, 'Region', 'r']],
         'A multi-part SQL Resource source lost its parts.');
     $sqlRepository = (new ReflectionClass(SqlRepository::class))->newInstanceWithoutConstructor();
     (new ReflectionProperty(SqlRepository::class, 'metadataRepository'))->setValue($sqlRepository, new SourceMetadata());

@@ -21,9 +21,10 @@ Planned work is tracked separately in [Roadmap](Roadmap.md).
 - The data API addresses only user objects of registered databases: system
   schemas, client-written database-qualified names, and system procedures are
   rejected. SELECT and set-operation requests can combine databases of one
-  server profile, and metadata actions can select a database; cross-server
-  queries, cross-database writes, and database-selectable SQL Resources and
-  routines are not supported. Metadata is not cached across requests.
+  server profile; metadata actions and routines select one database; SQL
+  Resources address registered databases only through `{{database:id}}`
+  placeholders. Cross-server queries and cross-database writes are not
+  supported. Metadata is not cached across requests.
 - Subqueries cannot refer to columns of the outer query (no correlated
   subqueries).
 - There is no separate limit on the number of filters per request; it is bounded
@@ -95,7 +96,7 @@ Use SQL Resource Mode for approved complex read-only SQL beyond these boundaries
 
 ## Routines, metadata, and responses
 
-- Routines are called by name and must exist in the configured database.
+- Routines are called by name and must exist in the selected database.
   Parameters are positional; named or output parameters, result-set choice, and
   runtime filter/sort/page are absent. Stored procedures require `data.write`
   because the API cannot tell whether a procedure changes data.

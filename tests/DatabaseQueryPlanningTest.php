@@ -221,7 +221,8 @@ try {
     planAssert($collected->requestDatabase->path === 'database' && $collected->baseSourceDatabase->path === 'source.database'
         && $collected->references[1]->path === 'joins.0.source.database', 'References do not record where they were named.');
     planAssert(DatabaseReferenceCollector::declaredPrimaryId($select(['database' => 'inventory', 'table' => 'P'])) === 'inventory'
-        && DatabaseReferenceCollector::declaredPrimaryId(['action' => 'sql', 'database' => 'inventory']) === null
+        && DatabaseReferenceCollector::declaredPrimaryId(['action' => 'sql', 'database' => 'inventory']) === 'inventory'
+        && DatabaseReferenceCollector::declaredPrimaryId(['action' => 'insert', 'database' => 'inventory']) === null
         && DatabaseReferenceCollector::declaredPrimaryId(['action' => 'union', 'queries' => [['source' => ['database' => 'reporting']]]]) === 'reporting',
         'The early availability gate does not see the selected database.');
     $payloads[] = $rejected($select(['table' => 'Recent'], ['with' => ['name' => 'Recent', 'query' => ['source' => ['table' => 'Orders'], 'fields' => ['Id']]],
@@ -324,10 +325,8 @@ try {
         'A database-qualified write table was accepted.'))[1] === 'INVALID_REQUEST'
         && planResponse(planFailure(fn () => RoutineResolver::name('CompanyDB.dbo.Report', 'procedure'), 'A database-qualified routine was accepted.'))[1] === 'INVALID_ROUTINE',
         'Database-qualified write or routine names were accepted.');
-    // SQL Resources, writes, and routines do not name databases; metadata names
-    // its database only at the top level.
+    // Writes do not name databases; routines and metadata name theirs only at the top level.
     foreach ([
-        ['action' => 'sql', 'resource' => 'reports/sales', 'database' => 'inventory'],
         ['action' => 'insert', 'table' => 'Customer', 'data' => ['A' => 1], 'database' => 'inventory'],
         ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Run', 'database' => 'inventory']],
         ['action' => 'metadata.columns', 'source' => ['table' => 'Customer', 'database' => 'inventory']],
@@ -359,7 +358,7 @@ try {
         && ($v3Normalized['joins'][0]['database'] ?? null) === 'company' && ($v3Normalized['where'][0]['subquery']['database'] ?? null) === 'company'
         && $withoutDatabases($v3Normalized) === $v2Normalized,
         'Database locations changed the V2 normalized request.');
-    foreach ([['action' => 'sql', 'resource' => 'reports/sales'], ['action' => 'metadata.tables'], ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Run']],
+    foreach ([['action' => 'sql', 'resource' => 'reports/customer'], ['action' => 'metadata.tables'], ['action' => 'procedure', 'source' => ['procedure' => 'dbo.Run']],
         ['action' => 'insert', 'table' => 'Customer', 'data' => ['A' => 1]]] as $request) {
         planAssert($planner->plan($request)->databaseIds() === ['company'], 'A V2 action did not plan the default database.');
     }

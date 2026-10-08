@@ -164,6 +164,10 @@ connection or linked server is used.
 
 Metadata actions are planned the same way: their optional `database` selects
 the primary database, so their catalog queries read the connected database.
+Routines are planned the same way and run in their one selected database. A
+SQL Resource's `{{database:id}}` placeholders are collected from the trusted
+file during planning; at execution they are rendered, by token position, as
+the delimited physical names of the plan's databases.
 Structured lookups (`objectExists`, `objectColumns`, …) take a
 `QualifiedObject` and read another database's `[Database].INFORMATION_SCHEMA`
 on the same connection. `metadata.databases` is answered by `DatabaseDirectory`

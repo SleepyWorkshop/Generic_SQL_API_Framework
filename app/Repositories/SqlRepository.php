@@ -7,6 +7,9 @@ require_once __DIR__ . '/../Requests/ApiRequestException.php';
 require_once __DIR__ . '/../Resources/SqlResourceStatement.php';
 require_once __DIR__ . '/MetadataRepository.php';
 require_once __DIR__ . '/Query/DatabaseDateValueNormalizer.php';
+require_once __DIR__ . '/../Database/DatabaseQueryPlanContext.php';
+require_once __DIR__ . '/../Database/MssqlIdentifier.php';
+require_once __DIR__ . '/../Security/DatabaseCredentialException.php';
 
 class SqlRepository
 {
@@ -38,7 +41,7 @@ class SqlRepository
         );
         $sql = trim($this->queryEngine->getQuery($definition['file']));
         $sql = rtrim($sql, "; \t\n\r\0\x0B");
-        $statement = SqlResourceStatement::analyze($sql);
+        $statement = $this->withDatabases(SqlResourceStatement::analyze($sql));
         $allowedColumns = [];
         foreach ($definition['columns'] as $column) {
             $allowedColumns[strtolower($column)] = $column;
@@ -427,12 +430,35 @@ class SqlRepository
         return (int)$date;
     }
 
+    /**
+     * Render `{{database:id}}` placeholders as the delimited physical names
+     * of the request plan's databases, which the planner resolved from the
+     * same placeholders; the registry is the only source of the names.
+     */
+    private function withDatabases(SqlResourceStatement $statement): SqlResourceStatement
+    {
+        if ($statement->databaseIds() === []) return $statement;
+        $plan = DatabaseQueryPlanContext::current();
+        if ($plan === null) throw new LogicException('SQL resources with database placeholders require a database query plan.');
+        return $statement->withDatabases(static function (string $id) use ($plan): string {
+            $database = $plan->database($id) ?? throw new LogicException('A SQL resource database is not part of the query plan.');
+            try {
+                return MssqlIdentifier::database($database->physicalName())->quoted();
+            } catch (InvalidArgumentException $exception) {
+                throw new DatabaseCredentialException('Invalid database configuration.');
+            }
+        });
+    }
+
     private function resolveSourceColumn(
         SqlResourceStatement $statement,
         string $field,
         bool $requireDirectProjection
     ): ?array
     {
+        // Columns are confirmed through the connected database's catalog only,
+        // so resources that address other databases do not resolve sources.
+        if ($statement->databaseIds() !== []) return null;
         $matches = [];
         $candidates = $statement->sourceCandidates($field, $requireDirectProjection);
         foreach ($candidates as $candidate) {

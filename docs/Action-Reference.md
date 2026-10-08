@@ -94,7 +94,7 @@ Discover and execute a server-owned, read-only SQL Resource.
 ### Request
 
 Required: `action`, `resource`. Optional: `execution`, `filters`, `sort`,
-`pagination`, and `filterLogic`.
+`pagination`, `filterLogic`, and `database`.
 
 ### Minimal example
 
@@ -160,6 +160,7 @@ Required: `action`, `resource`. Optional: `execution`, `filters`, `sort`,
 | `sort` | array | no | Runtime order using execution output columns. |
 | `pagination` | object | no | Positive page/pageSize; requires an approved sort. |
 | `filterLogic` | string | no | AND or OR; default AND. |
+| `database` | database id | no | Database for a resource without `{{database:id}}` placeholders; default: the default database. Rejected for resources with placeholders. |
 
 ### Validation
 
@@ -483,7 +484,7 @@ Execute a named SQL Server stored procedure with positional parameters.
 
 ### Request
 
-Required: `action`, `source.procedure`. Optional: `parameters`.
+Required: `action`, `source.procedure`. Optional: `parameters` and `database`.
 
 ### Minimal example
 
@@ -503,6 +504,7 @@ Required: `action`, `source.procedure`. Optional: `parameters`.
 |---|---|---:|---|
 | `source.procedure` | identifier | yes | Procedure name, optionally schema-qualified. |
 | `parameters` | array | no | Positional values; default empty. Use a JSON list. |
+| `database` | database id | no | Database whose routine runs; default: the default database. |
 
 ### Validation
 
@@ -538,7 +540,7 @@ Execute a SQL Server scalar function as `SELECT function(...) AS Result`.
 
 ### Request
 
-Required: `action`, `source.function`. Optional: `parameters`.
+Required: `action`, `source.function`. Optional: `parameters` and `database`.
 
 ### Minimal example
 
@@ -558,6 +560,7 @@ Required: `action`, `source.function`. Optional: `parameters`.
 |---|---|---:|---|
 | `source.function` | identifier | yes | Function name, optionally schema-qualified. |
 | `parameters` | array | no | Positional prepared values; default empty. |
+| `database` | database id | no | Database whose routine runs; default: the default database. |
 
 ### Validation
 
@@ -589,7 +592,7 @@ Execute a table-valued SQL Server function as `SELECT * FROM function(...)`.
 
 ### Request
 
-Required: `action`, `source.function`. Optional: `parameters`.
+Required: `action`, `source.function`. Optional: `parameters` and `database`.
 
 ### Minimal example
 
@@ -605,8 +608,8 @@ Required: `action`, `source.function`. Optional: `parameters`.
 
 ### Parameters
 
-The fields are the same as `function`: required `source.function` and optional
-positional `parameters` list.
+The fields are the same as `function`: required `source.function`, optional
+positional `parameters` list, and optional `database`.
 
 ### Validation
 

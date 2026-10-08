@@ -6,22 +6,30 @@ class SqlResourceStatement
 {
     /** Rowset functions that reach other servers or files. */
     private const REMOTE_ROWSETS = ['OPENQUERY', 'OPENROWSET', 'OPENDATASOURCE'];
+    /** `{{database:id}}`: a registered logical database, rendered from the registry. */
+    private const DATABASE_PLACEHOLDER = '/^\{\{database:([a-z][a-z0-9_-]{0,63})\}\}$/D';
 
     private string $prefix;
     private string $body;
     private string $suffix;
     private bool $authoredPagination;
+    /** The authored body, with placeholders, that source analysis reads. */
+    private string $analysisBody;
+    /** @var list<string> logical database ids of the placeholders, in order */
+    private array $databaseIds = [];
 
-    private function __construct(string $prefix, string $body, string $suffix, bool $authoredPagination)
+    private function __construct(string $prefix, string $body, string $suffix, bool $authoredPagination, ?string $analysisBody = null)
     {
         $this->prefix = $prefix;
         $this->body = $body;
         $this->suffix = $suffix;
         $this->authoredPagination = $authoredPagination;
+        $this->analysisBody = $analysisBody ?? $body;
     }
 
     public static function analyze(string $sql): self
     {
+        $databaseIds = self::assertDatabaseAddressing($sql);
         $tokens = self::topLevelTokens($sql);
         if ($tokens === []) {
             throw new RuntimeException('Approved SQL resources must be read-only queries.');
@@ -83,12 +91,104 @@ class SqlResourceStatement
         }
 
         $statement = new self($prefix, $body, $suffix, $authoredPagination);
+        $statement->databaseIds = $databaseIds;
         foreach ($statement->topLevelSources() as $source) {
             if ($source['server'] !== null) {
                 throw new RuntimeException('Approved SQL resources cannot reference linked-server objects.');
             }
         }
         return $statement;
+    }
+
+    /** Logical database ids named by `{{database:id}}` placeholders, first use first. */
+    public function databaseIds(): array
+    {
+        return $this->databaseIds;
+    }
+
+    /**
+     * The statement to execute: each placeholder replaced, at its token
+     * position, by the delimited physical name `$quotedDatabase($id)` returns.
+     * Source analysis keeps reading the authored text.
+     *
+     * @param callable(string): string $quotedDatabase
+     */
+    public function withDatabases(callable $quotedDatabase): self
+    {
+        if ($this->databaseIds === []) return $this;
+        $render = static function (string $sql) use ($quotedDatabase): string {
+            $placeholders = [];
+            self::scan($sql, function (string $type, int $start, string $value) use (&$placeholders): void {
+                if ($type === 'placeholder') $placeholders[] = [$start, $value];
+            }, true);
+            foreach (array_reverse($placeholders) as [$start, $value]) {
+                preg_match(self::DATABASE_PLACEHOLDER, $value, $match);
+                $sql = substr($sql, 0, $start) . $quotedDatabase($match[1]) . substr($sql, $start + strlen($value));
+            }
+            return $sql;
+        };
+        $statement = new self($render($this->prefix), $render($this->body), $render($this->suffix), $this->authoredPagination, $this->analysisBody);
+        $statement->databaseIds = $this->databaseIds;
+        return $statement;
+    }
+
+    /**
+     * Databases are addressed only through `{{database:id}}.schema.object`
+     * (or `{{database:id}}..object`). Any other name of three or more parts,
+     * such as `Db.dbo.Table`, `[Db].[dbo].[Table]`, `Server.Db.dbo.Table`, or a
+     * three-part column reference, is rejected, as is a placeholder used in
+     * any other way. Returns the placeholder ids, first use first.
+     *
+     * @return list<string>
+     */
+    private static function assertDatabaseAddressing(string $sql): array
+    {
+        $tokens = [];
+        self::scan($sql, function (string $type, int $start, string $value) use (&$tokens): void {
+            if (in_array($type, ['word', 'quoted', 'dot', 'placeholder'], true)) {
+                $tokens[] = ['type' => $type, 'start' => $start, 'end' => $start + strlen($value), 'value' => $value];
+            }
+        }, true);
+        $ids = [];
+        $chain = [];
+        $flush = function () use (&$chain, &$ids): void {
+            $parts = [];
+            $afterDot = false;
+            foreach ($chain as $token) {
+                if ($token['type'] !== 'dot') {
+                    $parts[] = $token;
+                    $afterDot = false;
+                } elseif ($parts !== []) {
+                    if ($afterDot) $parts[] = null;
+                    $afterDot = true;
+                }
+            }
+            $chain = [];
+            foreach ($parts as $index => $part) {
+                if ($part === null || $part['type'] !== 'placeholder') continue;
+                if (preg_match(self::DATABASE_PLACEHOLDER, $part['value'], $match) !== 1) {
+                    throw new RuntimeException('Approved SQL resources contain an invalid database placeholder.');
+                }
+                if ($index !== 0 || count($parts) !== 3 || $parts[2] === null) {
+                    throw new RuntimeException('A database placeholder must qualify an object as {{database:id}}.schema.object.');
+                }
+                if (!in_array($match[1], $ids, true)) $ids[] = $match[1];
+            }
+            if (count($parts) >= 3 && ($parts[0] === null || $parts[0]['type'] !== 'placeholder')) {
+                throw new RuntimeException('Approved SQL resources address other databases only through {{database:id}} placeholders.');
+            }
+        };
+        $previous = null;
+        foreach ($tokens as $token) {
+            $adjacent = $previous !== null
+                && ($previous['type'] === 'dot' || $token['type'] === 'dot')
+                && trim(substr($sql, $previous['end'], $token['start'] - $previous['end'])) === '';
+            if (!$adjacent) $flush();
+            $chain[] = $token;
+            $previous = $token;
+        }
+        $flush();
+        return $ids;
     }
 
     public function prefix(): string
@@ -122,7 +222,7 @@ class SqlResourceStatement
             return [];
         }
 
-        $tokens = self::topLevelTokens($this->body);
+        $tokens = self::topLevelTokens($this->analysisBody);
         $fromIndex = null;
         foreach ($tokens as $index => $token) {
             if ($token['value'] === 'FROM') {
@@ -170,7 +270,7 @@ class SqlResourceStatement
      */
     public function topLevelSources(): array
     {
-        $tokens = self::topLevelTokens($this->body);
+        $tokens = self::topLevelTokens($this->analysisBody);
         foreach ($tokens as $index => $token) {
             if ($token['value'] === 'FROM') {
                 return array_values($this->parseTopLevelSources($tokens, $index));
@@ -183,14 +283,14 @@ class SqlResourceStatement
     {
         $from = $tokens[$fromIndex];
         $start = $from['start'] + strlen('FROM');
-        $end = strlen($this->body);
+        $end = strlen($this->analysisBody);
         foreach (array_slice($tokens, $fromIndex + 1) as $token) {
             if (in_array($token['value'], ['WHERE', 'GROUP', 'HAVING', 'ORDER', 'OFFSET', 'FETCH', 'FOR'], true)) {
                 $end = $token['start'];
                 break;
             }
         }
-        $segment = substr($this->body, $start, $end - $start);
+        $segment = substr($this->analysisBody, $start, $end - $start);
         $starts = [0];
         self::scan($segment, function (string $type, int $position, string $value) use (&$starts): void {
             if ($type === 'comma') {
@@ -214,8 +314,8 @@ class SqlResourceStatement
 
     private function directProjection(string $field, int $fromPosition): ?array
     {
-        $selectEnd = stripos($this->body, 'SELECT') + strlen('SELECT');
-        $projection = substr($this->body, $selectEnd, $fromPosition - $selectEnd);
+        $selectEnd = stripos($this->analysisBody, 'SELECT') + strlen('SELECT');
+        $projection = substr($this->analysisBody, $selectEnd, $fromPosition - $selectEnd);
         $starts = [0];
         self::scan($projection, function (string $type, int $position) use (&$starts): void {
             if ($type === 'comma') {
@@ -329,7 +429,7 @@ class SqlResourceStatement
 
     private function parseSource(string $sql): ?array
     {
-        $identifier = '(?:[A-Za-z_][A-Za-z0-9_]*|\[[A-Za-z_][A-Za-z0-9_]*\])';
+        $identifier = '(?:[A-Za-z_][A-Za-z0-9_]*|\[[A-Za-z_][A-Za-z0-9_]*\]|\{\{database:[a-z][a-z0-9_-]{0,63}\}\})';
         if (preg_match(
             '/^\s*((?:' . $identifier . '\s*\.\s*){0,3}' . $identifier . ')'
                 . '(?:\s+(?:AS\s+)?(' . $identifier . '))?/i',
@@ -340,7 +440,9 @@ class SqlResourceStatement
         }
 
         $parts = preg_split('/\s*\.\s*/', $matches[1]);
-        $parts = array_map(fn (string $part): string => trim($part, '[]'), $parts ?: []);
+        // A placeholder part becomes its logical database id.
+        $parts = array_map(fn (string $part): string => preg_match(self::DATABASE_PLACEHOLDER, $part, $placeholder) === 1
+            ? $placeholder[1] : trim($part, '[]'), $parts ?: []);
         $table = end($parts);
         $alias = isset($matches[2]) ? trim($matches[2], '[]') : null;
         if ($alias !== null && in_array(strtoupper($alias), [
@@ -412,6 +514,7 @@ class SqlResourceStatement
             }
             if ($character === '"' || $character === '[') {
                 $closing = $character === '[' ? ']' : '"';
+                $start = $index;
                 for ($index++; $index < $length; $index++) {
                     if ($sql[$index] !== $closing) continue;
                     if ($index + 1 < $length && $sql[$index + 1] === $closing) {
@@ -421,6 +524,20 @@ class SqlResourceStatement
                     $index++;
                     break;
                 }
+                if ($depth === 0 || $allDepths) $visitor('quoted', $start, substr($sql, $start, $index - $start));
+                continue;
+            }
+            if ($character === '{' && $next === '{') {
+                // One opaque token, so a placeholder's id is never read as SQL.
+                $end = strpos($sql, '}}', $index + 2);
+                $start = $index;
+                $index = $end === false ? $length : $end + 2;
+                if ($depth === 0 || $allDepths) $visitor('placeholder', $start, substr($sql, $start, $index - $start));
+                continue;
+            }
+            if ($character === '.') {
+                if ($depth === 0 || $allDepths) $visitor('dot', $index, '.');
+                $index++;
                 continue;
             }
             if ($character === '-' && $next === '-') {

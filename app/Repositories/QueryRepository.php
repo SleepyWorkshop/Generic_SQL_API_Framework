@@ -18,6 +18,7 @@ class QueryRepository
     private SetOperationBuilder $setOperationBuilder;
     private RoutineResolver $routines;
     private Logger $logger;
+    private ?SourceResolver $sources;
 
     public function __construct(
         ?QueryEngine $queryEngine = null,
@@ -32,6 +33,7 @@ class QueryRepository
         // Sources resolve within the request's database plan, when there is one.
         $plan = DatabaseQueryPlanContext::current();
         $sources ??= $plan === null ? null : new SourceResolver($plan);
+        $this->sources = $sources;
         $this->selectBuilder = new SelectBuilder($this->queryEngine, $metadataRepository, $this->logger, $sources);
         $this->routineBuilder = new RoutineBuilder();
         $this->routines = $routines ?? new RoutineResolver($metadataRepository);
@@ -103,8 +105,17 @@ class QueryRepository
         return $this->routineBuilder->buildTableFunction($routine, $request['params'] ?? []);
     }
 
+    /**
+     * Resolve a routine in the connected database. With a database plan the
+     * routine is also a QualifiedObject of the plan's (single) database.
+     */
     private function resolveRoutine($name, string $type, array $request): array
     {
-        return $this->routines->resolve($name, $type, $request['params'] ?? []);
+        $routine = $this->routines->resolve($name, $type, $request['params'] ?? []);
+        if ($this->sources !== null) {
+            if ($this->sources->plan()->isCrossDatabase) throw new LogicException('A routine runs in one database.');
+            $routine['object'] = $this->sources->qualify(null, $routine['schema'], $routine['name']);
+        }
+        return $routine;
     }
 }

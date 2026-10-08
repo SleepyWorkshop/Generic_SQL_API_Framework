@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/ApiRequestException.php';
 require_once __DIR__ . '/../Security/SecurityConfiguration.php';
+require_once __DIR__ . '/../Database/DatabaseRegistry.php';
 
 class SqlRequestValidator
 {
@@ -14,8 +15,12 @@ class SqlRequestValidator
     {
         $errors = [];
         $this->rejectUnknown($request, [
-            'action', 'resource', 'execution', 'filters', 'sort', 'pagination', 'filterLogic',
+            'action', 'resource', 'execution', 'filters', 'sort', 'pagination', 'filterLogic', 'database',
         ], $errors);
+        // The database a resource without {{database:id}} placeholders runs against.
+        if (array_key_exists('database', $request) && !DatabaseRegistry::isValidId($request['database'])) {
+            $errors[] = ['path' => 'database', 'message' => 'Database must be a configured database id.'];
+        }
         if (($request['action'] ?? null) !== 'sql') {
             $errors[] = ['path' => 'action', 'message' => 'SQL action is required.'];
         }

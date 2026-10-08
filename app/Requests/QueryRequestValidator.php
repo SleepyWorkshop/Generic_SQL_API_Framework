@@ -80,7 +80,9 @@ class QueryRequestValidator
                 }
             }
         } elseif (in_array($action, ['procedure', 'function', 'tableFunction'], true)) {
-            $this->rejectUnknown($request, ['action', 'source', 'parameters'], '', $errors);
+            // A routine runs in one database: `database`, else the default.
+            $this->rejectUnknown($request, ['action', 'source', 'parameters', 'database'], '', $errors);
+            $this->validateDatabase($request, '', $errors);
             $key = $action === 'procedure' ? 'procedure' : 'function';
             $this->validateSourceName($request, $key, $errors);
             if (isset($request['parameters']) && !is_array($request['parameters'])) {

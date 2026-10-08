@@ -73,13 +73,14 @@ on. Discovery does not parse the projection or infer an output schema.
   joins of every kind, `APPLY`, subqueries, derived tables, CTEs, aggregates,
   windows, set operations, `PIVOT`/`UNPIVOT`, JSON/XML functions, `TOP`, and
   ordering.
-- Objects of the configured database may be written as `Table`,
-  `schema.Table`, or `Database.schema.Table`; the parser keeps every part.
-  Runtime filters resolve source columns only through the connected
-  database's catalog, so a filter that would need a column of a
-  database-qualified source cannot be placed. Four-part (linked-server) names
-  in the main query's FROM/JOIN clauses, and `OPENQUERY`, `OPENROWSET`, and
-  `OPENDATASOURCE` anywhere in the file, are rejected.
+- Objects of the resource's database are written as `Table` or
+  `schema.Table`. Another registered database is named only through a
+  database placeholder (below). Any other name of three or more parts is
+  rejected anywhere in the file: `Database.schema.Table`,
+  `[Database].[schema].[Table]`, `Database..Table`, four-part linked-server
+  names, and three-part column references such as `dbo.Customer.Id` (use an
+  alias). `OPENQUERY`, `OPENROWSET`, and `OPENDATASOURCE` are rejected too.
+  These rules are checked before any connection opens.
 - Never put runtime values in the file. Clients supply values through runtime
   filters, which are always prepared parameters.
 - Authored `OFFSET/FETCH` makes the resource fixed-page: any request filters,
@@ -90,9 +91,42 @@ on. Discovery does not parse the projection or infer an output schema.
 The SQL inside a resource is trusted server code and is not analyzed table by
 table. Review every file as backend code.
 
+## Database placeholders
+
+`{{database:id}}` names a registered logical database (the id an operator
+configured, never a physical database name) and may only qualify an object:
+
+```sql
+SELECT p.ProductID, c.Name
+FROM {{database:inventory}}.dbo.Product p
+JOIN {{database:company}}.dbo.Customer c ON c.Id = p.CustomerId
+```
+
+- Each placeholder is resolved through the registry before any connection
+  opens, and rendered as the database's delimited physical name, for example
+  `[InventoryDB]` or `[Sales.2024]]Q]`. The name never comes from the request.
+- The first placeholder's database is the resource's primary database: the
+  request's connection opens to it, and objects without a placeholder
+  resolve there. A resource without placeholders uses the request's
+  `database`, else the default database.
+- All placeholder databases must share one server profile; the statement then
+  runs once, on that one connection. Otherwise the request fails with
+  `CROSS_SERVER_QUERY_NOT_SUPPORTED`. Unknown, disabled, and disconnected
+  databases fail with `DATABASE_NOT_FOUND`, `DATABASE_DISABLED`,
+  `SERVER_PROFILE_DISABLED`, or `DATABASE_UNAVAILABLE`.
+- A request cannot send `database` for a resource that has placeholders
+  (`INVALID_REQUEST`).
+- The id must be lowercase, exactly as registered; `{{database:id}}` alone,
+  as a schema or object, or with more parts than `.schema.object` (or
+  `..object`) is rejected. Placeholders inside string literals and comments
+  are left as text.
+- Runtime filters that would need source-column resolution are not placed on
+  resources with placeholders; output filters and explicit mappings still
+  work.
+
 ## How runtime filters are applied
 
-Files contain no placeholders or markers. The backend transforms the statement
+Apart from database placeholders, files contain no placeholders or markers. The backend transforms the statement
 using the request's validated `execution.filters` placement:
 
 | Placement | Where the predicate goes |
