@@ -10,7 +10,7 @@ return [
 
     'app_name' => 'Generic SQL REST API Framework',
 
-    'version' => '2.1.0',
+    'version' => '3.0.0',
 
     'timezone' => 'Asia/Kolkata',
 

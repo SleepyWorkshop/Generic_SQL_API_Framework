@@ -230,7 +230,7 @@ Required fields are `action`, `table`, and `data`; optional `database`.
 
 ### Validation
 
-The table must exist in the configured database. Live metadata enforces column
+The table must exist in the target database (`database`, else the default database). Live metadata enforces column
 existence, types, lengths, nullability, required fields, defaults, and
 generated-column protection.
 
@@ -514,7 +514,7 @@ Required: `action`, `source.procedure`. Optional: `parameters` and `database`.
 
 The name must be `Name` or `Schema.Name`, outside the `sys` and
 `INFORMATION_SCHEMA` schemas, and must not start with `sp_` or `xp_`. It must
-name an existing user stored procedure of the configured database. At most the
+name an existing user stored procedure of the selected database (`database`, else the default database). At most the
 declared number of parameters may be sent (trailing parameters use their
 defaults). Values are always prepared.
 

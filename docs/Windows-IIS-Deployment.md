@@ -9,7 +9,8 @@ links to remain authoritative for the underlying behavior:
 |---|---|
 | Development launchers | [Local development](Local-Development.md) |
 | Production security principles, headers, sessions, CORS, secrets | [Production Security and Deployment](Production-Security-and-Deployment.md) |
-| `database.json`, encryption envelope, key rotation | [Database Configuration](Database-Configuration.md) |
+| Database registry, encryption, key rotation | [Database Configuration](Database-Configuration.md) |
+| Upgrading a V2 installation | [Upgrading to V3](Upgrading-to-V3.md) |
 | Admin Console pages and availability controls | [Admin Console](Admin-Console.md) |
 | Liveness, readiness, System Health | [Monitoring and Health](Monitoring-and-Health.md) |
 | Application backups and restore | [Backup and Recovery](Backup-and-Recovery.md) |
@@ -411,7 +412,7 @@ the same `GENERIC_RUNTIME_CONFIG_DIR`.
 2. Copy the frontend `dist` folder from section 2.4 to
    `C:\GenericReporting\Frontend\Generic-Reporting-Framework\dist`.
 
-Do not copy a development machine's `config\*.json`, `database\config\database.json`,
+Do not copy a development machine's `config\*.json`, `database\config\databases.json` (or `database.json`),
 `runtime\secrets\`, `logs\`, `backups\`, or `storage\`. They are ignored by Git
 for that reason and are created fresh on the server.
 
@@ -513,7 +514,7 @@ icacls C:\PHP /grant "${id}:(OI)(CI)RX"
 | `Backend\` (code), `Frontend\...\dist\`, `C:\PHP` | Read & execute | Code and static files |
 | `Backend\config` | Read & execute | Shipped PHP configuration and allowlists; never writable by the pool |
 | `state\config` | Modify | Admin settings, users, keys, runtime/availability state, lock files |
-| `Backend\database\config` | Modify | Encrypted `database.json` saved by the Admin Console |
+| `Backend\database\config` | Modify | Encrypted `databases.json` registry saved by the Admin Console |
 | `Backend\logs` | Modify | Operational and audit logs |
 | `Backend\runtime` | Modify | Health cache, backup lock, backup-signing key (`runtime\secrets`) |
 | `Backend\runtime\windows`, `Backend\runtime\linux` | Read & execute | Development PHP runtimes; not used by IIS |
@@ -587,7 +588,7 @@ foreach ($boundary in 'api', 'admin', 'sqlparser') {
 | `GENERIC_APP_ENV=production` | ✔ | ✔ | ✔ | Production mode (secure cookies, application availability controls, no local process management) |
 | `GENERIC_RUNTIME_CONFIG_DIR=C:\GenericReporting\state\config` | ✔ | ✔ | ✔ | Runtime configuration outside the read-only code tree (section 8.1); the parser reads its availability state there |
 | `GENERIC_ADMIN_ENABLED=1` | | ✔ | | Allows `admin.*` actions; never set it on `/api` or `/sqlparser` |
-| `GENERIC_SQL_API_ENCRYPTION_KEY=<SECRET>` | ✔ | ✔ | | Decrypts `database.json` (11.3). The parser never touches the database |
+| `GENERIC_SQL_API_ENCRYPTION_KEY=<SECRET>` | ✔ | ✔ | | Decrypts the `databases.json` registry (11.3). The parser never touches the database |
 
 Optional variables such as `GENERIC_API_ALLOWED_ORIGINS`,
 `GENERIC_BACKUP_SIGNING_KEY`, and `DB_QUERY_TIMEOUT_SECONDS` are described in
@@ -623,7 +624,7 @@ off the command line:
 
 The value is stored in `C:\Windows\System32\inetsrv\config\applicationHost.config`,
 which only Administrators and SYSTEM can read. Never put the key in `web.config`,
-`database.json`, a script file, the repository, or a command line. Rotation is
+`databases.json`, a script file, the repository, or a command line. Rotation is
 described in [Database Configuration](Database-Configuration.md#secret-rotation).
 
 ### 11.4 Verify
@@ -899,8 +900,10 @@ should be limited to isolated test environments.
 2. **Test Connection** tests the values in the form with one temporary
    connection and changes nothing.
 3. **Save Database** encrypts the whole configuration with the key from 11.3 and
-   writes `Backend\database\config\database.json`. Passwords are never shown
-   again; leave the password blank on later edits to keep it.
+   writes the registry `Backend\database\config\databases.json` (the default
+   server profile and database). Passwords are never shown again; leave the
+   password blank on later edits to keep it. Further servers and databases are
+   added on the **Databases** page.
 4. **System Health → Service Actions → Database → Connect** verifies the saved
    configuration with one test connection and only then enables application
    database access. The Database card should show **connected**.
@@ -996,7 +999,7 @@ operations tooling; see [Logging](Logging.md).
 
 > **Application backup is not a SQL Server backup.** Recovery points contain
 > only application configuration (users, roles, API-key hashes, Admin settings,
-> and the encrypted `database.json`). Back up `ApplicationDb` with SQL
+> and the encrypted `databases.json` registry). Back up `ApplicationDb` with SQL
 > Server-native full, differential, and log backups.
 
 - **Create:** Admin → **Backup & Recovery** → **Create Backup**. The signed ZIP
@@ -1032,7 +1035,7 @@ pool recycles. Every update must end with a recycle.
 1. Create an application backup (section 21) and confirm SQL Server backups are current.
 2. Optionally **Disable** the API in System Health so clients get a clean `503`.
 3. Copy the new release over `Backend` (and the new frontend `dist`). Do not
-   overwrite `state\config`, `database\config\database.json`, `runtime\secrets`,
+   overwrite `state\config`, `database\config\databases.json`, `runtime\secrets`,
    `logs`, `storage`, or `backups`.
 4. Re-copy any changed `deployment\iis\*.web.config.example` files to their
    `web.config` locations (section 13), keeping local edits such as the redirect
@@ -1044,7 +1047,14 @@ pool recycles. Every update must end with a recycle.
    and the development runtimes read-only after the copy.
 6. Recycle: `& "$env:windir\System32\inetsrv\appcmd.exe" recycle apppool /apppool.name:GenericSQLAPI`
 7. Hard-refresh browsers (Ctrl+F5) so new Admin/parser JavaScript loads.
-8. Re-run section 19 and **Enable** the API.
+8. **Upgrading from V2 to V3 only (once):** an existing
+   `database\config\database.json` keeps serving as the default database. In
+   the Admin Console open **Configuration → Database**, leave the password blank,
+   and **Save Database**: the worker migrates it, with its own encryption key,
+   into `database\config\databases.json` and removes the V2 file. Then check
+   the **Databases** page. Do not put the encryption key on a command line to
+   run the migration script instead. See [Upgrading to V3](Upgrading-to-V3.md).
+9. Re-run section 19 and **Enable** the API.
 
 ### 22.2 Rollback
 
@@ -1053,6 +1063,12 @@ pool recycles. Every update must end with a recycle.
 3. If configuration must also go back, restore the matching application backup
    (section 21). Restore SQL Server data only through SQL Server-native restores.
 4. Recycle the application pool and re-run section 19.
+
+Rolling back from V3 to V2 needs the application backup created with V2 before
+the upgrade: V2 cannot read `databases.json`, and the V3 migration removed the
+V2 `database.json`. Restore that backup with the V2 code (it brings back
+`database.json`); servers and databases added after the upgrade are not part of
+it. See [Upgrading to V3](Upgrading-to-V3.md#rolling-back).
 
 ## 23. Troubleshooting
 
@@ -1085,7 +1101,7 @@ Run the read-only validator for a structured report:
 - [ ] PHP 8.2+ **NTS x64** in `C:\PHP`, Visual C++ runtime installed
 - [ ] `php.ini` merged with `deployment\php-production-security.ini`; `odbc`, `openssl` (and OPcache) loaded; `display_errors = Off`; sessions and PHP error log outside web roots
 - [ ] ODBC Driver 18 for SQL Server (x64) registered
-- [ ] Code in `C:\GenericReporting`; no development `config`, `database.json`, `runtime\secrets`, logs, or backups copied
+- [ ] Code in `C:\GenericReporting`; no development `config`, `databases.json`/`database.json`, `runtime\secrets`, logs, or backups copied
 - [ ] Runtime configuration bootstrapped; `validate-production.php` reports templates `VALIDATED`
 - [ ] Application pool `GenericSQLAPI`: No Managed Code, Integrated, 64-bit, ApplicationPoolIdentity
 - [ ] NTFS: install root, `Backend\config`, and the development runtimes read-only for the pool; only the listed state folders writable

@@ -3,7 +3,7 @@
 System Health manages a runtime availability gate, not a permanent SQL connection, and never starts or stops SQL Server. There is no connection pool: every database request opens and closes its own ODBC connection.
 
 - **Connect** decrypts the saved configuration, opens one test connection, closes it, and only then enables new database requests.
-- **Disconnect** denies new database requests (`503 DATABASE_UNAVAILABLE`) without opening a connection and without changing `database.json`, its encrypted credentials, or API/SQL Parser availability.
+- **Disconnect** denies new database requests (`503 DATABASE_UNAVAILABLE`) without opening a connection and without changing the registry, its encrypted credentials, or API/SQL Parser availability.
 - **Restart** disables, retests, and re-enables only on success.
 - A failed Connect or Restart leaves access disabled and returns `DATABASE_CONNECTION_FAILED`, or `DATABASE_CONFIGURATION_UNAVAILABLE` with a safe `reason` of `configuration_missing`, `encryption_key_missing`, or `configuration_invalid`.
 - Configuration → Database's **Test Connection** tests the currently submitted form values through a temporary request-scoped connection without saving them or changing availability. There is no separate saved-configuration test action.
@@ -19,22 +19,51 @@ Database tab edits.
 
 ## Configuration file
 
-Runtime database settings come from the ignored local file:
+Runtime database settings come from the ignored local database registry:
 
 ```text
-database/config/database.json
+database/config/databases.json
 ```
 
-The runtime accepts either the historical plaintext JSON object or the recommended encrypted envelope. Normal reporting requests only read this file. The local Admin Console's Database page is the preferred local configuration path: it validates/tests settings and always saves a complete encrypted envelope.
+```json
+{
+  "version": 2,
+  "defaultDatabase": "company",
+  "servers": {
+    "sql01": { "name": "SQL Server 01", "enabled": true, "connection": { "...": "encrypted envelope" } }
+  },
+  "databases": {
+    "company": { "name": "Company", "server": "sql01", "enabled": true, "catalog": { "...": "encrypted envelope" } }
+  }
+}
+```
+
+Ids, display names, flags, and server references are plaintext so the
+registry can be listed without the key. Each server's `connection` (the fields
+below, without `database`) and each database's `catalog` (its SQL Server
+database name) is a separate AES-256-GCM envelope (`version: 2`) whose
+additional authenticated data binds it to its own id, so entries cannot be
+swapped or renamed. The default database must exist and stay enabled on an
+enabled server profile. Manage the registry through the Admin Console
+(**Databases** page, or Configuration → Database for the default database);
+never edit it by hand.
+
+A V2 `database/config/database.json` (plaintext or a `version: 1` envelope) is
+still read until it is migrated: it serves as the `default` server profile and
+`default` database. The first registry write (an Admin save) or
+`php scripts/migrate-database-registry.php` migrates it, verifies the result,
+and removes the V2 file. See [Upgrading to V3](Upgrading-to-V3.md).
 
 Leaving the password field blank while editing retains an existing password;
 passwords are never returned to the browser. Saving a new configuration requires
 a password for SQL authentication. Windows integrated authentication stores no
 required password and is available only when the backend runs on Windows.
 
-## Plaintext fields
+## Connection fields
 
-The plaintext form is retained for backward compatibility and as the input to the one-time migration:
+These are the fields of a server profile's connection (and of the V2
+`database.json` plaintext form, retained only as migration input; `database`
+becomes the database context's catalog):
 
 | Field | Type | Required | Behavior |
 |---|---|---:|---|
@@ -52,9 +81,10 @@ The plaintext form is retained for backward compatibility and as the input to th
 
 See `database/config/database.example.json` for a placeholder-only example. The earlier password-only encrypted object remains readable so existing deployments can migrate, but new deployments should encrypt the complete configuration.
 
-## Complete configuration encryption
+## Encryption
 
-The recommended deployed `database.json` contains only this versioned envelope:
+Each registry entry is an envelope of this form (V2 `database.json` files use
+the same shape with `"version": 1` and no binding):
 
 ```json
 {
@@ -85,11 +115,11 @@ access at the operating-system layer.
 Runtime resolution is centralized:
 
 ```text
-database.json
-  -> parse and detect encrypted envelope
+databases.json
+  -> validate the registry structure (no key needed)
   -> read external key
-  -> authenticate and decrypt AES-256-GCM payload
-  -> decode the complete configuration
+  -> authenticate and decrypt the server profile's and database's envelopes
+  -> DatabaseContext
   -> existing driver validation and connection path
 ```
 
@@ -150,7 +180,7 @@ shell it uses that shell's identity and environment, not the IIS worker's.
 ## Security and troubleshooting
 
 - Keep `GENERIC_SQL_API_ENCRYPTION_KEY` separate from the encrypted file and restrict access to both.
-- Never commit `database.json`, plaintext configuration copies, or encryption keys.
+- Never commit `databases.json`, `database.json`, plaintext configuration copies, or encryption keys.
 - A missing-key error means the PHP worker does not see `GENERIC_SQL_API_ENCRYPTION_KEY`.
 - An invalid-key error means the environment value is not strict Base64 for exactly 32 bytes.
 - A decryption failure means authentication failed, the payload is malformed, or the key/payload pair does not match.
@@ -167,18 +197,23 @@ save creates a fresh nonce and replaces the complete encrypted envelope. Then
 restart or reconnect database runtime access and revoke the prior SQL password
 after validation.
 
-There is no automatic encryption-key rotation. Preserve the current key while
-decrypting the current configuration, provision a new Base64-encoded 32-byte
-key to every worker, save the configuration under that new key, recycle the
-workers, and verify connection health before destroying the old key. Losing the
-old key before re-encryption makes the existing ciphertext unrecoverable. Keep
-an approved, access-controlled recovery copy of the matching key and encrypted
+There is no automatic encryption-key rotation and no re-encryption tool. Every
+registry entry is sealed separately, so rotating the key means re-entering
+configuration under the new key: create an Admin backup, provision the new
+Base64-encoded 32-byte key to every worker and recycle them, then on the
+**Databases** page re-save every server profile (entering its password again)
+and every database (entering its catalog again). Entries not yet re-saved are
+unreadable (`readable: false`) and their databases fail with
+`DATABASE_CONFIGURATION_ERROR`, so plan a maintenance window and verify
+connection health before destroying the old key. Losing the old key before
+re-entry makes the existing ciphertext unrecoverable. Keep an approved,
+access-controlled recovery copy of the matching key and encrypted
 configuration; never back up plaintext configuration.
 
-Legacy plaintext configuration and the former password-only encrypted format
-remain readable for compatibility. Saving through the Admin Console seals the
-complete configuration; files are not migrated merely by loading them. Operators must explicitly save/migrate such files so plaintext
-does not persist indefinitely.
+A V2 plaintext configuration and the former password-only encrypted format
+remain readable until migration. Files are not migrated merely by loading
+them; migrate explicitly (see [Upgrading to V3](Upgrading-to-V3.md)) so
+plaintext does not persist indefinitely.
 
 The query timeout is separate application configuration: the runtime setting
 `query.timeoutSeconds` (default 45 seconds, overridable by

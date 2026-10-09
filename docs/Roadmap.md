@@ -10,7 +10,7 @@ contract until it is implemented, tested, and documented.
 | v1.0.0 | Core Generic SQL REST API Framework | Completed (2026-07-27) |
 | v2.0.0 | Platform expansion and security | Completed (2026-10-05) |
 | v2.1.0 | Security verification, operational hardening, and generic authorization | Completed |
-| v3.0.0 | Multi-database support | Unreleased / upcoming |
+| v3.0.0 | Multi-database support for SQL Server | Completed (2026-10-09) |
 | v3.1 | Developer experience and API integration | Upcoming |
 
 ## Completed
@@ -52,19 +52,37 @@ suite. See the [changelog](../CHANGELOG.md#200---2026-10-05).
 The external penetration test and deployed-host validation were deliberately
 deferred; they are listed under [Deferred](#deferred).
 
+### v3.0.0 — Multi-database support for SQL Server
+
+Several SQL Server server profiles and databases behind logical database ids,
+with same-server cross-database SELECT. SQL Server remains the only engine.
+See the [changelog](../CHANGELOG.md#300---2026-10-09) and
+[Upgrading to V3](Upgrading-to-V3.md).
+
+| # | Scope | Status | Commit |
+|---|---|---|---|
+| 1 | Architecture and database-context design (no code) | Completed | — |
+| 2 | Encrypted database registry, V2 migration, runtime state, backup format 4 | Completed | `0768228` |
+| 3 | Database context resolution, connection manager, login timeout | Completed | `b93cb3b` |
+| 4 | Database references, access policy, and query planning | Completed | `3467ae9` |
+| 5 | SQL Server identifiers, qualified objects, and source resolution | Completed | `c566c46` |
+| 6 | Same-server cross-database SELECT | Completed | `34e4a20` |
+| 7 | Database-aware metadata and `metadata.databases` | Completed | `d1c51ce` |
+| 8 | Database-aware SQL Resources and routines | Completed | `a0d14d4` |
+| 9 | Database-aware writes with one target database | Completed | `1d0bfd5` |
+| 10 | Health and Admin database management | Completed | `828202c` |
+| 11 | Security, isolation, and regression campaign | Completed | `26703dd` |
+| 12 | Migration verification, documentation, and release preparation | Completed | release commit (`v3.0.0`) |
+
+Deferred by design or not verified (see [Limitations](Limitations.md#multi-database-v3)):
+other database engines; queries across server profiles, linked servers, and
+federation; multi-target writes and distributed transactions; per-database
+authorization; persistent connections and pools; cross-request metadata
+caching and cross-database metadata federation; cross-database write sources;
+encryption-key re-encryption tooling. Execution against a real SQL Server was
+not part of the repository verification.
+
 ## Upcoming
-
-### v3.0.0 — Multi-database support
-
-Move from the SQL Server-only implementation to a database-provider
-architecture:
-
-- a database registry and per-request database context;
-- provider abstraction for connections, metadata, and SQL generation;
-- database-aware resources, authorization, and metadata validation;
-- Admin Console management of multiple databases;
-- planned providers: Microsoft SQL Server, MySQL, PostgreSQL, and MariaDB;
-- provider-specific and cross-database regression tests.
 
 ### v3.1 — Developer experience and API integration
 
@@ -77,6 +95,11 @@ architecture:
 
 Known items without a scheduled milestone:
 
+- **SQL Server integration testing** of V3 on a dedicated non-production SQL
+  Server: two databases on one instance (cross-database SELECT, collations,
+  other databases' catalog views), SQL Resource placeholders, routines,
+  writes, Azure SQL Database edition detection, and health checks.
+- Encryption-key re-encryption tooling for the database registry.
 - Informational static-analysis findings SSA-13 – SSA-16 and SSA-18 – SSA-20;
   see
   [Security verification](security/Security-Verification.md#findings-register).
@@ -99,8 +122,9 @@ Known items without a scheduled milestone:
 ## Future direction (uncommitted)
 
 Explicit transactions, query and metadata caching, query profiling, distributed
-rate limiting and session state, webhooks and events, and multi-tenancy have been
-considered. None is scheduled.
+rate limiting and session state, webhooks and events, multi-tenancy, other
+database engines (MySQL, PostgreSQL, MariaDB), cross-server queries, and
+per-database authorization have been considered. None is scheduled.
 
 ## Out of scope
 

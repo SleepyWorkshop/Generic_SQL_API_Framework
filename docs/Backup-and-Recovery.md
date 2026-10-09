@@ -10,7 +10,8 @@ Server backup engine, scheduler, cloud-sync client, or arbitrary file archiver.
 
 ## Scope and ZIP format
 
-The official artifact is `backup-<recovery-point-id>.zip`. The version-3 ZIP has exactly:
+The official artifact is `backup-<recovery-point-id>.zip`. The current
+(format 4, V3) ZIP has exactly:
 
 ```text
 manifest.json
@@ -20,13 +21,18 @@ config/installation.json
 config/admin.json
 config/authorization.json
 config/api-keys.json
-database/config/database.json
+database/config/databases.json
 ```
 
 These are logical paths: the `config/*.json` entries are read from and
 restored to the runtime configuration directory (`GENERIC_RUNTIME_CONFIG_DIR`),
-and `database/config/database.json` to its fixed location. The database document
-must remain an AES-256-GCM encrypted envelope. Password
+and `database/config/databases.json` to its fixed location. The database
+registry is backed up as stored — server profiles, databases, the default
+database, enabled flags, and every encrypted envelope — and must validate as a
+registry. Recovery points of formats 2 and 3 (V2), which contain
+`database/config/database.json` instead, remain verifiable and restorable:
+restoring one converts its database configuration into the registry and
+removes the V2 file, so the result is always a V3 installation. Password
 hashes and API-key secret hashes are configuration state, but plaintext
 passwords and one-time raw API-key secrets are never stored and therefore cannot
 enter a backup. The manifest contains the recovery-point ID, UTC creation time,

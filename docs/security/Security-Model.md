@@ -31,7 +31,7 @@ Public API: body checks → logging → Admin/identity actions rejected (404)
     ▼
 Services: authentication, sessions, users, API keys, query, write, routines, Admin
     ▼
-Storage: runtime JSON (GENERIC_RUNTIME_CONFIG_DIR), encrypted database.json,
+Storage: runtime JSON (GENERIC_RUNTIME_CONFIG_DIR), encrypted databases.json registry,
          PHP sessions, logs, backups, rate-limit counters
 SQL Server: ODBC, one request-owned connection, prepared parameters
 ```
@@ -45,7 +45,7 @@ SQL Server: ODBC, one request-owned connection, prepared parameters
 | SQL Parser | Loopback or internal binding; fixed routing to `index.php` and its assets | No authentication, database, configuration, file, or network access; never executes SQL |
 | Database | Request-scoped ODBC connection; catalog-confirmed user objects only; prepared parameters; the database login's permissions are the data boundary | Credentials are decrypted only in request memory |
 | Filesystem | Fixed FastCGI targets; no generic `*.php` routing; state directories outside web roots | See [Filesystem](#filesystem-and-least-privilege) |
-| Secrets | Worker environment for keys; AES-256-GCM `database.json`; hashed passwords and API keys | See [Secrets](#secrets-and-configuration) |
+| Secrets | Worker environment for keys; per-entry AES-256-GCM `databases.json` registry; hashed passwords and API keys | See [Secrets](#secrets-and-configuration) |
 | Sessions | PHP file sessions, cookie-only, strict mode, host-only cookie, idle and absolute timeouts, `authVersion` revocation | See [Sessions](#sessions-csrf-and-cors) |
 | Logging | Allowlisted audit fields and redaction; logs are never served | See [Logging](#logging-and-auditing) |
 
@@ -203,7 +203,7 @@ through the Admin API.
 | Secret | Where it lives | Controls |
 |---|---|---|
 | `GENERIC_SQL_API_ENCRYPTION_KEY` | Worker environment: IIS FastCGI registrations for `api` and `admin`, or the PHP-FPM pool/service | Never in `web.config`, the repository, scripts, or command lines; not given to the SQL Parser on IIS; never returned by health or Admin responses |
-| Database credentials | `database/config/database.json` as an authenticated AES-256-GCM envelope | Decrypted in request memory only; Admin returns `passwordConfigured`, never the password, ciphertext, or connection string |
+| Database credentials | Server profiles in `database/config/databases.json`, each an authenticated AES-256-GCM envelope bound to its id | Decrypted in request memory only; Admin returns `passwordConfigured`, never the password, ciphertext, or connection string |
 | User passwords | `auth.json`, `password_hash(PASSWORD_DEFAULT)`, rehashed on login | Never logged or returned |
 | API keys | `api-keys.json`, hash of the secret plus a short fingerprint | Raw `gsk_` key shown once; logs carry only the ID and fingerprint |
 | Session IDs and CSRF tokens | PHP session storage outside web roots | Never logged |
@@ -211,14 +211,15 @@ through the Admin API.
 | Legacy shared API key (optional) | `GENERIC_SQL_API_KEY` | Keys shorter than 32 characters are refused; roles come from `legacyApiKeyRoles` |
 
 Only `*.example.json` configuration is tracked; `.gitignore` excludes
-`database/config/database.json`, `runtime/secrets/`, `storage/`, logs, backups,
+`database/config/databases.json`, `database/config/database.json`, `runtime/secrets/`, `storage/`, logs, backups,
 and `.env`. The constant `AuthService::DUMMY_PASSWORD_HASH` is a fixed
 placeholder that equalizes login timing; it is not a credential. On IIS,
 environment variables reach FastCGI workers only when set on the FastCGI
 registration.
 
-Plaintext `database.json` remains readable for migration only. Production
-deployments must use the encrypted form and an externally managed key.
+A V2 `database.json` (plaintext or encrypted) remains readable only until it
+is migrated into the registry. Production deployments must use the encrypted
+registry and an externally managed key.
 
 ## Filesystem and least privilege
 
@@ -227,7 +228,7 @@ deployments must use the encrypted form and an externally managed key.
 | Code: `api/`, `admin/`, `sqlparser/`, `app/`, `core/`, `queries/`, `database/drivers/`, `config/` (shipped PHP configuration) | Read only |
 | `runtime/windows/`, `runtime/linux/` (development PHP runtimes) | Read only |
 | Runtime configuration directory (`GENERIC_RUNTIME_CONFIG_DIR`, outside the code tree) | Read/write |
-| `database/config/` | Read/write (encrypted `database.json`) |
+| `database/config/` | Read/write (encrypted `databases.json` registry) |
 | `runtime/` (other contents), `storage/`, `logs/`, `backups/`, PHP session directory | Read/write |
 | `runtime/secrets/` or an external secret store | Narrowly restricted read |
 | `.git/`, temporary files | No access |
@@ -262,8 +263,8 @@ HSTS, CSP, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, and
   procedure-level grants. `db_owner` is never required, and a highly privileged
   or shared login gives every `data.read`/`data.write` principal the same reach.
 - Windows authentication through the application-pool identity is recommended
-  on a domain; SQL authentication passwords are stored only in the encrypted
-  `database.json`.
+  on a domain; SQL authentication passwords are stored only in the server
+  profiles of the encrypted `databases.json` registry.
 - ODBC Driver 18 encrypts by default and `trustServerCertificate` defaults to
   off. Production driver auto-selection uses only ODBC Driver 18 or 17, and a TLS
   failure never falls back to another driver. Weakened transport settings are
@@ -315,7 +316,7 @@ collection are deployment responsibilities. See [Logging](../Logging.md).
 ## Backups
 
 Application backups contain only the runtime JSON configuration and the
-encrypted `database.json`. Keys, sessions, availability and rate-limit state,
+encrypted `databases.json` registry. Keys, sessions, availability and rate-limit state,
 logs, and SQL Server data are excluded by a fixed list that is validated on
 restore. SHA-256 integrity and an HMAC-SHA256 manifest signature are verified
 before preview and restore. Restore requires the Admin gate, `admin.manage`,

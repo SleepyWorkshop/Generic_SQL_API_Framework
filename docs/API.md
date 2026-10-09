@@ -121,8 +121,9 @@ See [SQL Resource Mode](SQL-Resource-Mode.md) and
 
 ### CRUD write requests
 
-Writes name their target in `table` (`Table` or `Schema.Table`). Any user table
-of the configured database can be written by a caller holding `data.write`;
+Writes name their target in `table` (`Table` or `Schema.Table`) and, optionally,
+its one database in `database` (default: the default database). Any user table
+of a registered database can be written by a caller holding `data.write`;
 there is no per-table registration. System schemas and cross-database names are
 rejected, and the table and its columns are validated against live metadata.
 

@@ -17,10 +17,12 @@ $adminExample = json_decode((string)file_get_contents($root . '/config/admin.exa
 $databaseStateExample = json_decode((string)file_get_contents($root . '/config/database-state.example.json'), true, 512, JSON_THROW_ON_ERROR);
 $applicationRuntimeExample = json_decode((string)file_get_contents($root . '/config/application-runtime-state.example.json'), true, 512, JSON_THROW_ON_ERROR);
 
+// config/app.php is the single version source; the release documents below
+// must describe that version.
+$version = $application['version'] ?? null;
 repositoryDocumentationAssert(
-    ($application['app_name'] ?? null) === 'Generic SQL REST API Framework'
-        && ($application['version'] ?? null) === '2.1.0-dev',
-    'Application identity does not represent the completed v2.1.0 release.'
+    ($application['app_name'] ?? null) === 'Generic SQL REST API Framework' && $version === '3.0.0',
+    'Application identity does not represent the v3.0.0 release.'
 );
 repositoryDocumentationAssert(
     $adminExample === RuntimeConfiguration::adminDefaults()
@@ -43,21 +45,29 @@ repositoryDocumentationAssert(
         === RuntimeConfiguration::authorizationDefaults(),
     'Tracked authorization example does not match bootstrap defaults.'
 );
-// Releases appear newest first; future v3 work stays under [Unreleased].
+// Releases appear newest first, the current version directly below [Unreleased].
 preg_match_all('/^## \[([^\]]+)\](.*)$/m', $changelog, $releases);
 repositoryDocumentationAssert(
-    $releases[1] === ['Unreleased', '2.1.0', '2.0.0', '1.0.0']
-        && $releases[2] === ['', '', ' - 2026-10-05', ' - 2026-07-27'],
+    $releases[1] === ['Unreleased', $version, '2.1.0', '2.0.0', '1.0.0']
+        && $releases[2] === ['', ' - 2026-10-09', '', ' - 2026-10-05', ' - 2026-07-27'],
     'Changelog release status is inconsistent.'
 );
 repositoryDocumentationAssert(
     str_starts_with($readme, "# Generic SQL REST API Framework\n")
-        && str_contains($readme, '| **v2.1.0** | **Completed — current version** |')
-        && str_contains($readme, '| v3.0.0 | Unreleased / upcoming |')
-        && !preg_match('/v[12]\.[01]\.0[^.\n]*unreleased/i', $readme)
+        && str_contains($readme, "| **v{$version}** | **Completed (2026-10-09) — current version** |")
+        && str_contains($readme, '| v2.1.0 | Completed |')
+        && !preg_match('/v[123]\.[01]\.0[^.\n]*unreleased/i', $readme)
         && preg_match('/Phase [1-4](?:\.[0-9]+)?\s+[—-].*implemented/i', $readme) !== 1,
     'README contains an incorrect release status or phase diary.'
 );
+// V3 is SQL Server only: no other engine is described as supported or planned.
+foreach (['README.md' => $readme, 'docs/Roadmap.md' => $roadmap] as $document => $text) {
+    repositoryDocumentationAssert(
+        preg_match('/planned providers|(?:MySQL|PostgreSQL|MariaDB)[^.\n]*(?:supported|implemented)/i', $text) !== 1,
+        "{$document} claims support for another database engine."
+    );
+}
+repositoryDocumentationAssert(is_file($root . '/docs/Upgrading-to-V3.md'), 'The V2 to V3 upgrade guide is missing.');
 
 // The roadmap separates completed, upcoming, and deferred work and records the
 // real release state of each milestone.
@@ -71,13 +81,13 @@ foreach ([
     '| v1.0.0 | Core Generic SQL REST API Framework | Completed (2026-07-27) |',
     '| v2.0.0 | Platform expansion and security | Completed (2026-10-05) |',
     '| v2.1.0 | Security verification, operational hardening, and generic authorization | Completed |',
-    '| v3.0.0 | Multi-database support | Unreleased / upcoming |',
+    "| v{$version} | Multi-database support for SQL Server | Completed (2026-10-09) |",
     '| v3.1 | Developer experience and API integration | Upcoming |',
 ] as $milestone) {
     repositoryDocumentationAssert(str_contains($roadmap, $milestone), "Roadmap does not record milestone: {$milestone}");
 }
-// v2.1.0 is the completed line and v3.0.0 the next major version; there is no
-// separate v2.2 milestone or 2.2.0 development version.
+// v2.1.0 was followed directly by v3.0.0; there is no separate v2.2
+// milestone or 2.2.0 development version.
 foreach (['README.md' => $readme, 'CHANGELOG.md' => $changelog, 'docs/Roadmap.md' => $roadmap] as $document => $text) {
     repositoryDocumentationAssert(preg_match('/\b2\.2\.0\b|\bv2\.2\b/i', $text) !== 1, "{$document} describes a v2.2 milestone.");
 }

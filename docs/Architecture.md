@@ -25,22 +25,58 @@ Middleware (app/Middleware)
   ↓
 Request validation and normalization (app/Requests)
   ↓
+Database planning (app/Database)
+  references → registry contexts → access policy → one server profile
+  ↓
 Controllers → services → repositories and builders (app/)
   ↓
-QueryEngine → Database → DriverFactory → SqlServerDriver → PHP ODBC
+QueryEngine → DatabaseConnectionManager → Database → SqlServerDriver → PHP ODBC
+  (one request-scoped connection, to the plan's primary database)
   ↓
 Microsoft SQL Server
 
 Configuration and state (read by every layer above):
   config/*.php                      shipped PHP configuration (read-only in production)
   GENERIC_RUNTIME_CONFIG_DIR        users, roles, API keys, Admin settings, availability
-  database/config/database.json     encrypted database configuration
+  database/config/databases.json    database registry: server profiles and databases,
+                                    each entry AES-256-GCM encrypted
+  database/config/database.json     V2 configuration, read only until migrated
   logs/, runtime/, storage/, backups/
 ```
 
-Microsoft SQL Server through ODBC is the only database provider. `DriverFactory`
-creates only `SqlServerDriver`; the other files in `database/drivers/` are empty
-stubs.
+Microsoft SQL Server through ODBC is the only database engine in V3.
+`DriverFactory` creates only `SqlServerDriver`; the other files in
+`database/drivers/` are empty stubs.
+
+## Multi-database architecture
+
+- **Registry.** `DatabaseRegistry` stores server profiles (connection,
+  credentials, TLS, login timeout) and database contexts (logical id, display
+  name, server profile, physical catalog, enabled flag) plus the default
+  database. Credentials belong to server profiles; every entry is sealed
+  separately with AES-256-GCM bound to its id. The registry is the allowlist of
+  databases the API can reach.
+- **Resolution.** Clients name databases only by logical id.
+  `DatabaseContextResolver` turns an id into a `DatabaseContext` (configured,
+  enabled, profile enabled) and checks its availability gate. Physical names
+  are trusted registry values and reach SQL only through `QualifiedObject` and
+  `MssqlIdentifier` delimited identifiers.
+- **Planning.** `DatabaseReferenceCollector` finds the request's database
+  references (top-level `database`, source `database`, SQL Resource
+  `{{database:id}}` placeholders); `DatabaseAccessPolicy` (V3: allow enabled
+  databases) and `DatabaseQueryPlanner` produce a `DatabaseQueryPlan` with one
+  primary database and one server profile. Different profiles fail with
+  `CROSS_SERVER_QUERY_NOT_SUPPORTED`.
+- **Execution.** `DatabaseConnectionManager` opens one request-scoped
+  connection to the primary database. Same-profile cross-database SELECTs and
+  SQL Resources run as one statement on it; engines without same-instance
+  cross-database names (Azure SQL Database, Synapse dedicated pools) refuse
+  them first. Writes and routines have exactly one target database. There are
+  no persistent connections, pools, linked servers, or distributed
+  transactions.
+- **Administration.** The Admin Console manages profiles and databases
+  through the registry; API and SQL Parser availability are application flags,
+  never process control in production, where IIS owns the worker lifecycle.
 
 ## Components
 
@@ -180,14 +216,17 @@ Pagination runs a count query, then checks the database compatibility level:
 complete first-page SQL Resource whose authored `TOP` fits the page skips the
 count.
 
-Database configuration is resolved by `DatabaseConfigurationResolver`:
+Database configuration is resolved through the registry:
 
 ```text
-database/config/database.json
-  → plaintext object (compatibility), or
-    AES-256-GCM envelope decrypted in memory with GENERIC_SQL_API_ENCRYPTION_KEY
-  → SqlServerDriver → odbc_connect
+database/config/databases.json
+  → per-entry AES-256-GCM envelopes decrypted in memory with GENERIC_SQL_API_ENCRYPTION_KEY
+  → DatabaseContext (server profile + physical catalog)
+  → DatabaseConnectionManager → SqlServerDriver → odbc_connect
 ```
+
+Until a V2 `database.json` is migrated, it is read as the `default` server
+profile and `default` database; see [Upgrading to V3](Upgrading-to-V3.md).
 
 See [Database configuration](Database-Configuration.md).
 

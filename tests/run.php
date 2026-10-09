@@ -34,6 +34,7 @@ $tests = [
     __DIR__ . '/DatabaseWriteTest.php',
     __DIR__ . '/AdminDatabaseManagementTest.php',
     __DIR__ . '/SecurityIsolationRegressionTest.php',
+    __DIR__ . '/UpgradeVerificationTest.php',
     __DIR__ . '/DatabaseAvailabilityLifecycleTest.php',
     __DIR__ . '/RuntimeConfigurationBootstrapTest.php',
     __DIR__ . '/AuthenticationFoundationTest.php',

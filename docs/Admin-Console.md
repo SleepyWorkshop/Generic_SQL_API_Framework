@@ -122,7 +122,7 @@ service.
   connection, closes it, and only then enables access. Requests continue to
   open their own request-scoped connections.
 - **Disconnect** only disables access: database-dependent API requests return
-  `503 DATABASE_UNAVAILABLE`; `database.json`, credentials, and API/SQL Parser
+  `503 DATABASE_UNAVAILABLE`; the registry, credentials, and API/SQL Parser
   availability are unchanged.
 - **Restart** reconnects.
 - A failed Connect or Restart leaves access disabled and returns

@@ -21,6 +21,15 @@ is reproduced here.
   hardening opportunities, or accepted risks, each documented in
   [Security model](Security-Model.md#accepted-risks-and-deployment-responsibilities)
   or [Limitations](../Limitations.md).
+- v3.0.0 (multi-database) adds a repository-level isolation sweep
+  (`SecurityIsolationRegressionTest`): unregistered and system databases,
+  physical-name and qualified-name bypasses, identifier injection in every
+  request position, SQL Resource placeholders and remote rowsets,
+  cross-server combinations, single-target writes and routines, registry
+  tampering and key handling, and secret leakage through errors. It found and
+  fixed missing Azure SQL cross-database detection, test writes into live logs
+  and state, and Admin acceptance of unrenderable catalog names. See
+  [Security model](Security-Model.md#database-isolation).
 - All verification so far was performed against the repository and local,
   isolated deployments. **No deployed production-like host has been tested, and
   the external penetration test has not been performed.**

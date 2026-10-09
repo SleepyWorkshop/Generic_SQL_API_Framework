@@ -93,7 +93,7 @@ Apply least privilege to the PHP service identity:
 | `app/`, `core/`, `database/drivers/`, `queries/` | no | read |
 | `config/` (shipped PHP configuration and allowlists) | no | read only |
 | runtime configuration directory (`GENERIC_RUNTIME_CONFIG_DIR`, outside the code tree) | no | read/write |
-| `database/config/` | no | read/write (encrypted `database.json` saved by the Admin Console) |
+| `database/config/` | no | read/write (encrypted `databases.json` registry saved by the Admin Console) |
 | `logs/`, `runtime/`, `storage/security/`, PHP session directory | no | read/write |
 | `runtime/windows/`, `runtime/linux/` (development PHP runtimes) | no | read only |
 | `runtime/secrets/` or external secret store | no | narrowly restricted read |
@@ -222,7 +222,7 @@ GENERIC_SQL_API_KEY=<legacy key only when that authentication path is used>
 
 Optional validated overrides such as `GENERIC_API_ALLOWED_ORIGINS`, session/login limits, and `DB_QUERY_TIMEOUT_SECONDS` retain their documented behavior. Prefer the Admin Console runtime settings (stored in `admin.json` in the runtime configuration directory) unless deployment automation intentionally owns an environment override.
 
-The encryption key must be available to the PHP worker identity but stored separately from `database/config/database.json`. Never place credentials, keys, session data, or real production hostnames in repository templates.
+The encryption key must be available to the PHP worker identity but stored separately from `database/config/databases.json`. Never place credentials, keys, session data, or real production hostnames in repository templates.
 
 On IIS, provision the key outside the site content and grant the application-pool
 identity only the access it needs. Apply NTFS ACLs to `database/config`,

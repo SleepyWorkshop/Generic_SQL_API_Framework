@@ -102,7 +102,7 @@ Do not casually edit or commit:
 
 - `admin.json`, `auth.json`, `authorization.json`, `api-keys.json`,
   `installation.json`, `database-state.json`, or `application-runtime-state.json`;
-- `database/config/database.json`;
+- `database/config/databases.json` and `database/config/database.json`;
 - `runtime/secrets/`, `runtime/api/`, `runtime/sqlparser/`, or `runtime/health/`;
 - `logs/`, `storage/`, lock files, backups, temporary files, sessions, or keys.
 

@@ -5,8 +5,87 @@ Planned work is in [docs/Roadmap.md](docs/Roadmap.md).
 
 ## [Unreleased]
 
-No changes yet. The next major version is v3.0.0; see the
-[Roadmap](docs/Roadmap.md).
+No changes yet. Planned work is in the [Roadmap](docs/Roadmap.md).
+
+## [3.0.0] - 2026-10-09
+
+Multi-database support for Microsoft SQL Server: several server profiles and
+databases behind logical database ids, with same-server cross-database
+SELECT. SQL Server remains the only database engine. Upgrade instructions and
+compatibility notes are in [Upgrading to V3](docs/Upgrading-to-V3.md).
+
+### Added
+
+- **Database registry** (`database/config/databases.json`): server profiles
+  (connection, credentials, TLS options, login timeout) and database contexts
+  (logical id, name, server profile, catalog, enabled flag) with a default
+  database. Each entry is an AES-256-GCM envelope bound to its own id;
+  structural validation needs no key.
+- **Database selection** by logical id: a top-level `database` on `select`,
+  `union`, `unionAll`, `sql`, `metadata.*` (except `metadata.databases`),
+  `procedure`, `function`, `tableFunction`, `insert`, `update`, `delete`, and
+  `upsert`, and `source.database` on SELECT sources. Requests are planned
+  before any connection opens (references → registry contexts → access
+  policy → one server profile).
+- **Same-server cross-database SELECT**: joins, subqueries, CTEs, set
+  operations, aggregation, windows, and pagination across databases of one
+  server profile, as one statement on one connection; physical names are
+  rendered from the registry as delimited identifiers, and each source's
+  columns are validated against its own database.
+- **Schema-aware SELECT sources** (`source.schema`).
+- **Database-aware metadata**, `metadata.columns` with `source.schema`, and
+  `metadata.databases`, which lists logical databases (`id`, `name`,
+  `default`, `enabled`, `available`, `crossDatabaseGroup`) from the registry
+  without connecting.
+- **SQL Resource `{{database:id}}` placeholders** for registered databases.
+- **Database-aware routines and writes**, each with exactly one target
+  database.
+- **Admin Console**: a Databases page and `admin.servers.*`/`admin.databases.*`
+  actions to manage, enable, test, and connect server profiles and databases;
+  a per-server and per-database health tree on System Health.
+- Login timeout per server profile (`options.loginTimeoutSeconds`, ODBC
+  `ConnectTimeout`).
+- New error codes: `DATABASE_NOT_FOUND`, `DATABASE_DISABLED`,
+  `SERVER_PROFILE_DISABLED`, `SERVER_PROFILE_NOT_FOUND`,
+  `CROSS_SERVER_QUERY_NOT_SUPPORTED`, `CROSS_DATABASE_QUERY_NOT_SUPPORTED`,
+  `COLLATION_CONFLICT`, `DATABASE_CONNECTION_TIMEOUT`,
+  `DATABASE_CONNECTION_FAILED`.
+- `scripts/migrate-database-registry.php` and `GENERIC_SECURITY_STORAGE_DIR`.
+
+### Changed
+
+- **Breaking:** SQL Resources may not contain literal database-qualified or
+  four-part names, three-part column references, or `OPENQUERY`,
+  `OPENROWSET`, and `OPENDATASOURCE`; another database is addressed only with
+  a placeholder. A resource with placeholders runs on its first placeholder's
+  database and rejects a request `database`.
+- **Breaking:** SELECT `source.table` and source aliases are single
+  identifiers (use `source.schema`); dotted names, which the catalog check
+  never accepted, are now validation errors.
+- The V2 `database.json` is read as the `default` server profile and
+  database until migrated by the first registry write or the migration
+  script; migration verifies the result before removing the V2 file.
+- Database availability state is per database (version 2); application
+  backups use format 4 with the registry, and format 2 and 3 recovery points
+  are converted on restore.
+- Connection failures map to specific codes instead of `500 INTERNAL_ERROR`.
+- Health: per-database checks and caches; readiness still depends only on the
+  default database and opens no connection.
+- The test runner isolates logs and security state, and no suite writes the
+  deployment's configuration, runtime, logs, or storage.
+
+### Security
+
+- The registry is the database allowlist: unregistered databases (including
+  `master`, `msdb`, `tempdb`, and `model`), physical names, and qualified names
+  never resolve; queries across server profiles are rejected before
+  connecting, and cross-database queries are refused on Azure SQL Database and
+  Synapse dedicated pools.
+- An isolation sweep covers identifier injection in every request position,
+  registry tampering, key handling, and secret leakage; Admin rejects catalog
+  names that cannot be rendered as identifiers.
+- Real SQL Server execution was not verified by the regression suite, which
+  uses recorded ODBC calls and in-memory catalogs.
 
 ## [2.1.0]
 
@@ -45,7 +124,7 @@ and evidence are in
   `INVALID_WRITE_RESOURCE` are no longer returned; unknown write tables return
   `400 INVALID_WRITE_TABLE`.
 - `config/authorization.example.json` reflects schema version 4.
-- Application version metadata reports `2.1.0-dev`.
+- Application version metadata reports `2.1.0`.
 - Documentation reorganized into current reference, roadmap, changelog, and a
   consolidated security model and verification record.
 

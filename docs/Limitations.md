@@ -3,6 +3,38 @@
 These are current public-contract boundaries, not hidden supported features.
 Planned work is tracked separately in [Roadmap](Roadmap.md).
 
+## Multi-database (V3)
+
+**Not supported by design in V3:**
+
+- database engines other than Microsoft SQL Server;
+- queries across server profiles (`CROSS_SERVER_QUERY_NOT_SUPPORTED`), linked
+  servers, and `OPENQUERY`/`OPENROWSET`/`OPENDATASOURCE`;
+- cross-database queries on engines without same-instance cross-database
+  names: Azure SQL Database and Synapse dedicated SQL pools
+  (`CROSS_DATABASE_QUERY_NOT_SUPPORTED`);
+- writes or routine calls against more than one database, cross-database write
+  sources, and distributed transactions;
+- per-database (or per-table/column) authorization: role permissions apply to
+  every registered database; the database login's grants are the boundary;
+- persistent connections or connection pools: each request opens its own
+  connection;
+- literal database-qualified names in SQL Resources (use
+  `{{database:id}}` placeholders).
+
+**Not implemented:** cross-request metadata caching (only 15-second health
+checks are cached), metadata federation across databases (metadata reads one
+selected database), automatic encryption-key rotation or re-encryption,
+and correlated subqueries.
+
+**Not verified in the project's test environment:** execution against a real
+SQL Server — including same-instance cross-database queries, collation
+behavior, catalog views of other databases, and routine and write execution.
+The regression suite uses recorded ODBC calls and in-memory catalogs; it shows
+that the generated SQL, plans, and connections are as intended, not how a
+given SQL Server responds. Verify on a dedicated non-production SQL Server
+before production use.
+
 ## Universal API and security
 
 - Authentication supports sessions, managed API keys, the legacy environment
@@ -14,7 +46,7 @@ Planned work is tracked separately in [Roadmap](Roadmap.md).
 - The endpoint accepts POST and OPTIONS only.
 - Authorization is by role permission only. There is no per-table, per-column,
   per-routine, or per-SQL-Resource authorization in the API: a principal with
-  `data.read` can query any table or view of the configured database that the
+  `data.read` can query any table or view of any registered database that the
   database login can read, and `data.write` can change any table the login can
   write (ST-003). Restrict data exposure with the database login's own
   permissions, least-privilege views, and SQL Resources.
@@ -32,7 +64,7 @@ Planned work is tracked separately in [Roadmap](Roadmap.md).
   by the request body limit (ST-004).
 - Unpaginated reads are limited to `GENERIC_MAX_RESULT_ROWS` rows (default 10,000)
   and fail with `413 RESULT_TOO_LARGE` instead of truncating.
-- SQL Server over ODBC is the only provider.
+- SQL Server over ODBC is the only database engine.
 
 ## JSON Query Mode
 

@@ -40,7 +40,8 @@ the [changelog](../CHANGELOG.md). Start with the repository
 | [Local development](Local-Development.md) | Launchers, bundled runtimes, local troubleshooting |
 | [Production security and deployment](Production-Security-and-Deployment.md) | Production hosting for IIS and Nginx, permissions, secrets, operator checklists |
 | [Windows Server IIS deployment](Windows-IIS-Deployment.md) | Step-by-step Windows installation |
-| [Database configuration](Database-Configuration.md) | `database.json`, encryption, ODBC, key rotation |
+| [Database configuration](Database-Configuration.md) | The database registry, encryption, ODBC, key rotation |
+| [Upgrading to V3](Upgrading-to-V3.md) | V2 → V3 migration, compatibility changes, verification, rollback |
 | [Admin Console](Admin-Console.md) | Pages, availability controls, every Admin API action |
 | [Authentication and authorization](Authentication-and-Authorization.md) | Modes, sessions, API keys, roles, user management |
 | [Runtime and performance controls](Runtime-and-Performance-Controls.md) | Timeouts, rate limits, sessions, request and page limits |
