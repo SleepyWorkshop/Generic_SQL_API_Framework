@@ -47,8 +47,10 @@ try {
     $applicationStatePath = RuntimeConfiguration::path(RuntimeConfiguration::APPLICATION_RUNTIME_STATE_FILE);
     $applicationRuntime = new ApplicationRuntimeManager($applicationStatePath);
     $configuration = new AdminConfigurationRepository();
+    // Bound to the test's own registry; without one the default id would come from the deployment's registry.
     $databaseAvailability = new DatabaseAvailabilityManager(
-        RuntimeConfiguration::path(RuntimeConfiguration::DATABASE_STATE_FILE)
+        RuntimeConfiguration::path(RuntimeConfiguration::DATABASE_STATE_FILE),
+        DatabaseRegistry::forLegacyPath($databasePath)
     );
     JsonFileStore::save($databasePath, [
         'provider' => 'sqlserver',

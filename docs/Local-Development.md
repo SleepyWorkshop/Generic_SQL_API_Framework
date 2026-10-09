@@ -63,8 +63,8 @@ service.
 
 - The Admin Console is served at `/` on its port; an `/admin` bookmark
   redirects there. Use first-run setup to create the System Administrator,
-  then configure the database under **Configuration → Database** (more servers
-  and databases under **Databases**). Saving writes the encrypted registry
+  then add a server profile and a database under **Databases** (the first
+  database becomes the default). Saving writes the encrypted registry
   `database/config/databases.json`.
 - **System Health** starts, stops, and restarts the API and SQL Parser
   processes and connects or disconnects database availability. Each component
@@ -98,7 +98,7 @@ audit records to `logs/audit/YYYY-MM-DD.jsonl`. Search by the response's
 | `PHP runtime not found` or `php.ini not found` | Restore the bundled runtime files, or install PHP 8.2+ on Linux |
 | `PHP ODBC extension not available` | Enable `odbc` in the launcher's `php.ini` and check its DLL/shared-library dependencies |
 | `PHP OpenSSL extension not available` | Enable `openssl` (Windows: `php_openssl.dll` in the bundled `php.ini`) |
-| `Database configuration has not been saved` | Save settings in **Configuration → Database** |
+| `Database configuration has not been saved` | Add a server profile and a database on the **Databases** page |
 | Encryption key errors | Restore the matching key file or environment value; the launcher never replaces a missing key for an already-encrypted configuration |
 | Decryption failure | The encrypted configuration and key are not a matching pair, or the file was altered |
 | `No compatible SQL Server ODBC driver` | Install a supported driver or configure the exact installed driver |

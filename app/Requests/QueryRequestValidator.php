@@ -41,6 +41,12 @@ class QueryRequestValidator
         'partitionBy'
     ];
 
+    /** Whether the value names a public data action, exactly as validate() accepts it. */
+    public static function isAction(mixed $action): bool
+    {
+        return is_string($action) && in_array($action, self::ACTIONS, true);
+    }
+
     public function validate(array $request): void
     {
         $errors = [];

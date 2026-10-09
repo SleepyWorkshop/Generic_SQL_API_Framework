@@ -266,7 +266,14 @@ try {
     $adminCss = (string)file_get_contents(__DIR__ . '/../admin/assets/admin.css');
     $compactAdminJavaScript = str_replace('"', "'", preg_replace('/\s+/', '', $adminJavaScript));
     $compactAdminCss = preg_replace('/\s+/', ' ', $adminCss);
-    unifiedAdminAssert(str_contains($compactAdminJavaScript, 'availableAuthenticationModes.map'), 'Database authentication UI does not use backend-supported modes.');
+    // The server profile form (Databases → Servers) is the only database connection form.
+    unifiedAdminAssert(str_contains($compactAdminJavaScript, "(serverOptions.availableAuthenticationModes||['sql']).map"), 'Database authentication UI does not use backend-supported modes.');
+    foreach (['databaseSection', 'database-form', 'admin.database.save', 'admin.database.test', 'admin.database.get', 'Save Database'] as $removedConfigDatabase) {
+        unifiedAdminAssert(!str_contains($adminJavaScript, $removedConfigDatabase), "Configuration → Database remains ({$removedConfigDatabase}).");
+    }
+    foreach (['admin.database.get', 'admin.database.test', 'admin.database.save'] as $compatibilityAction) {
+        unifiedAdminAssert(str_contains((string)file_get_contents(__DIR__ . '/../admin/api.php'), "'{$compatibilityAction}'"), "{$compatibilityAction} is no longer routed.");
+    }
     foreach ([
         'session' => 'Session',
         'api_key' => 'API Key',
@@ -445,6 +452,13 @@ try {
     unifiedAdminAssert(!str_contains($adminJavaScript, '"encryption",\n      "backup",')
         && !str_contains((string)file_get_contents(__DIR__ . '/../app/Health/ApplicationHealthMonitor.php'), "'backup' => \$this->backupHealth()"),
         'Backup remains in the System Health response or UI aggregation.');
+    // System Health renders no Backup card; backup state stays on the Backup & Recovery page.
+    foreach (['backupHealthCard', 'backupReasons', 'checks.backup'] as $removedBackupHealth) {
+        unifiedAdminAssert(!str_contains($adminJavaScript, $removedBackupHealth), "System Health still renders backup health ({$removedBackupHealth}).");
+    }
+    foreach (['async function backupRecoveryView()', 'action: "admin.backup.history"', 'action: "admin.backup.schedule"', 'backup-overview-title'] as $backupPage) {
+        unifiedAdminAssert(str_contains($adminJavaScript, $backupPage), "The Backup & Recovery page lost {$backupPage}.");
+    }
     unifiedAdminAssert(str_contains((string)file_get_contents(__DIR__ . '/../app/Health/ApplicationHealthMonitor.php'), 'public function restoreSafety(): array'),
         'Restore safety health validation was removed while separating Backup from System Health.');
     unifiedAdminAssert(!str_contains(strtolower($adminJavaScript), 'test saved configuration'), 'Removed saved database test remains in the Admin Console.');

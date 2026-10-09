@@ -50,8 +50,8 @@ secrets, and is excluded from backups as host-specific state.
 ## Pages
 
 - **System Health** is the runtime control plane. Cards: Admin Console, API
-  Server, SQL Parser, Database, PHP Runtime, Configuration, Logging, Encryption,
-  and Backup. Cards show status only; API, SQL Parser, and database lifecycle
+  Server, SQL Parser, Database, PHP Runtime, Configuration, Logging, and
+  Encryption (backup state is on the Backup & Recovery page). Cards show status only; API, SQL Parser, and database lifecycle
   controls are in the separate Service Actions section. See
   [Monitoring and health](Monitoring-and-Health.md).
 - **System Info** shows application, status, platform, PHP runtime,
@@ -59,12 +59,9 @@ secrets, and is excluded from backups as host-specific state.
 - **Databases** manages the database registry
   (`database/config/databases.json`), in two tabs. See
   [Server profiles and databases](#server-profiles-and-databases).
-- **Configuration** has Server (development only), Database, Security, Runtime &
-  Performance, and Advanced tabs.
-  - **Database** edits, tests, and saves the default database's SQL Server
-    settings (the `admin.database.*` actions). Test Connection uses the
-    submitted form values and does not save them or change availability. See
-    [Database configuration](Database-Configuration.md).
+- **Configuration** has Server (development only), Security, Runtime &
+  Performance, and Advanced tabs. Database connections are managed only on the
+  **Databases** page; the former Configuration → Database tab was removed.
   - **Security** holds the API authentication mode, CORS origins, and session
     and CSRF information.
   - **Runtime & Performance** holds query timeout, rate limits, session
@@ -173,14 +170,14 @@ All actions are `POST` JSON requests to `admin/api.php`. "Gate" means loopback,
 | `admin.health` (alias `admin.status`) | Detailed System Health | Gate | no |
 | `admin.system.info` | System information | Gate | no |
 | `admin.settings.get` | Redacted configuration (`server: null` in production) | Gate | no |
-| `admin.database.get` | Safe database configuration | Gate | no |
+| `admin.database.get` | Safe default-database configuration (compatibility; no longer used by the console) | Gate | no |
 | `admin.servers.list`, `admin.databases.list` | Server profiles; database contexts | Gate | no |
 | `admin.databases.health` | Server profiles and their databases, each with its own health | Gate | no |
 | `admin.backup.history`, `admin.backup.schedule` | Recovery points; schedule information | Gate | no |
 | `admin.console.restart` | Revalidate Admin configuration and clear application bytecode caches | Gate | yes |
 | `admin.api.start`, `.stop`, `.restart` | API process lifecycle (development) or Enable/Disable/Reload (production) | Gate | yes |
 | `admin.sqlParser.start`, `.stop`, `.restart` | SQL Parser lifecycle, as above | Gate | yes |
-| `admin.database.test`, `.save` | Test submitted values; save configuration | Gate | yes |
+| `admin.database.test`, `.save` | Test submitted values; save the default database (compatibility; no longer used by the console) | Gate | yes |
 | `admin.database.connect`, `.disconnect`, `.restart` | Database availability gate | Gate | yes |
 | `admin.servers.save` (`server`), `.enable`, `.disable`, `.delete`, `.test` (`id`) | Manage and test server profiles | Gate | yes |
 | `admin.databases.save` (`database`), `.enable`, `.disable`, `.default`, `.delete`, `.test`, `.connect`, `.disconnect` (`id`) | Manage, test, and gate databases | Gate | yes |

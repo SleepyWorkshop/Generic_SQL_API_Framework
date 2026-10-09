@@ -5,7 +5,27 @@ Planned work is in [docs/Roadmap.md](docs/Roadmap.md).
 
 ## [Unreleased]
 
-No changes yet. Planned work is in the [Roadmap](docs/Roadmap.md).
+### Changed
+
+- **Admin Console: Configuration → Database removed.** The **Databases** page
+  (Databases and Servers tabs) is the only database UI. A V2 `database.json` is
+  migrated by editing and saving the `default` server profile there. The
+  `admin.database.*` actions remain for compatibility.
+- **System Health** no longer shows a Backup card; backup state is on the
+  Backup & Recovery page. The `admin.health` response still carries the
+  `backup` check.
+- **Databases page:** the default database's row has no Set Default, Disable,
+  or Delete actions (the API still rejects them with `409`), and the server and
+  database tables size their columns to their content instead of reusing the
+  Users table's fixed widths, so rows are compact.
+
+### Fixed
+
+- The database availability gate applies only to data actions. A request with
+  an invalid action is rejected by validation (`400 INVALID_REQUEST`)
+  regardless of database state instead of `503 DATABASE_UNAVAILABLE`; data
+  actions are gated as before. Tests no longer depend on the deployment's own
+  database registry, which made `AuthorizationApiCoverageTest` fail in CI.
 
 ## [3.0.0] - 2026-10-09
 

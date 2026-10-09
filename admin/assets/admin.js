@@ -618,43 +618,12 @@
     content.innerHTML = `<div class="grid"><article class="section-card"><h2>System</h2><dl class="detail-list"><dt>Application</dt><dd>${escapeHtml(display(info.application))}</dd><dt>Status</dt><dd>${escapeHtml(display(info.status))}</dd><dt>Platform</dt><dd>${escapeHtml(display(info.platform))}</dd><dt>PHP Runtime</dt><dd>${escapeHtml(display(info.phpRuntime))}</dd><dt>Configuration</dt><dd>${escapeHtml(display(info.configurationStatus))}</dd><dt>Database</dt><dd>${escapeHtml(display(info.databaseStatus))}</dd></dl></article><article class="section-card"><h2>Services</h2><dl class="detail-list"><dt>Admin Console</dt><dd>${escapeHtml(display(info.services && info.services.adminConsole))}</dd><dt>API</dt><dd>${escapeHtml(display(info.services && info.services.api))}</dd><dt>SQL Parser</dt><dd>${escapeHtml(display(info.services && info.services.sqlParser))}</dd></dl></article></div>`;
   }
 
-  function databasePayload(db, form = null) {
-    if (form) {
-      const v = new FormData(form);
-      return {
-        provider: "sqlserver",
-        driver: v.get("driver"),
-        server: v.get("server"),
-        port: v.get("port"),
-        database: v.get("database"),
-        authentication: v.get("authentication"),
-        username: v.get("username"),
-        password: v.get("password") || null,
-        encrypt: v.get("encrypt") === "on",
-        trustServerCertificate: v.get("trustServerCertificate") === "on",
-        loginTimeoutSeconds: v.get("loginTimeoutSeconds") ? Number(v.get("loginTimeoutSeconds")) : null,
-      };
-    }
-    return {
-      provider: db.provider,
-      driver: db.driver,
-      server: db.server,
-      port: db.port,
-      database: db.database,
-      authentication: db.authentication,
-      username: db.username,
-      password: null,
-      encrypt: db.encrypt,
-      trustServerCertificate: db.trustServerCertificate,
-      loginTimeoutSeconds: db.loginTimeoutSeconds,
-    };
-  }
   // Server holds the development launcher's listener settings. In production
   // IIS/Nginx and FastCGI/FPM own listeners, so the tab does not exist there.
   function configurationTabs(hostingMode) {
     return hostingMode === "production"
-      ? ["database", "security", "runtime", "advanced"]
-      : ["server", "database", "security", "runtime", "advanced"];
+      ? ["security", "runtime", "advanced"]
+      : ["server", "security", "runtime", "advanced"];
   }
   function resolveConfigurationTab(tab, hostingMode) {
     const tabs = configurationTabs(hostingMode),
@@ -677,7 +646,6 @@
       );
     const target = document.querySelector("#config-section");
     if (activeConfigTab === "server") serverSection(target, settings.server);
-    else if (activeConfigTab === "database") await databaseSection(target);
     else if (activeConfigTab === "security") securitySection(target, settings);
     else if (activeConfigTab === "runtime")
       runtimeSection(target, settings.runtime);
@@ -750,64 +718,6 @@
         }
       }),
     );
-  }
-  async function databaseSection(target) {
-    const db = row(await call({ action: "admin.database.get" })),
-      options = db.availableDrivers
-        .map(
-          (driver) =>
-            `<option${driver === db.driver ? " selected" : ""}>${escapeHtml(driver)}</option>`,
-        )
-        .join(""),
-      authenticationOptions = db.availableAuthenticationModes
-        .map(
-          (mode) =>
-            `<option value="${escapeHtml(mode)}"${mode === db.authentication ? " selected" : ""}>${mode === "windows" ? "Windows integrated" : "SQL login"}</option>`,
-        )
-        .join("");
-    target.innerHTML = `<form id="database-form" class="stack"><p class="help">Stored credentials remain encrypted. Leave password blank to retain the current password.</p><div class="row"><label>ODBC Driver<select name="driver">${options}</select></label><label>Server<input name="server" value="${escapeHtml(db.server)}" required></label></div><div class="row"><label>Port<input name="port" value="${escapeHtml(db.port)}"></label><label>Database<input name="database" value="${escapeHtml(db.database)}" required></label></div><div class="row"><label>Authentication<select name="authentication">${authenticationOptions}</select></label><label>Username<input name="username" value="${escapeHtml(db.username)}"></label></div><label>Password<input name="password" type="password" autocomplete="new-password" placeholder="${db.passwordConfigured ? "Stored password retained" : "Required for SQL login"}"></label><label>Login timeout (seconds)<input name="loginTimeoutSeconds" type="number" min="1" max="65534" step="1" value="${escapeHtml(db.loginTimeoutSeconds)}"></label><div class="row"><label class="check"><input name="encrypt" type="checkbox"${db.encrypt ? " checked" : ""}> Encrypt connection</label><label class="check"><input name="trustServerCertificate" type="checkbox"${db.trustServerCertificate ? " checked" : ""}> Trust server certificate</label></div><div class="actions"><button type="button" id="test-database" class="secondary">Test Connection</button><button>Save Database</button></div></form>`;
-    const form = target.querySelector("form");
-    target
-      .querySelector("#test-database")
-      .addEventListener("click", async (event) => {
-        const done = setButtonBusy(event.currentTarget, "Testing…");
-        try {
-          await call(
-            {
-              action: "admin.database.test",
-              database: databasePayload(null, form),
-            },
-            true,
-          );
-          notify("Database connection succeeded.");
-        } catch (error) {
-          notify(error.message, true);
-        } finally {
-          done();
-        }
-      });
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const button = event.currentTarget.querySelector(
-          "button:not([type=button])",
-        ),
-        done = setButtonBusy(button, "Saving…");
-      try {
-        await call(
-          {
-            action: "admin.database.save",
-            database: databasePayload(null, form),
-          },
-          true,
-        );
-        notify("Encrypted database configuration saved.");
-        await configurationView("database");
-      } catch (error) {
-        notify(error.message, true);
-      } finally {
-        done();
-      }
-    });
   }
   function securitySection(target, settings) {
     const mode = settings.authentication.mode,
@@ -1165,34 +1075,6 @@
     invalid: "Invalid encrypted database configuration",
     configuration_missing: "Database configuration missing",
   };
-  const backupReasons = {
-    verified: "Latest backup verified",
-    no_backups: "No backup has been created yet",
-    storage_unavailable: "Backup storage unavailable",
-    configuration_invalid: "Backup configuration invalid",
-    verification_failed: "Latest backup failed verification",
-    signing_key_unavailable: "Backup signing key unavailable",
-    backup_failed: "Last scheduled backup failed",
-    backup_overdue: "Scheduled backup overdue",
-  };
-  function backupHealthCard(backup) {
-    const attempt = backup.lastScheduledAttempt;
-    return healthCard(
-      "Backup",
-      {
-        status: backup.status === "not_configured" ? "not configured" : backup.status,
-        healthy: backup.status === "healthy" || backup.status === "not_configured",
-      },
-      [
-        ["Reason", backupReasons[backup.category] || backup.category],
-        ["Latest backup", backup.latestBackupAt ? formatAdminDate(backup.latestBackupAt) : null],
-        ["Verification", backup.verification],
-        ["Recovery points", backup.recoveryPoints],
-        ["Schedule", backup.scheduleEnabled === undefined ? null : backup.scheduleEnabled ? backup.frequency : "disabled"],
-        ["Last scheduled attempt", attempt ? `${formatAdminDate(attempt.attemptedAt)} — ${attempt.status}` : null],
-      ],
-    );
-  }
   async function healthView() {
     loading();
     const health = row(await call({ action: "admin.health" })),
@@ -1266,7 +1148,7 @@
             : [["Category", checks[name].category]],
         ),
       )
-      .join("")}${checks.backup ? backupHealthCard(checks.backup) : ""}</div><section class="service-actions" aria-labelledby="service-actions-title"><div class="service-actions__heading"><h2 id="service-actions-title">Service Actions</h2><p class="help">Control application services without mixing lifecycle actions into health diagnostics.</p></div><div class="table-wrap"><table class="service-actions__table"><thead><tr><th>Service</th><th>Status</th><th>Actions</th></tr></thead><tbody>${serviceActionRow(
+      .join("")}</div><section class="service-actions" aria-labelledby="service-actions-title"><div class="service-actions__heading"><h2 id="service-actions-title">Service Actions</h2><p class="help">Control application services without mixing lifecycle actions into health diagnostics.</p></div><div class="table-wrap"><table class="service-actions__table"><thead><tr><th>Service</th><th>Status</th><th>Actions</th></tr></thead><tbody>${serviceActionRow(
       "Admin Console",
       health.adminConsole,
       '<button type="button" class="secondary" data-admin-console-restart>Restart</button>',
@@ -1401,6 +1283,19 @@
       section.querySelector(".help").textContent = error.message;
     }
   }
+  // Row actions of the Databases page. The current default database (the
+  // `default` flag of admin.databases.list) gets no Set Default, Disable, or
+  // Delete at all; the backend rejects those requests independently.
+  function serverActionButtons(server) {
+    const id = escapeHtml(server.id);
+    return `<button class="small secondary" data-server-action="edit" data-id="${id}">Edit</button><button class="small secondary" data-server-action="test" data-id="${id}">Test Connection</button><button class="small secondary" data-server-action="${server.enabled ? "disable" : "enable"}" data-id="${id}">${server.enabled ? "Disable" : "Enable"}</button><button class="small danger" data-server-action="delete" data-id="${id}"${server.databaseCount ? ' disabled title="Move or delete its databases first"' : ""}>Delete</button>`;
+  }
+  function databaseActionButtons(database) {
+    const id = escapeHtml(database.id),
+      common = `<button class="small secondary" data-database-action="edit" data-id="${id}">Edit</button><button class="small secondary" data-database-action="test" data-id="${id}">Test Connection</button><button class="small secondary" data-database-action="${database.available ? "disconnect" : "connect"}" data-id="${id}">${database.available ? "Disconnect" : "Connect"}</button>`;
+    if (database.default) return common;
+    return `${common}<button class="small secondary" data-database-action="default" data-id="${id}"${database.usable ? "" : " disabled"}>Set Default</button><button class="small secondary" data-database-action="${database.enabled ? "disable" : "enable"}" data-id="${id}">${database.enabled ? "Disable" : "Enable"}</button><button class="small danger" data-database-action="delete" data-id="${id}">Delete</button>`;
+  }
   // Server profiles and database contexts, both stored in the database registry.
   async function databasesView(tab = activeDatabaseTab) {
     loading();
@@ -1419,19 +1314,19 @@
     const serverRows = servers
         .map(
           (server) =>
-            `<tr><td data-label="Server">${escapeHtml(server.name)}<br><span class="help">${escapeHtml(server.id)}</span></td><td data-label="Host">${escapeHtml(server.readable ? `${server.connection.server}${server.connection.port ? `,${server.connection.port}` : ""}` : "Unreadable")}</td><td data-label="Status">${badge(server.enabled, "Enabled", "Disabled")}</td><td data-label="Databases">${server.databaseCount}</td><td data-label="Login timeout">${escapeHtml(server.readable ? `${server.connection.loginTimeoutSeconds}s` : "")}</td><td class="user-actions-cell" data-label="Actions"><div class="actions"><button class="small secondary" data-server-action="edit" data-id="${escapeHtml(server.id)}">Edit</button><button class="small secondary" data-server-action="test" data-id="${escapeHtml(server.id)}">Test Connection</button><button class="small secondary" data-server-action="${server.enabled ? "disable" : "enable"}" data-id="${escapeHtml(server.id)}">${server.enabled ? "Disable" : "Enable"}</button><button class="small danger" data-server-action="delete" data-id="${escapeHtml(server.id)}"${server.databaseCount ? ' disabled title="Move or delete its databases first"' : ""}>Delete</button></div></td></tr>`,
+            `<tr><td data-label="Server">${escapeHtml(server.name)}<br><span class="help">${escapeHtml(server.id)}</span></td><td data-label="Host">${escapeHtml(server.readable ? `${server.connection.server}${server.connection.port ? `,${server.connection.port}` : ""}` : "Unreadable")}</td><td data-label="Status">${badge(server.enabled, "Enabled", "Disabled")}</td><td data-label="Databases">${server.databaseCount}</td><td data-label="Login timeout">${escapeHtml(server.readable ? `${server.connection.loginTimeoutSeconds}s` : "")}</td><td class="user-actions-cell" data-label="Actions"><div class="actions">${serverActionButtons(server)}</div></td></tr>`,
         )
         .join(""),
       databaseRows = databases
         .map(
           (database) =>
-            `<tr><td data-label="Database">${escapeHtml(database.name)}<br><span class="help">${escapeHtml(database.id)}</span>${database.default ? ' <span class="role-badge">Default</span>' : ""}</td><td data-label="Server">${escapeHtml(database.serverName || database.server)}</td><td data-label="Catalog">${escapeHtml(database.catalog ?? "Unreadable")}</td><td data-label="Enabled">${badge(database.usable, "Enabled", database.enabled ? "Server disabled" : "Disabled")}</td><td data-label="Availability">${badge(database.available, "Available", "Disconnected")}</td><td class="user-actions-cell" data-label="Actions"><div class="actions"><button class="small secondary" data-database-action="edit" data-id="${escapeHtml(database.id)}">Edit</button><button class="small secondary" data-database-action="test" data-id="${escapeHtml(database.id)}">Test Connection</button><button class="small secondary" data-database-action="${database.available ? "disconnect" : "connect"}" data-id="${escapeHtml(database.id)}">${database.available ? "Disconnect" : "Connect"}</button><button class="small secondary" data-database-action="default" data-id="${escapeHtml(database.id)}"${database.default || !database.usable ? " disabled" : ""}>Set Default</button><button class="small secondary" data-database-action="${database.enabled ? "disable" : "enable"}" data-id="${escapeHtml(database.id)}"${database.default && database.enabled ? ' disabled title="Choose another default first"' : ""}>${database.enabled ? "Disable" : "Enable"}</button><button class="small danger" data-database-action="delete" data-id="${escapeHtml(database.id)}"${database.default ? ' disabled title="Choose another default first"' : ""}>Delete</button></div></td></tr>`,
+            `<tr><td data-label="Database">${escapeHtml(database.name)}<br><span class="help">${escapeHtml(database.id)}</span>${database.default ? ' <span class="role-badge">Default</span>' : ""}</td><td data-label="Server">${escapeHtml(database.serverName || database.server)}</td><td data-label="Catalog">${escapeHtml(database.catalog ?? "Unreadable")}</td><td data-label="Enabled">${badge(database.usable, "Enabled", database.enabled ? "Server disabled" : "Disabled")}</td><td data-label="Availability">${badge(database.available, "Available", "Disconnected")}</td><td class="user-actions-cell" data-label="Actions"><div class="actions">${databaseActionButtons(database)}</div></td></tr>`,
         )
         .join("");
     content.innerHTML = `${tabs}${
       activeDatabaseTab === "servers"
-        ? `<div class="users-heading"><p class="help">A server profile is one SQL Server connection boundary and its encrypted credentials. Databases of one profile can be queried together.</p><button data-server-action="add">+ Add Server</button></div>${servers.length ? `<div class="table-wrap"><table class="users-table"><thead><tr><th>Server</th><th>Host</th><th>Status</th><th>Databases</th><th>Login timeout</th><th>Actions</th></tr></thead><tbody>${serverRows}</tbody></table></div>` : '<div class="empty">No server profiles are configured.</div>'}`
-        : `<div class="users-heading"><p class="help">Clients name databases by id. Enabled is configuration; availability is the runtime gate opened by a verified connection.</p><button data-database-action="add"${servers.length ? "" : ' disabled title="Add a server profile first"'}>+ Add Database</button></div>${databases.length ? `<div class="table-wrap"><table class="users-table"><thead><tr><th>Database</th><th>Server</th><th>Catalog</th><th>Enabled</th><th>Availability</th><th>Actions</th></tr></thead><tbody>${databaseRows}</tbody></table></div>` : '<div class="empty">No databases are configured.</div>'}`
+        ? `<div class="users-heading"><p class="help">A server profile is one SQL Server connection boundary and its encrypted credentials. Databases of one profile can be queried together.</p><button data-server-action="add">+ Add Server</button></div>${servers.length ? `<div class="table-wrap"><table class="registry-table"><thead><tr><th>Server</th><th>Host</th><th>Status</th><th>Databases</th><th>Login timeout</th><th>Actions</th></tr></thead><tbody>${serverRows}</tbody></table></div>` : '<div class="empty">No server profiles are configured.</div>'}`
+        : `<div class="users-heading"><p class="help">Clients name databases by id. Enabled is configuration; availability is the runtime gate opened by a verified connection.</p><button data-database-action="add"${servers.length ? "" : ' disabled title="Add a server profile first"'}>+ Add Database</button></div>${databases.length ? `<div class="table-wrap"><table class="registry-table"><thead><tr><th>Database</th><th>Server</th><th>Catalog</th><th>Enabled</th><th>Availability</th><th>Actions</th></tr></thead><tbody>${databaseRows}</tbody></table></div>` : '<div class="empty">No databases are configured.</div>'}`
     }`;
     const openForm = (heading, body, submit) => {
       document.querySelector("#user-dialog-content").innerHTML = `<div class="user-dialog__surface"><header class="user-dialog__header"><h2 id="user-dialog-title">${escapeHtml(heading)}</h2><button type="button" class="dialog-close" data-dialog-close aria-label="Close">×</button></header><form class="user-dialog__form"><div class="user-dialog__body stack">${body}<p class="dialog-error" data-dialog-error role="alert" hidden></p></div><footer class="dialog-actions user-dialog__footer"><button type="button" class="secondary" data-dialog-close>Cancel</button><button>Save</button></footer></form></div>`;

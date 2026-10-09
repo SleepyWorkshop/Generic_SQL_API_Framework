@@ -53,14 +53,13 @@ const row = (response) => response.data[0];
 const call = async () => ({ data: [input.settings] });
 const setButtonBusy = () => () => {};
 const notify = () => {};
-const databaseSection = async () => rendered.sections.push("database");
 const securitySection = () => rendered.sections.push("security");
 const runtimeSection = () => rendered.sections.push("runtime");
 const advancedSection = () => rendered.sections.push("advanced");
 JS;
     $program .= $slice('const escapeHtml =', 'const row =')
         . $slice('function configurationTabs(', 'const productionWebServers =')
-        . $slice('function developmentServerMarkup(', 'async function databaseSection(')
+        . $slice('function developmentServerMarkup(', 'function securitySection(')
         . '(async () => { const result = await (async () => { ' . $script . ' })();'
         . ' process.stdout.write(JSON.stringify({ result, activeConfigTab, tabs: content.innerHTML,'
         . ' sections: rendered.sections, section: rendered.target.innerHTML })); })()'
@@ -122,13 +121,14 @@ try {
     $developmentMarkup = $developmentPage['section'];
     serverConfigurationAssert(
         $developmentPage['activeConfigTab'] === 'server' && $developmentPage['sections'] === []
-            && preg_match_all('/data-tab="([a-z]+)"/', $developmentPage['tabs'], $tabs) === 5
-            && $tabs[1] === ['server', 'database', 'security', 'runtime', 'advanced'],
+            && preg_match_all('/data-tab="([a-z]+)"/', $developmentPage['tabs'], $tabs) === 4
+            && $tabs[1] === ['server', 'security', 'runtime', 'advanced'],
         'Development Configuration no longer offers the Server tab first.'
     );
     serverConfigurationAssert(
-        serverConfigurationNode('return configurationTabs("development");')['result'] === ['server', 'database', 'security', 'runtime', 'advanced']
-            && serverConfigurationNode('return resolveConfigurationTab("features", "development");')['result'] === 'server',
+        serverConfigurationNode('return configurationTabs("development");')['result'] === ['server', 'security', 'runtime', 'advanced']
+            && serverConfigurationNode('return resolveConfigurationTab("features", "development");')['result'] === 'server'
+            && serverConfigurationNode('return resolveConfigurationTab("database", "development");')['result'] === 'server',
         'Development Configuration tabs changed.'
     );
     foreach ([
@@ -177,18 +177,19 @@ try {
     );
 
     // Production has no Server tab; requests for it, including the default
-    // tab and the legacy "features" alias, fall back to Database without
-    // touching the null server configuration.
+    // tab, the legacy "features" alias, and the removed Database tab, fall
+    // back to Security without touching the null server configuration.
+    // Database connections are managed only on the Databases page.
     serverConfigurationAssert(
-        serverConfigurationNode('return configurationTabs("production");')['result'] === ['database', 'security', 'runtime', 'advanced'],
+        serverConfigurationNode('return configurationTabs("production");')['result'] === ['security', 'runtime', 'advanced'],
         'Production Configuration still offers the Server tab.'
     );
-    foreach (['await configurationView("server");', 'await configurationView();', 'await configurationView("features");', 'await configurationView("unknown");'] as $request) {
+    foreach (['await configurationView("server");', 'await configurationView();', 'await configurationView("features");', 'await configurationView("unknown");', 'await configurationView("database");'] as $request) {
         $page = serverConfigurationNode($request, ['settings' => $production]);
         preg_match_all('/data-tab="([a-z]+)"/', $page['tabs'], $tabs);
         serverConfigurationAssert(
-            $page['activeConfigTab'] === 'database' && $page['sections'] === ['database'] && $page['section'] === ''
-                && $tabs[1] === ['database', 'security', 'runtime', 'advanced']
+            $page['activeConfigTab'] === 'security' && $page['sections'] === ['security'] && $page['section'] === ''
+                && $tabs[1] === ['security', 'runtime', 'advanced']
                 && !preg_match('/Server|apiPortMinimum|Save Server Configuration|Restart API|Restart SQL Parser/', $page['tabs'] . $page['section']),
             "Production Configuration rendered Server content for {$request}."
         );

@@ -78,7 +78,8 @@ try {
     $configuration = new AdminConfigurationRepository();
     $applicationStatePath = RuntimeConfiguration::path(RuntimeConfiguration::APPLICATION_RUNTIME_STATE_FILE);
     $applicationRuntime = new ApplicationRuntimeManager($applicationStatePath);
-    $availability = new DatabaseAvailabilityManager(RuntimeConfiguration::path(RuntimeConfiguration::DATABASE_STATE_FILE));
+    // Bound to the test's own registry; without one the default id would come from the deployment's registry.
+    $availability = new DatabaseAvailabilityManager(RuntimeConfiguration::path(RuntimeConfiguration::DATABASE_STATE_FILE), DatabaseRegistry::forLegacyPath($databasePath));
     $connectionTests = 0;
     $connectionSucceeds = true;
     $tester = function () use (&$connectionTests, &$connectionSucceeds): void {

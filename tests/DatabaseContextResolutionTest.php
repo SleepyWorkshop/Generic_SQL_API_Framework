@@ -378,6 +378,18 @@ try {
         'A request was accepted while the default database was disconnected.');
     contextAssert(contextResponse($middlewareFailure)[0] === 503 && contextResponse($middlewareFailure)[1] === 'DATABASE_UNAVAILABLE',
         'A disconnected default database did not return 503 DATABASE_UNAVAILABLE.');
+    // Only data actions meet the gate: an invalid action is left to validation (400), whatever the
+    // database state or registry, while every data action, case and padding exact, is still gated.
+    $emptyResolver = new DatabaseContextResolver($emptyRegistry, $availability);
+    foreach ([' select', 'select ', 'SELECT', 'admin.status', '', null, ['select']] as $notData) {
+        (new DatabaseAvailabilityMiddleware(null, $resolver))->handle(['action' => $notData]);
+        (new DatabaseAvailabilityMiddleware(null, $emptyResolver))->handle(['action' => $notData]);
+    }
+    foreach (['select', 'union', 'sql', 'procedure', 'insert', 'metadata.tables'] as $dataAction) {
+        $gated = contextFailure(fn () => (new DatabaseAvailabilityMiddleware(null, $emptyResolver))->handle(['action' => $dataAction]),
+            "{$dataAction} passed the gate without a configured database.");
+        contextAssert(contextResponse($gated)[1] === 'DATABASE_UNAVAILABLE', "{$dataAction} was not reported unavailable.");
+    }
     $availability->setAvailable(true, 'company');
     (new DatabaseAvailabilityMiddleware(null, $resolver))->handle(['action' => 'select']);
     $v2Manager = new DatabaseConnectionManager(static fn (array $configuration): Database => new RecordingDatabase($configuration));

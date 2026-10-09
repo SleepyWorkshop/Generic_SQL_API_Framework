@@ -44,6 +44,40 @@ function adminDbRemoveDirectory(string $directory): void
     @rmdir($directory);
 }
 
+/**
+ * Render the Databases page's row actions with the shipped admin.js helpers in
+ * Node: [servers|databases => [id => [action => disabled]]].
+ */
+function adminDbRenderedActions(array $servers, array $databases): array
+{
+    $source = (string)file_get_contents(dirname(__DIR__) . '/admin/assets/admin.js');
+    $slice = static function (string $start, string $end) use ($source): string {
+        $from = strpos($source, $start);
+        $to = $from === false ? false : strpos($source, $end, $from);
+        adminDbAssert($from !== false && $to !== false, "admin.js no longer contains {$start}.");
+        return substr($source, $from, $to - $from);
+    };
+    $program = $slice('const escapeHtml =', 'const row =') . $slice('function serverActionButtons(', '  // Server profiles and database contexts')
+        . 'const input = JSON.parse(process.argv[1]);'
+        . 'process.stdout.write(JSON.stringify({servers: Object.fromEntries(input.servers.map((s) => [s.id, serverActionButtons(s)])),'
+        . ' databases: Object.fromEntries(input.databases.map((d) => [d.id, databaseActionButtons(d)]))}));';
+    $process = proc_open(['node', '-e', $program, json_encode(['servers' => $servers, 'databases' => $databases])], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    adminDbAssert(is_resource($process), 'Node.js is required to render the Databases page.');
+    $output = stream_get_contents($pipes[1]);
+    $error = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    adminDbAssert(proc_close($process) === 0, "Rendering the Databases page failed: {$error}");
+    $rendered = [];
+    foreach (json_decode((string)$output, true, 512, JSON_THROW_ON_ERROR) as $kind => $rows) {
+        foreach ($rows as $id => $html) {
+            preg_match_all('/<button[^>]*data-(?:server|database)-action="([a-z]+)"[^>]*>/', $html, $buttons, PREG_SET_ORDER);
+            foreach ($buttons as [$tag, $action]) $rendered[$kind][$id][$action] = str_contains($tag, ' disabled');
+        }
+    }
+    return $rendered;
+}
+
 /** Counts process-manager use: production availability must never touch it. */
 final class AdminDbProcessProbe extends ApiProcessManager
 {
@@ -151,6 +185,16 @@ try {
         && $byDatabase['inventory']['serverName'] === 'SQL Server 01' && $byDatabase['inventory']['usable'] && !$byDatabase['inventory']['available'],
         'Databases were not listed with their server, default, and states.');
 
+    // Row actions: the default database renders no Set Default, Disable, or Delete; others keep theirs.
+    $rendered = adminDbRenderedActions($servers['servers'], $databases['databases']);
+    adminDbAssert($rendered['databases']['company'] === ['edit' => false, 'test' => false, 'connect' => false],
+        'The default database rendered more than Edit, Test Connection, and Connect: ' . json_encode($rendered['databases']['company']));
+    adminDbAssert($rendered['databases']['inventory'] === ['edit' => false, 'test' => false, 'connect' => false, 'default' => false, 'disable' => false, 'delete' => false],
+        'Another database lost an applicable action: ' . json_encode($rendered['databases']['inventory']));
+    adminDbAssert($rendered['servers']['sql01'] === ['edit' => false, 'test' => false, 'disable' => false, 'delete' => true]
+        && $rendered['servers']['sql03'] === ['edit' => false, 'test' => false, 'disable' => false, 'delete' => false],
+        'Server profile actions changed: ' . json_encode($rendered['servers']));
+
     // 6. Update a profile: a blank password keeps the stored one.
     $admin(['action' => 'admin.servers.save', 'server' => ['id' => 'sql01', 'name' => 'Primary SQL', 'enabled' => true]
         + $connection('sql01.admin.test', 'admin_user', '', ['port' => '1433'])]);
@@ -196,6 +240,15 @@ try {
     $admin(['action' => 'admin.databases.enable', 'id' => 'archive']);
     $admin(['action' => 'admin.databases.default', 'id' => 'inventory']);
     adminDbAssert($registry->defaultDatabaseId() === 'inventory', 'The default database was not changed.');
+    // The new default is protected in the API and, after a refresh, in the rendered rows; the old one is not.
+    $before = $registry->storedDocument();
+    $refused(['action' => 'admin.databases.disable', 'id' => 'inventory'], 409, 'DEFAULT_DATABASE_REQUIRED');
+    $refused(['action' => 'admin.databases.delete', 'id' => 'inventory'], 409, 'DEFAULT_DATABASE_REQUIRED');
+    adminDbAssert($registry->storedDocument() === $before, 'A rejected default-database change altered the registry.');
+    $rendered = adminDbRenderedActions($admin(['action' => 'admin.servers.list'])['servers'], $admin(['action' => 'admin.databases.list'])['databases']);
+    adminDbAssert($rendered['databases']['inventory'] === ['edit' => false, 'test' => false, 'connect' => false]
+        && $rendered['databases']['company'] === ['edit' => false, 'test' => false, 'connect' => false, 'default' => false, 'disable' => false, 'delete' => false],
+        'Changing the default database did not move the hidden actions: ' . json_encode($rendered['databases']));
     $admin(['action' => 'admin.databases.default', 'id' => 'company']);
     $availability->setAvailable(true, 'archive');
     $admin(['action' => 'admin.databases.delete', 'id' => 'archive']);
@@ -305,6 +358,19 @@ try {
     adminDbAssert(str_contains($adminPage, "\$adminUrl('databases')") && str_contains($adminScript, '"databases"')
         && !preg_match('#:(?:8000|8090|8100)\b|localhost:|127\.0\.0\.1:#', $adminScript) && !preg_match('#["\']/(?:admin|api|sqlparser)/#', $adminScript),
         'The Admin Console hard-codes ports or public paths.');
+    // Both registry tables use their own content-sized layout, not the Users table's fixed widths.
+    $adminCss = (string)file_get_contents(dirname(__DIR__) . '/admin/assets/admin.css');
+    $cssRules = function (string $selector) use ($adminCss): string {
+        adminDbAssert(preg_match_all('/(?:^|\n)' . preg_quote($selector, '/') . ' \{([^}]*)\}/', $adminCss, $matches) > 0, "admin.css lacks {$selector}.");
+        return implode("\n", $matches[1]);
+    };
+    adminDbAssert(substr_count($adminScript, '<table class="registry-table">') === 2 && substr_count($adminScript, '<table class="users-table">') === 1,
+        'The Databases page tables still use the Users table layout.');
+    adminDbAssert(str_contains($cssRules('.actions'), 'flex-wrap: wrap') && str_contains($cssRules('.registry-table .actions button'), 'white-space: nowrap')
+        && str_contains($cssRules('.registry-table td'), 'overflow-wrap: anywhere') && str_contains($cssRules('.table-wrap'), 'overflow-x: auto')
+        && !str_contains($cssRules('.registry-table'), 'table-layout: fixed') && !preg_match('/\.registry-table[^{]*nth-child/', $adminCss)
+        && str_contains($cssRules('.users-table'), 'table-layout: fixed') && str_contains($cssRules('.users-table'), 'min-width: 1040px'),
+        'The Databases page tables are not compact and responsive, or the Users table changed.');
 
     // 44. Backups carry the registry: profiles, databases, default, flags, and encrypted configuration.
     $backupSource = (string)file_get_contents(dirname(__DIR__) . '/app/Backup/ApplicationBackupManager.php');

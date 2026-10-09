@@ -6,7 +6,7 @@ System Health manages a runtime availability gate, not a permanent SQL connectio
 - **Disconnect** denies new database requests (`503 DATABASE_UNAVAILABLE`) without opening a connection and without changing the registry, its encrypted credentials, or API/SQL Parser availability.
 - **Restart** disables, retests, and re-enables only on success.
 - A failed Connect or Restart leaves access disabled and returns `DATABASE_CONNECTION_FAILED`, or `DATABASE_CONFIGURATION_UNAVAILABLE` with a safe `reason` of `configuration_missing`, `encryption_key_missing`, or `configuration_invalid`.
-- Configuration → Database's **Test Connection** tests the currently submitted form values through a temporary request-scoped connection without saving them or changing availability. There is no separate saved-configuration test action.
+- **Test Connection** on the **Databases** page tests a saved server profile (its `master` catalog, also while the profile is disabled) or a saved, enabled database through a temporary request-scoped connection, without changing the registry or availability. To check new settings before they serve requests, save the server profile disabled, test it, then enable it.
 
 System Health reports the resulting state as `disabled`, `connected`, or `unhealthy` (enabled but failing its check); see [Monitoring and Health](Monitoring-and-Health.md).
 
@@ -14,8 +14,9 @@ Multiple databases are managed on the Admin Console's **Databases** page:
 server profiles hold connection settings and encrypted credentials, and each
 database context names its profile and SQL Server database. See
 [Admin Console](Admin-Console.md#server-profiles-and-databases). The settings
-below describe the default database's connection, which the Configuration →
-Database tab edits.
+below describe a server profile's connection. (The former Configuration →
+Database tab was removed; its `admin.database.*` actions remain for the
+default database.)
 
 ## Configuration file
 
@@ -45,7 +46,7 @@ database name) is a separate AES-256-GCM envelope (`version: 2`) whose
 additional authenticated data binds it to its own id, so entries cannot be
 swapped or renamed. The default database must exist and stay enabled on an
 enabled server profile. Manage the registry through the Admin Console
-(**Databases** page, or Configuration → Database for the default database);
+(**Databases** page);
 never edit it by hand.
 
 A V2 `database/config/database.json` (plaintext or a `version: 1` envelope) is
@@ -191,8 +192,9 @@ Encryption protects all stored connection settings when the configuration file a
 
 ## Secret rotation
 
-To rotate the SQL login password, use Configuration → Database over the
-loopback-protected Admin Console, enter the new password, test it, and save. The
+To rotate the SQL login password, edit the server profile on the **Databases**
+page over the loopback-protected Admin Console, enter the new password, save,
+and **Test Connection**. The
 save creates a fresh nonce and replaces the complete encrypted envelope. Then
 restart or reconnect database runtime access and revoke the prior SQL password
 after validation.

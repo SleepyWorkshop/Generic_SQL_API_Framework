@@ -157,7 +157,8 @@ try {
     ];
     JsonFileStore::save($databasePath, $databaseConfiguration);
     JsonFileStore::save($databaseStatePath, ['version' => 1, 'available' => false, 'updatedAt' => null]);
-    $databaseAvailability = new DatabaseAvailabilityManager($databaseStatePath);
+    // Bound to the test's own registry; without one the default id would come from the deployment's registry.
+    $databaseAvailability = new DatabaseAvailabilityManager($databaseStatePath, DatabaseRegistry::forLegacyPath($databasePath));
     $connectionTests = 0;
     $connectionTester = static function () use (&$connectionTests): void { $connectionTests++; };
     $adminService = new AdminService(

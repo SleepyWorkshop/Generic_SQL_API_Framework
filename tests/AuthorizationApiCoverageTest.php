@@ -691,15 +691,14 @@ try {
         coverageExpect(coverageRequest($admin, '/api.php', ['action' => $padded], $adminCookie, ['X-CSRF-Token' => $adminToken]), 404, 'NOT_FOUND', "Admin API normalized action '{$padded}'.");
         coverageAssert(in_array(coverageRequest($api, '/', ['action' => $padded])['status'], [401, 404], true), "Public API dispatched action '{$padded}' anonymously.");
     }
-    $availability = new DatabaseAvailabilityManager();
-    $availability->setAvailable(true);
-    try {
-        foreach ([' select', 'select ', 'SELECT', ' admin.status'] as $padded) {
-            coverageExpect(coverageRequest($api, '/', ['action' => $padded], $adminPublicCookie), 400, 'INVALID_REQUEST', "Public API normalized action '{$padded}'.");
-        }
-    } finally {
-        $availability->setAvailable(false);
+    // An authorized session's invalid action is rejected by validation whatever the database state
+    // (here: closed, and no database is registered in CI), while a real data action still meets the
+    // availability gate. Nothing here depends on the deployment's own database registry.
+    coverageAssert((new DatabaseAvailabilityManager())->available() === false, 'The isolated database is unexpectedly available.');
+    foreach ([' select', 'select ', 'SELECT', ' admin.status'] as $padded) {
+        coverageExpect(coverageRequest($api, '/', ['action' => $padded], $adminPublicCookie), 400, 'INVALID_REQUEST', "Public API normalized action '{$padded}'.");
     }
+    coverageExpect(coverageRequest($api, '/', ['action' => 'select'], $adminPublicCookie), 503, 'DATABASE_UNAVAILABLE', 'A data action bypassed the availability gate.');
     // P2-24: CORS.
     $evil = ['Origin' => 'https://evil.example'];
     coverageExpect(coverageRequest($api, '/', ['action' => 'setup.status'], headers: $evil), 403, 'CORS_ORIGIN_DENIED', 'A disallowed origin reached POST.');

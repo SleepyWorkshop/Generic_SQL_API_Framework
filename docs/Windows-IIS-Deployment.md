@@ -889,24 +889,26 @@ should be limited to isolated test environments.
 
 ## 18. Configure the database connection
 
-1. **Configuration → Database**:
+1. **Databases → Servers → + Add Server** (id, for example `sql01`, and a name):
    - **ODBC Driver**: `auto` or `ODBC Driver 18 for SQL Server`.
    - **Server**: `sql01.example.internal` (or `host\instance`); **Port**: `1433`
      or blank for the default/instance resolution.
-   - **Database**: `ApplicationDb`.
    - **Authentication**: *Windows integrated* (16.1) or *SQL login* (16.2) with
      username and password.
    - **Encrypt connection** / **Trust server certificate**: per 16.4.
-2. **Test Connection** tests the values in the form with one temporary
-   connection and changes nothing.
-3. **Save Database** encrypts the whole configuration with the key from 11.3 and
-   writes the registry `Backend\database\config\databases.json` (the default
-   server profile and database). Passwords are never shown again; leave the
-   password blank on later edits to keep it. Further servers and databases are
-   added on the **Databases** page.
-4. **System Health → Service Actions → Database → Connect** verifies the saved
-   configuration with one test connection and only then enables application
-   database access. The Database card should show **connected**.
+2. **Save** encrypts the connection with the key from 11.3 and writes the
+   registry `Backend\database\config\databases.json`. Passwords are never
+   shown again; leave the password blank on later edits to keep it. **Test
+   Connection** on the profile then checks it with one temporary connection
+   and changes nothing (to test before use, save it with **Enabled** cleared,
+   test, then **Enable**).
+3. **Databases → + Add Database**: an id (what clients send), a name, the
+   server profile, and the SQL Server database (catalog), for example
+   `ApplicationDb`. The first database becomes the default.
+4. **Connect** on the database (or **System Health → Service Actions →
+   Database → Connect** for the default) verifies it with one test connection
+   and only then makes it available to API requests. The Database card should
+   show **connected**.
 
 Failures are reported safely, for example `DATABASE_CONNECTION_FAILED`, or
 `DATABASE_CONFIGURATION_UNAVAILABLE` with the reason `encryption_key_missing`,
@@ -1049,8 +1051,8 @@ pool recycles. Every update must end with a recycle.
 7. Hard-refresh browsers (Ctrl+F5) so new Admin/parser JavaScript loads.
 8. **Upgrading from V2 to V3 only (once):** an existing
    `database\config\database.json` keeps serving as the default database. In
-   the Admin Console open **Configuration → Database**, leave the password blank,
-   and **Save Database**: the worker migrates it, with its own encryption key,
+   the Admin Console open **Databases → Servers**, **Edit** the `default` profile,
+   leave the password blank, and **Save**: the worker migrates it, with its own encryption key,
    into `database\config\databases.json` and removes the V2 file. Then check
    the **Databases** page. Do not put the encryption key on a command line to
    run the migration script instead. See [Upgrading to V3](Upgrading-to-V3.md).

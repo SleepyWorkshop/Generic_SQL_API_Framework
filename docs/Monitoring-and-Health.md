@@ -84,8 +84,9 @@ keyed by the registry contents; the cache never hides a disabled or
 disconnected state and never grants access.
 
 The System Health page shows only operational cards: Admin Console, API Server,
-SQL Parser, Database, PHP Runtime, Configuration, Logging, Encryption, and
-Backup. Implementation-level filesystem and PHP session-directory diagnostics
+SQL Parser, Database, PHP Runtime, Configuration, Logging, and Encryption.
+Backup state is not shown there; it is on the Backup & Recovery page, and the
+detailed response still carries the `backup` check below. Implementation-level filesystem and PHP session-directory diagnostics
 are not part of System Health; sessions, configuration files, logs, and backups
 keep working exactly as before, and a missing configuration file or runtime
 directory is still reported through the Configuration check and readiness. The

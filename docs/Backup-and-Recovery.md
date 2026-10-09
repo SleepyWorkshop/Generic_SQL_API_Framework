@@ -172,7 +172,8 @@ configuration validates and reports intent but does not wake or install a task.
 
 ## System Health
 
-System Health shows a **Backup** card built from this same service. It verifies
+The Admin `admin.health` response carries a `backup` check built from this same
+service; the System Health page does not display it. It verifies
 only the newest recovery point (signature, checksums, and schema, without
 requiring the database key) and reports the recovery-point count, latest backup
 time, schedule, next run, and last scheduled attempt. Its states are `healthy`

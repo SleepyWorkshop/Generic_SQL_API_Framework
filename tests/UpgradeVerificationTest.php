@@ -6,6 +6,7 @@ require_once __DIR__ . '/../app/Database/DatabaseQueryPlanner.php';
 require_once __DIR__ . '/../app/Runtime/DatabaseAvailabilityManager.php';
 require_once __DIR__ . '/../app/Health/ApplicationHealthMonitor.php';
 require_once __DIR__ . '/../app/Services/AdminService.php';
+require_once __DIR__ . '/../app/Requests/AdminRequestValidator.php';
 require_once __DIR__ . '/../app/Repositories/AdminConfigurationRepository.php';
 require_once __DIR__ . '/../app/Security/DatabaseCredentialEncryption.php';
 require_once __DIR__ . '/../core/JsonFileStore.php';
@@ -150,6 +151,31 @@ try {
         $availability->setAvailable(false, 'default');
         $state = JsonFileStore::load($root . '/config/database-state.json');
         upgradeAssert($state['version'] === 2 && $state['databases']['default']['available'] === false && !$availability->available(), "{$kind} runtime state did not migrate.");
+    }
+
+    // The Admin migration: Databases → Servers → edit the `default` profile, leave the password blank, save.
+    // The form submits the login timeout it shows (the default), so only that option may become explicit.
+    $withoutTimeout = function (array $configuration): array {
+        unset($configuration['options']['loginTimeoutSeconds']);
+        return $configuration;
+    };
+    foreach (['plaintext' => $v2, 'encrypted' => (new DatabaseCredentialEncryption($key))->encryptConfiguration($v2)] as $kind => $stored) {
+        [$root, $legacyPath] = $install("v2-admin-{$kind}");
+        JsonFileStore::save($legacyPath, $stored);
+        $registry = DatabaseRegistry::forLegacyPath($legacyPath);
+        $availability = new DatabaseAvailabilityManager($root . '/config/database-state.json', $registry);
+        $before = (new DatabaseContextResolver($registry, $availability))->resolve();
+        $administration = (new AdminService(new AdminConfigurationRepository($root . '/config/admin.json'), $legacyPath, $tester, null, null, null, null,
+            $availability, new Logger($directory . '/logs'), new ApplicationHealthMonitor($healthOptions($root, $registry))))->databaseAdministration();
+        $validator = new AdminRequestValidator();
+        $listed = $administration->dispatch($validator->validate(['action' => 'admin.servers.list']))['servers'][0];
+        $administration->dispatch($validator->validate(['action' => 'admin.servers.save', 'server' => ['id' => $listed['id'], 'name' => $listed['name'],
+            'enabled' => $listed['enabled'], 'password' => null] + array_diff_key($listed['connection'], ['provider' => true, 'passwordConfigured' => true])]));
+        $after = (new DatabaseContextResolver($registry, $availability))->resolve();
+        upgradeAssert($listed['id'] === 'default' && !is_file($legacyPath) && $registry->source() === DatabaseRegistry::SOURCE_REGISTRY
+            && $after->id === 'default' && $withoutTimeout($after->driverConfiguration()) == $withoutTimeout($before->driverConfiguration())
+            && DatabaseServerProfile::loginTimeoutFrom($after->driverConfiguration()) === DatabaseServerProfile::loginTimeoutFrom($before->driverConfiguration()),
+            "Saving the default server profile did not migrate a {$kind} V2 configuration unchanged.");
     }
 
     // 3. Failed migrations leave the V2 file in place and write no registry.

@@ -611,6 +611,29 @@ tr:last-child td {
   max-width: 100%;
   flex: 0 0 auto;
 }
+/* Databases page (servers and databases). These six-column tables size their
+   columns to content instead of the Users table's fixed eight-column widths,
+   so row actions stay on one line where space allows and wrap as a group
+   otherwise. Below the minimum width the table scrolls inside .table-wrap. */
+.registry-table {
+  min-width: 760px;
+}
+.registry-table th,
+.registry-table td {
+  padding: 8px 12px;
+}
+.registry-table td {
+  min-width: 6.5rem;
+  overflow-wrap: anywhere;
+}
+.registry-table .actions {
+  min-width: 250px;
+  gap: 6px;
+}
+.registry-table .actions button {
+  padding: 5px 9px;
+  white-space: nowrap;
+}
 .backup-recovery-page {
   width: 100%;
   overflow: hidden;

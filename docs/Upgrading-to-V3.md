@@ -31,8 +31,9 @@ upgrade on a test installation first.
   multi-target writes or distributed transactions.
 - **Admin Console.** A **Databases** page manages server profiles and
   databases; System Health shows each server and database. The
-  `admin.database.*` actions and Configuration → Database keep managing the
-  default database.
+  `admin.database.*` actions keep managing the default database. (Releases
+  after 3.0.0 remove the Configuration → Database tab; the **Databases** page
+  is the only database UI.)
 - **Backups** use format 4, which contains `databases.json`. V2 recovery points
   (formats 2 and 3) can still be verified and restored; restoring one converts
   it into a registry.
@@ -104,9 +105,9 @@ are otherwise unchanged.
    `default` server profile and the `default` database, and requests behave as
    before.
 4. **Migrate the database configuration** using one of:
-   - the Admin Console: **Configuration → Database**, leave the password
-     blank, **Save Database**. The worker encrypts the registry with its own
-     key. This is the recommended way on IIS;
+   - the Admin Console: **Databases → Servers**, **Edit** the `default`
+     server profile, leave the password blank, **Save**. The worker encrypts
+     the registry with its own key. This is the recommended way on IIS;
    - `php scripts/migrate-database-registry.php` with the key already in the
      environment of the account running it (not on its command line), and
      write access to `database/config/`.
