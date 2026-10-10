@@ -22,7 +22,7 @@ function discoveryFailure(callable $operation, string $message): Throwable
 class SqlResourceDiscoveryEngine extends QueryEngine
 {
     public array $executions = [];
-    public function __construct() {}
+    public function __construct(private int $compatibilityLevel = 150) {}
 
     public function executePrepared($sql, array $params = [], array $context = [])
     {
@@ -31,7 +31,7 @@ class SqlResourceDiscoveryEngine extends QueryEngine
             return ['data' => [['TotalRows' => 4]]];
         }
         if (str_contains($sql, 'compatibility_level')) {
-            return ['data' => [['CompatibilityLevel' => 150]]];
+            return ['data' => [['CompatibilityLevel' => $this->compatibilityLevel]]];
         }
         return [
             'executionTime' => 0.1,
@@ -273,6 +273,45 @@ try {
         'Discovered TOP first-page behavior regressed.'
     );
 
+    // A TOP resource must be ranked by its authored ORDER BY before it is
+    // limited, on both pagination paths (ROW_NUMBER below compatibility 110).
+    $orderedFile = $nested . DIRECTORY_SEPARATOR . 'ordered-products.sql';
+    file_put_contents($orderedFile, "SELECT Item_Code, Sales FROM Sales ORDER BY Sales DESC\n");
+    $files[] = $orderedFile;
+    $rankedTop = "SELECT TOP 10 Item_Code, Sales FROM Sales ORDER BY Sales DESC";
+    foreach ([100, 150] as $compatibilityLevel) {
+        $rankedEngine = new SqlResourceDiscoveryEngine($compatibilityLevel);
+        (new SqlRepository($rankedEngine, $registry))->execute([
+            'resource' => 'dashboard/sales/top-products',
+            'execution' => ['columns' => ['Item_Code', 'Sales']],
+            'filters' => [['field' => 'Sales', 'operator' => '>', 'value' => 0]],
+            'sort' => [['field' => 'Item_Code', 'direction' => 'ASC']],
+            'pagination' => ['page' => 2, 'pageSize' => 5],
+        ]);
+        $statements = array_column($rankedEngine->executions, 'sql');
+        $countSql = current(array_filter($statements, fn (string $sql): bool => str_contains($sql, 'COUNT(*) AS TotalRows')));
+        $dataSql = end($statements);
+        discoveryAssert(
+            is_string($countSql) && str_contains($countSql, $rankedTop)
+                && str_contains($dataSql, $rankedTop)
+                && ($compatibilityLevel >= 110
+                    ? str_contains($dataSql, 'OFFSET 5 ROWS')
+                    : str_contains($dataSql, 'ROW_NUMBER() OVER') && str_contains($dataSql, 'BETWEEN 6')),
+            "TOP resource was limited before ranking at compatibility level {$compatibilityLevel}."
+        );
+    }
+    $orderedEngine = new SqlResourceDiscoveryEngine(100);
+    (new SqlRepository($orderedEngine, new SqlResourceRegistry([], $root)))->execute([
+        'resource' => 'dashboard/sales/ordered-products',
+        'execution' => ['columns' => ['Item_Code', 'Sales']],
+        'sort' => [['field' => 'Item_Code', 'direction' => 'ASC']],
+        'pagination' => ['page' => 1, 'pageSize' => 5],
+    ]);
+    discoveryAssert(
+        !str_contains(end($orderedEngine->executions)['sql'], 'ORDER BY Sales DESC'),
+        'A non-TOP authored ORDER BY was kept inside a derived table.'
+    );
+
     $other = $root . DIRECTORY_SEPARATOR . 'archive';
     mkdir($other, 0700, true);
     $ambiguousItem = $other . DIRECTORY_SEPARATOR . 'item.sql';
@@ -314,6 +353,23 @@ try {
             && in_array('widgets/item-dashboard-stats', $realIds, true),
         'Repository resource discovery or unique basename compatibility failed.'
     );
+    // Resources referenced by the frontend Sales, Sales Receipts, Purchase,
+    // and Item dashboards must resolve to their exact files.
+    foreach ([
+        'widgets/sales-month-wise', 'widgets/top-10-categories-sales', 'widgets/category-sales-month-wise',
+        'widgets/sales-day-wise', 'widgets/date-wise-gst-wise-sales', 'widgets/gst-wise-sales',
+        'widgets/top-50-item-wise-sales', 'widgets/total-sales', 'widgets/daily-collection-summary',
+        'widgets/payment-mode-wise-collection', 'widgets/monthly-collection-trend',
+        'widgets/user-wise-day-wise-collection', 'widgets/top-10-largest-receipts',
+        'widgets/purchases-month-wise', 'widgets/purchases-day-wise', 'widgets/total-purchases',
+        'widgets/item-stock-value-by-category',
+    ] as $dashboardResource) {
+        discoveryAssert(
+            in_array($dashboardResource, $realIds, true)
+                && $realRegistry->resolve($dashboardResource)['file'] === realpath(QUERY_PATH . "/{$dashboardResource}.sql"),
+            "Dashboard SQL resource {$dashboardResource} did not resolve to its file."
+        );
+    }
     foreach ($realIds as $realId) {
         discoveryAssert(
             !str_contains((string)file_get_contents($realRegistry->resolve($realId)['file']), '/*__RUNTIME_FILTERS__*/'),

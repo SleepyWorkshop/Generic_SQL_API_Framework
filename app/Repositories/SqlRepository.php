@@ -136,13 +136,15 @@ class SqlRepository
                 [['path' => 'execution.defaultSort', 'message' => 'Supply an approved runtime or default sort.']]
             );
         }
-        $countResourceSql = $topLevelOrderBy === null
+        $topLimit = $this->getTopLimit($sql);
+        // With TOP, the authored ORDER BY decides which rows are kept, so it
+        // must stay inside every wrapper (count and ROW_NUMBER pagination).
+        $countResourceSql = $topLevelOrderBy === null || $topLimit !== null
             ? $sql
             : rtrim(substr($sql, 0, $topLevelOrderBy));
         $countBaseSql = $whereSql === ''
             ? $countResourceSql
             : "SELECT * FROM (\n{$countResourceSql}\n) AS SqlResource{$whereSql}";
-        $topLimit = $this->getTopLimit($sql);
         $topFitsRequestedPage = $topLimit !== null
             && isset($request['pagination'])
             && $request['pagination']['page'] === 1
@@ -156,10 +158,7 @@ class SqlRepository
         if ($canPageAuthoredSqlDirectly) {
             $orderedSql = $sql;
         } else {
-            $dataResourceSql = $topLevelOrderBy !== null && $topLimit !== null
-                ? $sql
-                : $countResourceSql;
-            $dataBaseSql = "SELECT * FROM (\n{$dataResourceSql}\n) AS SqlResource{$whereSql}";
+            $dataBaseSql = "SELECT * FROM (\n{$countResourceSql}\n) AS SqlResource{$whereSql}";
             $orderedSql = $dataBaseSql . $orderSql;
         }
         $paginationOrderSql = $this->buildOrderBy($sort, $allowedColumns, 'PagedSource');
